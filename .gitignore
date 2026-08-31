@@ -1,0 +1,12 @@
+# CMake build directories
+build/
+build_*/
+cmake-build-*/
+
+# Editor/OS cruft
+.DS_Store
+*.swp
+
+# Ad-hoc local benchmark reruns. Accepted reference baselines are committed
+# explicitly (see BENCHMARKS.md #10) rather than ignored wholesale.
+benchmarks/results/*.local.csv
