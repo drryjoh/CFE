@@ -18,8 +18,10 @@ namespace cfe {
 struct AoSLayout
 {
   CFE_HOST_DEVICE
-  static std::size_t index(std::size_t cell, std::size_t component,
-                                           std::size_t n_cells, std::size_t n_components)
+  static std::size_t index(std::size_t cell,
+                           std::size_t component,
+                           std::size_t n_cells,
+                           std::size_t n_components)
   {
     (void)n_cells;
     return cell * n_components + component;
@@ -31,8 +33,10 @@ struct AoSLayout
 struct SoALayout
 {
   CFE_HOST_DEVICE
-  static std::size_t index(std::size_t cell, std::size_t component,
-                                           std::size_t n_cells, std::size_t n_components)
+  static std::size_t index(std::size_t cell,
+                           std::size_t component,
+                           std::size_t n_cells,
+                           std::size_t n_components)
   {
     (void)n_components;
     return component * n_cells + cell;

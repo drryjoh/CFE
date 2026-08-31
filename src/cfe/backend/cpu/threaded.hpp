@@ -16,7 +16,9 @@ namespace backend {
 namespace threaded {
 
 template <class Index, class Functor>
-void parallel_for(Index n, Functor f, unsigned n_threads = 0)
+void parallel_for(Index n,
+                  Functor f,
+                  unsigned n_threads = 0)
 {
   if (n <= 0) return;
 

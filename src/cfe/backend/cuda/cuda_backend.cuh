@@ -36,7 +36,9 @@ CFE_GLOBAL void parallel_for_kernel(Index n, Functor f)
 // `block_size` is a simple, unmeasured default (256); it should be revisited
 // once occupancy/register data is available (see scripts/profile_cuda.sh).
 template <class Index, class Functor>
-void parallel_for(Index n, Functor f, int block_size = 256)
+void parallel_for(Index n,
+                  Functor f,
+                  int block_size = 256)
 {
   if (n <= 0) return;
   const int grid_size = static_cast<int>((static_cast<long long>(n) + block_size - 1) / block_size);
