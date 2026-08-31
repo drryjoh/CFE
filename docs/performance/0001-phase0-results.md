@@ -15,6 +15,43 @@ floored at 1024 cells), comfortably larger than cache. Each reported time is
 the median of 7 timed repetitions after one untimed warm-up pass; allocation
 and initialization happen once, outside every timed region.
 
+## AoS vs SoA, concretely
+
+The layout terms used throughout the results below refer to how the mesh's
+per-cell states are arranged in memory -- not to how a single state's
+components are named or grouped in code. Concretely, for 3 cells and a
+3-component state `[var1, var2, var3]` per cell (`n_cells = 3`,
+`n_components = 3`), the two layouts place the 9 scalars in memory as:
+
+**AoS (Array of States)** -- each cell's full state is contiguous;
+cells are laid out one after another:
+
+```text
+index:  0     1     2     3     4     5     6     7     8
+value: var1_0 var2_0 var3_0 var1_1 var2_1 var3_1 var1_2 var2_2 var3_2
+       \___________cell 0__________/\___________cell 1__________/ ...
+```
+
+**SoA (Structure of Arrays)** -- each component gets its own contiguous
+array spanning every cell; components are laid out one after another:
+
+```text
+index:  0     1     2     3     4     5     6     7     8
+value: var1_0 var1_1 var1_2 var2_0 var2_1 var2_2 var3_0 var3_1 var3_2
+       \___________var1___________/\___________var2___________/ ...
+```
+
+This matches the index arithmetic in `src/cfe/field/layout.hpp`:
+`AoSLayout::index = cell * n_components + component`,
+`SoALayout::index = component * n_cells + cell`.
+
+The benchmarked kernel (`q_new(i,k) = q(i,k) * q(i,k)`) loops over a cell `i`
+and touches all of that cell's components `k` together. Under AoS those
+components are the 3 values sitting right next to each other; under SoA
+they are 3 values that are `n_cells` apart -- 3 separate, far-flung memory
+streams instead of one. That access pattern, not anything about the
+component values themselves, is why AoS wins below.
+
 ## Environment
 
 | | |
