@@ -14,7 +14,8 @@ namespace cfe {
 using ComponentCounts = std::index_sequence<1, 5, 10, 20, 50, 100>;
 
 template <class Functor, std::size_t... Ns>
-void for_each_component_count_impl(Functor&& f, std::index_sequence<Ns...>) {
+void for_each_component_count_impl(Functor&& f, std::index_sequence<Ns...>)
+{
   (f(std::integral_constant<std::size_t, Ns>{}), ...);
 }
 
@@ -26,8 +27,9 @@ void for_each_component_count_impl(Functor&& f, std::index_sequence<Ns...>) {
 //     ...
 //   });
 template <class Functor>
-void for_each_component_count(Functor&& f) {
+void for_each_component_count(Functor&& f)
+{
   for_each_component_count_impl(std::forward<Functor>(f), ComponentCounts{});
 }
 
-} // namespace cfe
+}  // namespace cfe

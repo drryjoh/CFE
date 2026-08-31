@@ -12,7 +12,8 @@
 #include "cfe/field/field.hpp"
 #include "test_framework.hpp"
 
-CFE_TEST(test_serial_parallel_for_visits_every_index_exactly_once) {
+CFE_TEST(test_serial_parallel_for_visits_every_index_exactly_once)
+{
   constexpr int n = 1000;
   std::vector<int> visits(n, 0);
   cfe::backend::serial::parallel_for(n, [&](int i) { visits[i]++; });
@@ -21,7 +22,8 @@ CFE_TEST(test_serial_parallel_for_visits_every_index_exactly_once) {
   }
 }
 
-CFE_TEST(test_threaded_parallel_for_visits_every_index_exactly_once) {
+CFE_TEST(test_threaded_parallel_for_visits_every_index_exactly_once)
+{
   constexpr int n = 100000;
   std::vector<std::atomic<int>> visits(n);
   for (auto& v : visits) v = 0;
@@ -31,7 +33,8 @@ CFE_TEST(test_threaded_parallel_for_visits_every_index_exactly_once) {
   }
 }
 
-CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise) {
+CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise)
+{
   // The all-cell update from the task spec: q_new(i,k) = q(i,k) * q(i,k).
   // Squaring is associative/commutative-safe per element (no reduction
   // across elements), so serial and threaded execution must agree exactly,
@@ -73,7 +76,8 @@ CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise) {
   }
 }
 
-CFE_TEST(test_all_cell_square_update_compiles_and_runs_for_all_required_component_counts) {
+CFE_TEST(test_all_cell_square_update_compiles_and_runs_for_all_required_component_counts)
+{
   cfe::for_each_component_count([](auto n_components) {
     constexpr std::size_t N = decltype(n_components)::value;
     constexpr std::size_t n_cells = 256;

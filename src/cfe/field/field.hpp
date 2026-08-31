@@ -20,28 +20,39 @@ namespace cfe {
 
 // Non-owning accessor. Safe to pass by value into a `CFE_DEVICE` lambda.
 template <class Scalar, std::size_t NComponents, class Layout = AoSLayout>
-class FieldView {
-public:
+class FieldView
+{
+ public:
   static constexpr std::size_t n_components() { return NComponents; }
 
-  CFE_HOST_DEVICE FieldView() : data_(nullptr), n_cells_(0) {}
-  CFE_HOST_DEVICE FieldView(Scalar* data, std::size_t n_cells) : data_(data), n_cells_(n_cells) {}
+  CFE_HOST_DEVICE
+  FieldView() : data_(nullptr), n_cells_(0) {}
+  CFE_HOST_DEVICE
+  FieldView(Scalar* data, std::size_t n_cells) : data_(data), n_cells_(n_cells) {}
 
-  CFE_HOST_DEVICE std::size_t n_cells() const { return n_cells_; }
-  CFE_HOST_DEVICE std::size_t size() const { return n_cells_ * NComponents; }
+  CFE_HOST_DEVICE
+  std::size_t n_cells() const { return n_cells_; }
+  CFE_HOST_DEVICE
+  std::size_t size() const { return n_cells_ * NComponents; }
 
-  CFE_HOST_DEVICE Scalar& operator()(std::size_t cell, std::size_t component) {
+  CFE_HOST_DEVICE
+  Scalar& operator()(std::size_t cell, std::size_t component)
+  {
     return data_[Layout::index(cell, component, n_cells_, NComponents)];
   }
 
-  CFE_HOST_DEVICE const Scalar& operator()(std::size_t cell, std::size_t component) const {
+  CFE_HOST_DEVICE
+  const Scalar& operator()(std::size_t cell, std::size_t component) const
+  {
     return data_[Layout::index(cell, component, n_cells_, NComponents)];
   }
 
-  CFE_HOST_DEVICE Scalar* data() { return data_; }
-  CFE_HOST_DEVICE const Scalar* data() const { return data_; }
+  CFE_HOST_DEVICE
+  Scalar* data() { return data_; }
+  CFE_HOST_DEVICE
+  const Scalar* data() const { return data_; }
 
-private:
+ private:
   Scalar* data_;
   std::size_t n_cells_;
 };
@@ -49,8 +60,9 @@ private:
 // Owning host-side storage. Allocation happens only in the constructor,
 // never inside a parallel loop.
 template <class Scalar, std::size_t NComponents, class Layout = AoSLayout>
-class Field {
-public:
+class Field
+{
+ public:
   using View = FieldView<Scalar, NComponents, Layout>;
 
   explicit Field(std::size_t n_cells) : n_cells_(n_cells), storage_(n_cells * NComponents) {}
@@ -59,11 +71,13 @@ public:
   static constexpr std::size_t n_components() { return NComponents; }
   std::size_t size() const { return storage_.size(); }
 
-  Scalar& operator()(std::size_t cell, std::size_t component) {
+  Scalar& operator()(std::size_t cell, std::size_t component)
+  {
     return storage_[Layout::index(cell, component, n_cells_, NComponents)];
   }
 
-  const Scalar& operator()(std::size_t cell, std::size_t component) const {
+  const Scalar& operator()(std::size_t cell, std::size_t component) const
+  {
     return storage_[Layout::index(cell, component, n_cells_, NComponents)];
   }
 
@@ -73,9 +87,9 @@ public:
   View view() { return View(storage_.data(), n_cells_); }
   View view() const { return View(const_cast<Scalar*>(storage_.data()), n_cells_); }
 
-private:
+ private:
   std::size_t n_cells_;
   std::vector<Scalar> storage_;
 };
 
-} // namespace cfe
+}  // namespace cfe

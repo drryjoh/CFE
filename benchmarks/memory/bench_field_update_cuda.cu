@@ -30,11 +30,13 @@ namespace {
 template <class Layout>
 const char* layout_name();
 template <>
-const char* layout_name<cfe::AoSLayout>() {
+const char* layout_name<cfe::AoSLayout>()
+{
   return "AoS";
 }
 template <>
-const char* layout_name<cfe::SoALayout>() {
+const char* layout_name<cfe::SoALayout>()
+{
   return "SoA";
 }
 
@@ -42,7 +44,8 @@ constexpr std::size_t kTargetBytesPerField = 64ull * 1024ull * 1024ull;
 constexpr int kRepetitions = 7;
 
 template <class Scalar, std::size_t N, class Layout>
-void run_case(const char* precision_name) {
+void run_case(const char* precision_name)
+{
   const std::size_t n_cells =
       std::max<std::size_t>(1024, kTargetBytesPerField / (N * sizeof(Scalar)));
 
@@ -65,7 +68,7 @@ void run_case(const char* precision_name) {
     });
   };
 
-  run_pass(); // warm up: first launch pays context/JIT costs.
+  run_pass();  // warm up: first launch pays context/JIT costs.
 
   std::vector<double> seconds;
   seconds.reserve(kRepetitions);
@@ -79,17 +82,20 @@ void run_case(const char* precision_name) {
   const double median_s = seconds[seconds.size() / 2];
 
   const double cell_updates_per_s = static_cast<double>(n_cells) / median_s;
-  const double scalar_updates_per_s = static_cast<double>(n_cells) * static_cast<double>(N) / median_s;
-  const double bytes_moved = 2.0 * static_cast<double>(n_cells) * static_cast<double>(N) * sizeof(Scalar);
+  const double scalar_updates_per_s =
+      static_cast<double>(n_cells) * static_cast<double>(N) / median_s;
+  const double bytes_moved =
+      2.0 * static_cast<double>(n_cells) * static_cast<double>(N) * sizeof(Scalar);
   const double bandwidth_gb_s = bytes_moved / median_s / 1.0e9;
 
-  std::printf("%s,%zu,cuda,%s,%zu,%d,%.6f,%.3e,%.3e,%.3f\n", precision_name, N, layout_name<Layout>(),
-              n_cells, kRepetitions, median_s * 1e3, cell_updates_per_s, scalar_updates_per_s,
-              bandwidth_gb_s);
+  std::printf("%s,%zu,cuda,%s,%zu,%d,%.6f,%.3e,%.3e,%.3f\n", precision_name, N,
+              layout_name<Layout>(), n_cells, kRepetitions, median_s * 1e3, cell_updates_per_s,
+              scalar_updates_per_s, bandwidth_gb_s);
 }
 
 template <class Scalar>
-void run_all_cases_for_precision(const char* precision_name) {
+void run_all_cases_for_precision(const char* precision_name)
+{
   cfe::for_each_component_count([&](auto n_components) {
     constexpr std::size_t N = decltype(n_components)::value;
     run_case<Scalar, N, cfe::AoSLayout>(precision_name);
@@ -97,11 +103,13 @@ void run_all_cases_for_precision(const char* precision_name) {
   });
 }
 
-} // namespace
+}  // namespace
 
-int main() {
-  std::printf("precision,n_components,backend,layout,n_cells,repetitions,median_ms,cell_updates_per_s,"
-              "scalar_updates_per_s,bandwidth_gb_s\n");
+int main()
+{
+  std::printf(
+      "precision,n_components,backend,layout,n_cells,repetitions,median_ms,cell_updates_per_s,"
+      "scalar_updates_per_s,bandwidth_gb_s\n");
   run_all_cases_for_precision<float>("float");
   run_all_cases_for_precision<double>("double");
   return 0;

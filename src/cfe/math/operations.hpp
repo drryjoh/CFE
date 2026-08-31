@@ -16,33 +16,43 @@ namespace cfe {
 // --- componentwise operations ---------------------------------------------
 
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> operator+(FixedArray<Scalar, N> a,
-                                                 const FixedArray<Scalar, N>& b) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> operator+(FixedArray<Scalar, N> a,
+                                                const FixedArray<Scalar, N>& b)
+{
   a += b;
   return a;
 }
 
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> operator-(FixedArray<Scalar, N> a,
-                                                 const FixedArray<Scalar, N>& b) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> operator-(FixedArray<Scalar, N> a,
+                                                const FixedArray<Scalar, N>& b)
+{
   a -= b;
   return a;
 }
 
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> operator*(FixedArray<Scalar, N> a, const Scalar& s) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> operator*(FixedArray<Scalar, N> a, const Scalar& s)
+{
   a *= s;
   return a;
 }
 
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> operator*(const Scalar& s, FixedArray<Scalar, N> a) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> operator*(const Scalar& s, FixedArray<Scalar, N> a)
+{
   a *= s;
   return a;
 }
 
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> operator/(FixedArray<Scalar, N> a, const Scalar& s) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> operator/(FixedArray<Scalar, N> a, const Scalar& s)
+{
   a /= s;
   return a;
 }
@@ -50,8 +60,10 @@ CFE_HOST_DEVICE FixedArray<Scalar, N> operator/(FixedArray<Scalar, N> a, const S
 // Componentwise (Hadamard) product. Named `componentwise_multiply` to avoid
 // colliding with `operator*`, which is reserved for scalar scaling above.
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> componentwise_multiply(const FixedArray<Scalar, N>& a,
-                                                              const FixedArray<Scalar, N>& b) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> componentwise_multiply(const FixedArray<Scalar, N>& a,
+                                                             const FixedArray<Scalar, N>& b)
+{
   FixedArray<Scalar, N> out;
   for (std::size_t k = 0; k < N; ++k) out[k] = a[k] * b[k];
   return out;
@@ -62,7 +74,9 @@ CFE_HOST_DEVICE FixedArray<Scalar, N> componentwise_multiply(const FixedArray<Sc
 //   contract(A, B) = sum_k A[k] * B[k]
 // This is the generalized dot product used for both vectors and states.
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE Scalar contract(const FixedArray<Scalar, N>& a, const FixedArray<Scalar, N>& b) {
+CFE_HOST_DEVICE
+Scalar contract(const FixedArray<Scalar, N>& a, const FixedArray<Scalar, N>& b)
+{
   Scalar sum = Scalar(0);
   for (std::size_t k = 0; k < N; ++k) sum += a[k] * b[k];
   return sum;
@@ -73,9 +87,11 @@ CFE_HOST_DEVICE Scalar contract(const FixedArray<Scalar, N>& a, const FixedArray
 // component of weight vector `w`. Returns a container of the same size
 // (unlike `contract`, which reduces to a scalar).
 template <class Scalar, std::size_t N>
-CFE_HOST_DEVICE FixedArray<Scalar, N> weight(const FixedArray<Scalar, N>& a,
-                                              const FixedArray<Scalar, N>& w) {
+CFE_HOST_DEVICE
+FixedArray<Scalar, N> weight(const FixedArray<Scalar, N>& a,
+                                             const FixedArray<Scalar, N>& w)
+{
   return componentwise_multiply(a, w);
 }
 
-} // namespace cfe
+}  // namespace cfe

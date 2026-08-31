@@ -14,7 +14,8 @@
 #include "cfe/field/layout.hpp"
 #include "test_framework.hpp"
 
-CFE_TEST(test_cuda_backend_all_cell_square_matches_host_reference) {
+CFE_TEST(test_cuda_backend_all_cell_square_matches_host_reference)
+{
   cfe::for_each_component_count([](auto n_components) {
     constexpr std::size_t N = decltype(n_components)::value;
     constexpr std::size_t n_cells = 4096;
@@ -42,7 +43,7 @@ CFE_TEST(test_cuda_backend_all_cell_square_matches_host_reference) {
     for (std::size_t i = 0; i < n_cells; ++i) {
       for (std::size_t k = 0; k < N; ++k) {
         const double expected = host_q[cfe::AoSLayout::index(i, k, n_cells, N)] *
-                                 host_q[cfe::AoSLayout::index(i, k, n_cells, N)];
+                                host_q[cfe::AoSLayout::index(i, k, n_cells, N)];
         CFE_CHECK_NEAR(host_result[cfe::AoSLayout::index(i, k, n_cells, N)], expected, 1e-9);
       }
     }

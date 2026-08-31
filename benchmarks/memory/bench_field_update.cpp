@@ -32,18 +32,18 @@ namespace {
 
 enum class BackendKind { Serial, Threaded };
 
-const char* backend_name(BackendKind b) {
-  return b == BackendKind::Serial ? "serial" : "threaded";
-}
+const char* backend_name(BackendKind b) { return b == BackendKind::Serial ? "serial" : "threaded"; }
 
 template <class Layout>
 const char* layout_name();
 template <>
-const char* layout_name<cfe::AoSLayout>() {
+const char* layout_name<cfe::AoSLayout>()
+{
   return "AoS";
 }
 template <>
-const char* layout_name<cfe::SoALayout>() {
+const char* layout_name<cfe::SoALayout>()
+{
   return "SoA";
 }
 
@@ -55,7 +55,8 @@ constexpr std::size_t kTargetBytesPerField = 64ull * 1024ull * 1024ull;
 constexpr int kRepetitions = 7;
 
 template <class Scalar, std::size_t N, class Layout>
-double median_seconds_per_pass(std::size_t n_cells, BackendKind backend) {
+double median_seconds_per_pass(std::size_t n_cells, BackendKind backend)
+{
   cfe::Field<Scalar, N, Layout> q(n_cells);
   cfe::Field<Scalar, N, Layout> q_new(n_cells);
 
@@ -97,16 +98,19 @@ double median_seconds_per_pass(std::size_t n_cells, BackendKind backend) {
 }
 
 template <class Scalar, std::size_t N, class Layout>
-void run_case(const char* precision_name, BackendKind backend) {
+void run_case(const char* precision_name, BackendKind backend)
+{
   const std::size_t n_cells =
       std::max<std::size_t>(1024, kTargetBytesPerField / (N * sizeof(Scalar)));
 
   const double median_s = median_seconds_per_pass<Scalar, N, Layout>(n_cells, backend);
 
   const double cell_updates_per_s = static_cast<double>(n_cells) / median_s;
-  const double scalar_updates_per_s = static_cast<double>(n_cells) * static_cast<double>(N) / median_s;
+  const double scalar_updates_per_s =
+      static_cast<double>(n_cells) * static_cast<double>(N) / median_s;
   // One read of q and one write of q_new per scalar element.
-  const double bytes_moved = 2.0 * static_cast<double>(n_cells) * static_cast<double>(N) * sizeof(Scalar);
+  const double bytes_moved =
+      2.0 * static_cast<double>(n_cells) * static_cast<double>(N) * sizeof(Scalar);
   const double bandwidth_gb_s = bytes_moved / median_s / 1.0e9;
 
   std::printf("%s,%zu,%s,%s,%zu,%d,%.6f,%.3e,%.3e,%.3f\n", precision_name, N, backend_name(backend),
@@ -115,7 +119,8 @@ void run_case(const char* precision_name, BackendKind backend) {
 }
 
 template <class Scalar>
-void run_all_cases_for_precision(const char* precision_name) {
+void run_all_cases_for_precision(const char* precision_name)
+{
   const BackendKind backends[] = {BackendKind::Serial, BackendKind::Threaded};
   for (BackendKind backend : backends) {
     cfe::for_each_component_count([&](auto n_components) {
@@ -126,11 +131,13 @@ void run_all_cases_for_precision(const char* precision_name) {
   }
 }
 
-} // namespace
+}  // namespace
 
-int main() {
-  std::printf("precision,n_components,backend,layout,n_cells,repetitions,median_ms,cell_updates_per_s,"
-              "scalar_updates_per_s,bandwidth_gb_s\n");
+int main()
+{
+  std::printf(
+      "precision,n_components,backend,layout,n_cells,repetitions,median_ms,cell_updates_per_s,"
+      "scalar_updates_per_s,bandwidth_gb_s\n");
   run_all_cases_for_precision<float>("float");
   run_all_cases_for_precision<double>("double");
   return 0;

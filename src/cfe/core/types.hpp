@@ -25,4 +25,4 @@ using scalar = double;
 using local_index = std::int32_t;
 using global_index = std::int64_t;
 
-} // namespace cfe
+}  // namespace cfe

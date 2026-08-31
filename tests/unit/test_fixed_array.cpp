@@ -8,7 +8,8 @@
 namespace {
 
 template <class Scalar>
-void check_basic_arithmetic() {
+void check_basic_arithmetic()
+{
   cfe::FixedArray<Scalar, 3> a;
   a[0] = Scalar(1);
   a[1] = Scalar(2);
@@ -41,20 +42,22 @@ void check_basic_arithmetic() {
   CFE_CHECK_NEAR(divided[2], a[2], 1e-9);
 }
 
-} // namespace
+}  // namespace
 
 CFE_TEST(test_fixed_array_componentwise_arithmetic_float) { check_basic_arithmetic<float>(); }
 
 CFE_TEST(test_fixed_array_componentwise_arithmetic_double) { check_basic_arithmetic<double>(); }
 
-CFE_TEST(test_fixed_array_fill_constructor_sets_all_components) {
+CFE_TEST(test_fixed_array_fill_constructor_sets_all_components)
+{
   cfe::FixedArray<double, 5> a(3.5);
   for (std::size_t k = 0; k < a.size(); ++k) {
     CFE_CHECK_NEAR(a[k], 3.5, 1e-12);
   }
 }
 
-CFE_TEST(test_fixed_array_all_required_component_counts_compile) {
+CFE_TEST(test_fixed_array_all_required_component_counts_compile)
+{
   // Task spec item 9: components 1, 5, 10, 20, 50, 100 must compile.
   int constructed = 0;
   cfe::for_each_component_count([&](auto n_components) {

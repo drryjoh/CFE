@@ -13,46 +13,62 @@
 namespace cfe {
 
 template <class Scalar, std::size_t N>
-class FixedArray {
+class FixedArray
+{
   static_assert(N > 0, "FixedArray requires at least one component");
 
-public:
+ public:
   using value_type = Scalar;
   static constexpr std::size_t size() { return N; }
 
-  CFE_HOST_DEVICE FixedArray() : data_{} {}
+  CFE_HOST_DEVICE
+  FixedArray() : data_{} {}
 
-  CFE_HOST_DEVICE explicit FixedArray(const Scalar& fill) {
+  CFE_HOST_DEVICE
+  explicit FixedArray(const Scalar& fill)
+  {
     for (std::size_t k = 0; k < N; ++k) data_[k] = fill;
   }
 
-  CFE_HOST_DEVICE Scalar& operator[](std::size_t k) { return data_[k]; }
-  CFE_HOST_DEVICE const Scalar& operator[](std::size_t k) const { return data_[k]; }
+  CFE_HOST_DEVICE
+  Scalar& operator[](std::size_t k) { return data_[k]; }
+  CFE_HOST_DEVICE
+  const Scalar& operator[](std::size_t k) const { return data_[k]; }
 
-  CFE_HOST_DEVICE Scalar* data() { return data_; }
-  CFE_HOST_DEVICE const Scalar* data() const { return data_; }
+  CFE_HOST_DEVICE
+  Scalar* data() { return data_; }
+  CFE_HOST_DEVICE
+  const Scalar* data() const { return data_; }
 
-  CFE_HOST_DEVICE FixedArray& operator+=(const FixedArray& other) {
+  CFE_HOST_DEVICE
+  FixedArray& operator+=(const FixedArray& other)
+  {
     for (std::size_t k = 0; k < N; ++k) data_[k] += other.data_[k];
     return *this;
   }
 
-  CFE_HOST_DEVICE FixedArray& operator-=(const FixedArray& other) {
+  CFE_HOST_DEVICE
+  FixedArray& operator-=(const FixedArray& other)
+  {
     for (std::size_t k = 0; k < N; ++k) data_[k] -= other.data_[k];
     return *this;
   }
 
-  CFE_HOST_DEVICE FixedArray& operator*=(const Scalar& s) {
+  CFE_HOST_DEVICE
+  FixedArray& operator*=(const Scalar& s)
+  {
     for (std::size_t k = 0; k < N; ++k) data_[k] *= s;
     return *this;
   }
 
-  CFE_HOST_DEVICE FixedArray& operator/=(const Scalar& s) {
+  CFE_HOST_DEVICE
+  FixedArray& operator/=(const Scalar& s)
+  {
     for (std::size_t k = 0; k < N; ++k) data_[k] /= s;
     return *this;
   }
 
-private:
+ private:
   Scalar data_[N];
 };
 
@@ -67,4 +83,4 @@ using Vector = FixedArray<Scalar, Dim>;
 template <class Scalar, std::size_t NComponents>
 using State = FixedArray<Scalar, NComponents>;
 
-} // namespace cfe
+}  // namespace cfe

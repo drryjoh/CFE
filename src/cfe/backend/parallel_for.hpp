@@ -25,4 +25,4 @@ using backend::threaded::parallel_for;
 using backend::serial::parallel_for;
 #endif
 
-} // namespace cfe
+}  // namespace cfe

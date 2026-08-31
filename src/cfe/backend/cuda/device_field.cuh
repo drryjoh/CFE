@@ -21,30 +21,35 @@ namespace backend {
 namespace cuda {
 
 template <class Scalar, std::size_t NComponents, class Layout = AoSLayout>
-class DeviceField {
-public:
+class DeviceField
+{
+ public:
   using View = FieldView<Scalar, NComponents, Layout>;
 
-  explicit DeviceField(std::size_t n_cells) : n_cells_(n_cells), data_(nullptr) {
+  explicit DeviceField(std::size_t n_cells) : n_cells_(n_cells), data_(nullptr)
+  {
     const std::size_t bytes = n_cells_ * NComponents * sizeof(Scalar);
     if (cudaMalloc(reinterpret_cast<void**>(&data_), bytes) != cudaSuccess) {
       throw std::runtime_error("cfe::backend::cuda::DeviceField: cudaMalloc failed");
     }
   }
 
-  ~DeviceField() {
+  ~DeviceField()
+  {
     if (data_ != nullptr) cudaFree(data_);
   }
 
   DeviceField(const DeviceField&) = delete;
   DeviceField& operator=(const DeviceField&) = delete;
 
-  void copy_from_host(const Scalar* host_data) {
+  void copy_from_host(const Scalar* host_data)
+  {
     const std::size_t bytes = n_cells_ * NComponents * sizeof(Scalar);
     cudaMemcpy(data_, host_data, bytes, cudaMemcpyHostToDevice);
   }
 
-  void copy_to_host(Scalar* host_data) const {
+  void copy_to_host(Scalar* host_data) const
+  {
     const std::size_t bytes = n_cells_ * NComponents * sizeof(Scalar);
     cudaMemcpy(host_data, data_, bytes, cudaMemcpyDeviceToHost);
   }
@@ -52,11 +57,11 @@ public:
   std::size_t n_cells() const { return n_cells_; }
   View view() { return View(data_, n_cells_); }
 
-private:
+ private:
   std::size_t n_cells_;
   Scalar* data_;
 };
 
-} // namespace cuda
-} // namespace backend
-} // namespace cfe
+}  // namespace cuda
+}  // namespace backend
+}  // namespace cfe
