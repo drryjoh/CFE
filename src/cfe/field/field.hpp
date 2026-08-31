@@ -64,6 +64,11 @@ class Field
 {
  public:
   using View = FieldView<Scalar, NComponents, Layout>;
+  // Read-only counterpart to View: same pointer-based accessor, but
+  // instantiated on `const Scalar` so operator() can only ever return
+  // `const Scalar&`. This is what a const Field must hand out -- see
+  // view() const below.
+  using ConstView = FieldView<const Scalar, NComponents, Layout>;
 
   explicit Field(std::size_t n_cells) : n_cells_(n_cells), storage_(n_cells * NComponents) {}
 
@@ -85,7 +90,10 @@ class Field
   const Scalar* data() const { return storage_.data(); }
 
   View view() { return View(storage_.data(), n_cells_); }
-  View view() const { return View(const_cast<Scalar*>(storage_.data()), n_cells_); }
+  // No const_cast: storage_.data() on a const Field is already
+  // `const Scalar*`, which is exactly what ConstView's `const Scalar`
+  // instantiation expects. The returned view cannot be written through.
+  ConstView view() const { return ConstView(storage_.data(), n_cells_); }
 
  private:
   std::size_t n_cells_;

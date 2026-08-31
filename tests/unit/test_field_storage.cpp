@@ -1,6 +1,8 @@
 // Unit tests for cfe::Field / cfe::FieldView storage indexing (task spec
 // items 8/9/13: "storage indexing is correct", "all required state sizes
 // compile").
+#include <type_traits>
+
 #include "cfe/core/component_counts.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/field/layout.hpp"
@@ -69,6 +71,42 @@ CFE_TEST(test_aos_and_soa_fields_are_index_equivalent_despite_different_physical
   for (std::size_t i = 0; i < n_cells; ++i) {
     for (std::size_t k = 0; k < n_components; ++k) {
       CFE_CHECK_NEAR(aos(i, k), soa(i, k), 1e-12);
+    }
+  }
+}
+
+CFE_TEST(test_const_field_view_is_read_only_and_matches_mutable_field)
+{
+  constexpr std::size_t n_cells = 8;
+  constexpr std::size_t n_components = 3;
+  cfe::Field<double, n_components, cfe::AoSLayout> field(n_cells);
+
+  for (std::size_t i = 0; i < n_cells; ++i) {
+    for (std::size_t k = 0; k < n_components; ++k) {
+      field(i, k) = static_cast<double>(i * 10 + k);
+    }
+  }
+
+  const cfe::Field<double, n_components, cfe::AoSLayout>& const_field = field;
+  auto view = const_field.view();
+
+  // view() const must return the ConstView type (FieldView<const Scalar,
+  // ...>), not the writable View -- otherwise the const_cast this test
+  // exists to guard against has just been reintroduced.
+  static_assert(std::is_same<decltype(view),
+                             cfe::Field<double, n_components, cfe::AoSLayout>::ConstView>::value,
+                "Field::view() const must return ConstView");
+
+  // operator() on that view must hand back a const reference: attempting
+  // `view(i, k) = ...` here would fail to compile, which is the property
+  // under test (a real negative-compilation test isn't available in this
+  // framework -- see the type checks above/below instead).
+  static_assert(std::is_const<std::remove_reference<decltype(view(0, 0))>::type>::value,
+                "operator() on a ConstView must return a const reference");
+
+  for (std::size_t i = 0; i < n_cells; ++i) {
+    for (std::size_t k = 0; k < n_components; ++k) {
+      CFE_CHECK_NEAR(view(i, k), field(i, k), 1e-12);
     }
   }
 }

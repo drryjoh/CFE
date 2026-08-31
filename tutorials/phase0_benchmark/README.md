@@ -14,8 +14,8 @@ execution and memory architecture itself.
 
 ## 1. Prerequisites
 
-- A C++17 compiler (this was developed against Apple clang 21 / arm64; any
-  recent GCC or Clang should work).
+- A C++20 compiler (this was developed against Apple clang 21 / arm64; any
+  recent GCC or Clang should work; see `docs/adr/0006-language-standard.md`).
 - CMake >= 3.18. If your system does not have one:
   ```bash
   pip3 install --user cmake

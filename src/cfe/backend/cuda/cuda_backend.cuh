@@ -16,6 +16,7 @@
 
 #include <cstddef>
 
+#include "cfe/backend/cuda/cuda_check.cuh"
 #include "cfe/core/macros.hpp"
 
 namespace cfe {
@@ -32,7 +33,14 @@ CFE_GLOBAL void parallel_for_kernel(Index n, Functor f)
   }
 }
 
-// Launches one thread per index in [0, n) and blocks until completion.
+// Launches one thread per index in [0, n) and returns immediately once the
+// launch is queued -- it does NOT block until the kernel finishes. Call
+// `synchronize()` explicitly wherever a result is about to be read on the
+// host or timing must include kernel completion. This lets independent
+// launches overlap and lets host-side work proceed concurrently with the
+// device, at the cost of callers needing to synchronize deliberately instead
+// of getting it for free.
+//
 // `block_size` is a simple, unmeasured default (256); it should be revisited
 // once occupancy/register data is available (see scripts/profile_cuda.sh).
 template <class Index, class Functor>
@@ -43,7 +51,20 @@ void parallel_for(Index n,
   if (n <= 0) return;
   const int grid_size = static_cast<int>((static_cast<long long>(n) + block_size - 1) / block_size);
   parallel_for_kernel<Index, Functor><<<grid_size, block_size>>>(n, f);
-  cudaDeviceSynchronize();
+  // Catches launch-configuration errors (e.g. an invalid grid/block size or
+  // an over-resourced kernel); it does not itself wait for the kernel body
+  // to finish executing -- that is what synchronize() is for.
+  CFE_CUDA_CHECK(cudaGetLastError());
+}
+
+// Blocks until all previously launched work on the current device has
+// completed. parallel_for() above is asynchronous with respect to the host;
+// this is the explicit synchronization point callers must use before
+// reading results a launch produced, or before timing a launch's actual
+// execution rather than just its (near-instant) enqueue.
+inline void synchronize()
+{
+  CFE_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 }  // namespace cuda

@@ -66,6 +66,10 @@ void run_case(const char* precision_name)
     cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(std::size_t i) mutable {
       for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
     });
+    // parallel_for is asynchronous: without this, the timed region below
+    // would measure launch/enqueue latency instead of actual kernel
+    // execution time.
+    cfe::backend::cuda::synchronize();
   };
 
   run_pass();  // warm up: first launch pays context/JIT costs.

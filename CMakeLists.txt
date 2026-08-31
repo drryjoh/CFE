@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.18)
 
 project(CMU-CFE LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# See docs/adr/0006-language-standard.md: C++20 is an explicit architectural
+# decision, not an arbitrary default, and should stay in sync with
+# CMAKE_CUDA_STANDARD below.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -32,7 +35,15 @@ if(CMAKE_CUDA_COMPILER)
   message(STATUS "CFE: CUDA compiler found (${CMAKE_CUDA_COMPILER}); CFE_ENABLE_CUDA may be turned ON")
 else()
   if(CFE_ENABLE_CUDA)
-    message(WARNING "CFE_ENABLE_CUDA was requested but no CUDA compiler was found; disabling CUDA backend")
+    # CFE_ENABLE_CUDA was explicitly requested, not left at its default OFF
+    # -- silently downgrading that to a CPU-only build would hide a real
+    # configuration problem (missing/broken CUDA toolkit) behind a build
+    # that looks successful but is missing the backend the user asked for.
+    message(FATAL_ERROR
+      "CFE_ENABLE_CUDA=ON was explicitly requested but no CUDA compiler was "
+      "found (check_language(CUDA) failed). Install/configure a CUDA "
+      "toolkit so nvcc is on PATH, or omit -DCFE_ENABLE_CUDA=ON to build "
+      "the CPU-only configuration.")
   endif()
   set(CFE_ENABLE_CUDA OFF CACHE BOOL "Build the CUDA execution backend" FORCE)
 endif()
@@ -40,7 +51,7 @@ endif()
 if(CFE_ENABLE_CUDA)
   enable_language(CUDA)
   if(NOT CMAKE_CUDA_STANDARD)
-    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
   endif()
 endif()
@@ -52,7 +63,7 @@ find_package(Threads REQUIRED)
 add_library(cfe_core INTERFACE)
 target_include_directories(cfe_core INTERFACE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(cfe_core INTERFACE Threads::Threads)
-target_compile_features(cfe_core INTERFACE cxx_std_17)
+target_compile_features(cfe_core INTERFACE cxx_std_20)
 
 if(CFE_SCALAR_TYPE STREQUAL "float")
   target_compile_definitions(cfe_core INTERFACE CFE_SCALAR_IS_FLOAT)
@@ -71,6 +82,13 @@ endif()
 target_compile_options(cfe_core INTERFACE
   $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>
 )
+
+if(CFE_ENABLE_CUDA)
+  # Required for the __device__/__host__ __device__-annotated lambdas used
+  # by every parallel_for call site (see backend/cuda/cuda_backend.cuh);
+  # without it nvcc rejects them.
+  target_compile_options(cfe_core INTERFACE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
+endif()
 
 if(CFE_BUILD_TESTS)
   enable_testing()

@@ -32,7 +32,7 @@ echo "of interest -- the required sweep is 1,5,10,20,50,100 components x"
 echo "float/double (task spec item 9)."
 echo
 echo "Example (adjust -arch to the target GPU's compute capability):"
-echo "  nvcc -std=c++17 -O3 --resource-usage -arch=sm_80 \\"
+echo "  nvcc -std=c++20 --extended-lambda -O3 --resource-usage -arch=sm_80 \\"
 echo "       -I src \\"
 echo "       -c benchmarks/memory/bench_field_update_cuda.cu -o /dev/null"
 echo
