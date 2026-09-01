@@ -28,19 +28,20 @@
 
 ---
 
-## Slide: The core pattern — "do the same thing to every cell"
+## Slide: The core pattern — "one worker per cell"
 
-- Almost everything this engine does boils down to: *loop over every cell,
-  do the same small calculation, don't need to know what any other cell is
-  doing.*
-- That one small calculation, run once per cell, is called a **kernel**.
-- Because each cell's calculation doesn't depend on any other cell, this
-  work is what's called "embarrassingly parallel" — it's an easy case for
-  spreading across many workers at once, instead of doing it one cell at a
-  time.
+- Much of CFD can be organized as: **assign one worker to each cell and
+  have it perform the same operation.**
+- That one small operation, run once per cell, is called a **kernel**.
+- A worker is allowed to *read* data from neighboring cells — a real flow
+  calculation almost always needs that. What makes this parallel-friendly
+  is that we organize the work so each worker only ever *writes* its own
+  cell's result, never someone else's — so workers never step on each
+  other, even while reading each other's data.
 - That's the whole reason GPUs matter here: a GPU is built from thousands
-  of small workers (**threads**), each one perfectly happy to grab one cell
-  and run the kernel on it, all at the same time.
+  of small workers (**threads**), and this "read freely, write only your
+  own" structure is exactly the shape of problem they're built to chew
+  through.
 
 ---
 
