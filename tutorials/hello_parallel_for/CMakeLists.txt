@@ -1,0 +1,2 @@
+add_executable(cfe_hello_parallel_for hello_parallel_for.cpp)
+target_link_libraries(cfe_hello_parallel_for PRIVATE cfe_core)

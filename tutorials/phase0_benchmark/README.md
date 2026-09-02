@@ -12,6 +12,10 @@ layout. There is no physics here on purpose (see
 `tasks/0001-phase0-execution-foundation.md`) -- the point is to observe the
 execution and memory architecture itself.
 
+Want something smaller first? `tutorials/hello_parallel_for/` runs the same
+kernel on an 8-cell array and prints the before/after values plus a timing
+line -- no CSV, no options, just one program to read start to finish.
+
 ## 1. Prerequisites
 
 - A C++20 compiler (this was developed against Apple clang 21 / arm64; any

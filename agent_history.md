@@ -332,3 +332,66 @@ review pass makes that task more self-contained than before (the
 explicit `synchronize()` calls are now in place ahead of time), but the
 core gap -- no CUDA compilation or execution evidence exists anywhere in
 this project's history -- is unchanged.
+
+---
+
+## 2026-09-02 — Hands-on tutorial for PR #1
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Add a second, minimal tutorial so PR #1 has something a reader can build
+and run in under a minute to see the Phase 0 kernel actually execute, as a
+complement to the existing 48-combination benchmark sweep tutorial (which
+is better for measurement than for a first look). No architecture or
+scope change.
+
+Files changed:
+- `tutorials/hello_parallel_for/hello_parallel_for.cpp` -- new; fills an
+  8-cell x 3-component `Field`, runs `q_new(i,k) = q(i,k) * q(i,k)` via
+  `cfe::parallel_for`, prints before/after values and elapsed time.
+- `tutorials/hello_parallel_for/CMakeLists.txt`,
+  `tutorials/CMakeLists.txt` -- new; wired into the root build behind a
+  new `CFE_BUILD_TUTORIALS` option (default `ON`), matching the existing
+  `CFE_BUILD_TESTS`/`CFE_BUILD_BENCHMARKS` pattern.
+- `tutorials/hello_parallel_for/README.md` -- new; includes real captured
+  output from an actual run, not a mocked-up example.
+- `tutorials/phase0_benchmark/README.md` -- added a cross-link so a reader
+  starting from either tutorial finds the other.
+- `CMakeLists.txt` -- added the `CFE_BUILD_TUTORIALS` option and
+  `add_subdirectory(tutorials)`.
+
+Tests added:
+None (this is a runnable example, not a test). Verified instead by: full
+rebuild + all 23 existing unit tests still pass with the new target
+present; the new executable was actually run (serial and threaded
+backends) and its printed output is what appears in the README, not
+invented text.
+
+Benchmarks run:
+None -- this tutorial is explicitly not a performance measurement (its own
+README says so); the real sweep is unchanged.
+
+Performance change:
+None.
+
+Scientific verification:
+The before/after values printed by the tool were checked by hand against
+`q_new = q * q` for the documented example (e.g. cell 0: 1,2,3 -> 1,4,9;
+cell 7: 8,9,10 -> 64,81,100) before being pasted into the README.
+
+Architecture decisions:
+None. This is additive tooling, not a design decision.
+
+Known limitations:
+None beyond what already applied to the rest of Phase 0 (CUDA unverified).
+
+Next recommended task:
+Unchanged: get CUDA verified on real hardware (Orchard access expected
+soon). Separately, `tasks/0002-phase1-cartesian-grid-scalar-transport.md`
+is already scoped and stored on `cfe/development/phase_0002` for after
+PR #1 merges.

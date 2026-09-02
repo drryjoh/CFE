@@ -24,6 +24,7 @@ set_property(CACHE CFE_DEFAULT_BACKEND PROPERTY STRINGS serial threaded)
 
 option(CFE_BUILD_TESTS "Build the CFE unit test suite" ON)
 option(CFE_BUILD_BENCHMARKS "Build the CFE benchmark executables" ON)
+option(CFE_BUILD_TUTORIALS "Build the CFE tutorial/example executables" ON)
 
 # CUDA is opt-in but auto-detected: Phase 0 must not fail a CPU-only build
 # just because nvcc/hardware happen to be unavailable (see ADR 0001).
@@ -97,4 +98,8 @@ endif()
 
 if(CFE_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+
+if(CFE_BUILD_TUTORIALS)
+  add_subdirectory(tutorials)
 endif()
