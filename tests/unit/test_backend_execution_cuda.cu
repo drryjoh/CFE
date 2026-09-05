@@ -32,44 +32,55 @@ double tolerance_for(double expected)
   return 1e-9;
 }
 
+// nvcc forbids defining an extended __device__ lambda (the parallel_for
+// call below) inside a generic lambda expression, so the per-N body has to
+// live in its own template function rather than directly inside the
+// generic lambda that for_each_component_count invokes (mirrors the working
+// pattern in benchmarks/memory/bench_field_update_cuda.cu).
+template <class Scalar, class Layout, std::size_t N>
+void run_case_for_n()
+{
+  constexpr std::size_t n_cells = 4096;
+
+  std::vector<Scalar> host_q(n_cells * N);
+  for (std::size_t i = 0; i < n_cells; ++i) {
+    for (std::size_t k = 0; k < N; ++k) {
+      host_q[Layout::index(i, k, n_cells, N)] = static_cast<Scalar>(i + k + 1);
+    }
+  }
+
+  cfe::backend::cuda::DeviceField<Scalar, N, Layout> q(n_cells);
+  cfe::backend::cuda::DeviceField<Scalar, N, Layout> q_new(n_cells);
+  q.copy_from_host(host_q.data());
+
+  auto q_view = q.view();
+  auto out_view = q_new.view();
+  cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(std::size_t i) mutable {
+    for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
+  });
+  // parallel_for is asynchronous -- must synchronize before the result is
+  // meaningful to copy back and check.
+  cfe::backend::cuda::synchronize();
+
+  std::vector<Scalar> host_result(n_cells * N);
+  q_new.copy_to_host(host_result.data());
+
+  for (std::size_t i = 0; i < n_cells; ++i) {
+    for (std::size_t k = 0; k < N; ++k) {
+      const double base = static_cast<double>(host_q[Layout::index(i, k, n_cells, N)]);
+      const double expected = base * base;
+      CFE_CHECK_NEAR(host_result[Layout::index(i, k, n_cells, N)], expected,
+                     tolerance_for<Scalar>(expected));
+    }
+  }
+}
+
 template <class Scalar, class Layout>
 void run_case()
 {
   cfe::for_each_component_count([](auto n_components) {
     constexpr std::size_t N = decltype(n_components)::value;
-    constexpr std::size_t n_cells = 4096;
-
-    std::vector<Scalar> host_q(n_cells * N);
-    for (std::size_t i = 0; i < n_cells; ++i) {
-      for (std::size_t k = 0; k < N; ++k) {
-        host_q[Layout::index(i, k, n_cells, N)] = static_cast<Scalar>(i + k + 1);
-      }
-    }
-
-    cfe::backend::cuda::DeviceField<Scalar, N, Layout> q(n_cells);
-    cfe::backend::cuda::DeviceField<Scalar, N, Layout> q_new(n_cells);
-    q.copy_from_host(host_q.data());
-
-    auto q_view = q.view();
-    auto out_view = q_new.view();
-    cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(std::size_t i) mutable {
-      for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
-    });
-    // parallel_for is asynchronous -- must synchronize before the result is
-    // meaningful to copy back and check.
-    cfe::backend::cuda::synchronize();
-
-    std::vector<Scalar> host_result(n_cells * N);
-    q_new.copy_to_host(host_result.data());
-
-    for (std::size_t i = 0; i < n_cells; ++i) {
-      for (std::size_t k = 0; k < N; ++k) {
-        const double base = static_cast<double>(host_q[Layout::index(i, k, n_cells, N)]);
-        const double expected = base * base;
-        CFE_CHECK_NEAR(host_result[Layout::index(i, k, n_cells, N)], expected,
-                       tolerance_for<Scalar>(expected));
-      }
-    }
+    run_case_for_n<Scalar, Layout, N>();
   });
 }
 
