@@ -37,8 +37,23 @@ CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise)
 {
   // The all-cell update from the task spec: q_new(i,k) = q(i,k) * q(i,k).
   // Squaring is associative/commutative-safe per element (no reduction
-  // across elements), so serial and threaded execution must agree exactly,
-  // not just within a floating-point tolerance.
+  // across elements), so serial and threaded execution must agree exactly --
+  // that is the invariant this test is actually named for, and it is
+  // checked bitwise below via CFE_CHECK(out_serial == out_threaded).
+  //
+  // The second check below (against a freshly recomputed q(i,k) * q(i,k))
+  // is NOT held to the same bitwise standard: under GCC's default
+  // -ffp-contract=fast, the compiler may fuse this macro's separate
+  // "materialize q(i,k) * q(i,k)" and "subtract" statements into a single
+  // FMA, computing the exact infinite-precision residual instead of
+  // double-rounding through an intermediate value -- a few ULP different
+  // from the plain multiply that produced out_serial/out_threaded, even
+  // though both are individually correctly rounded. Verified by reproducing
+  // this on PSC Bridges-2 (GCC 13.3.1): the failure disappears entirely
+  // under -ffp-contract=off, and AddressSanitizer/UBSan found nothing, so
+  // this is compiler-permitted FP contraction, not a backend or memory bug.
+  // Clang's default (-ffp-contract=on, single-expression only) never
+  // triggers it, which is why this didn't show up in prior development.
   constexpr std::size_t n_cells = 5000;
   constexpr std::size_t n_components = 5;
 
@@ -71,7 +86,11 @@ CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise)
   for (std::size_t i = 0; i < n_cells; ++i) {
     for (std::size_t k = 0; k < n_components; ++k) {
       CFE_CHECK(out_serial(i, k) == out_threaded(i, k));
-      CFE_CHECK_NEAR(out_serial(i, k), q(i, k) * q(i, k), 1e-15);
+      // 1e-12 absolute is still four orders of magnitude tighter than the
+      // largest value in range here (~25) warrants for a real correctness
+      // bug, while comfortably absorbing the ~1e-15-scale FMA-contraction
+      // residual described above.
+      CFE_CHECK_NEAR(out_serial(i, k), q(i, k) * q(i, k), 1e-12);
     }
   }
 }
