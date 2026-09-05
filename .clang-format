@@ -1,0 +1,18 @@
+BasedOnStyle: Google
+ColumnLimit: 100
+AttributeMacros: ['CFE_HOST_DEVICE']
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterNamespace: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterExternBlock: false
+  BeforeElse: false
+  BeforeCatch: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  IndentBraces: false
