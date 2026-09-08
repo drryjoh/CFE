@@ -1,6 +1,8 @@
 # Phase 0 CUDA benchmark results
 
 Raw CSV: [`benchmarks/results/phase0_field_update_v100.csv`](../../benchmarks/results/phase0_field_update_v100.csv).
+Raw `nvcc --resource-usage` and `ncu` reports:
+[`benchmarks/results/ncu_reports/`](../../benchmarks/results/ncu_reports/).
 
 This is the CUDA counterpart to
 [`0001-phase0-results.md`](0001-phase0-results.md), which was written before
@@ -124,8 +126,54 @@ at double/N=50) is worth noting alongside observation 1 above: SoA is
 count alone would have been a misleading proxy for this kernel's actual
 performance -- the achieved-bandwidth measurement is what actually matters.
 
-<!-- Runtime occupancy/local-memory-traffic evidence (profile_cuda.sh parts
-2-3, via Nsight Compute) to be appended once collected. -->
+## Runtime occupancy / local-memory traffic / achieved bandwidth (Nsight Compute)
+
+Procedure: `scripts/profile_cuda.sh`, parts 2-4, via `ncu --set full` (occupancy,
+memory workload analysis) and a targeted `ncu --metrics
+l1tex__t_bytes_pipe_lsu_mem_local_op_{ld,st}.sum` query (local-memory/spill
+traffic). Unlike the static register sweep above, this requires a live GPU
+allocation, so it was run on a representative subset rather than all 24
+instantiations x 8 launches (192 total) each: `double`/AoS and `double`/SoA at
+`N=1` (identical layouts, sanity baseline) and `N=100` (the largest gap
+observed in the raw benchmark above). `--kernel-name-base mangled -k
+"regex:..."` selected one specific `(Scalar, N, Layout)` instantiation's first
+launch per profiling run.
+
+| | N=1, AoS | N=100, AoS | N=100, SoA |
+|---|---|---|---|
+| Achieved bandwidth | 793.9 GB/s (89.4% of peak) | 213.6 GB/s (23.7% of peak) | 728.8 GB/s (82.3% of peak) |
+| Achieved occupancy | 91.2% | 50.7% | 50.8% |
+| Theoretical occupancy | 100% | 100% | 100% |
+| Waves per SM | 51.2 | 0.51 | 0.51 |
+| Bytes used per 32-byte sector (global loads) | -- | 8.0 (25%) | 30.1 (94%) |
+| Local-memory (spill) traffic | -- | 0 bytes ld, 0 bytes st | -- |
+
+### Observations
+
+1. **The N=1 -> N=100 occupancy drop is a problem-size effect, not a layout
+   effect.** Both N=100 layouts land at the same ~51% achieved occupancy and
+   0.51 waves/SM ("this kernel grid is too small to fill the available
+   resources on this device" per Nsight Compute's own launch-statistics
+   warning) -- because `n_cells` is intentionally shrunk as N grows to hold
+   each field at ~64 MiB (see Methodology), there are simply fewer thread
+   blocks to launch at N=100 than at N=1. Layout does not change this.
+2. **The AoS vs SoA gap at N=100 is a pure coalescing effect on top of that
+   shared occupancy ceiling.** Nsight Compute quantifies this directly: AoS
+   utilizes only 8.0 of the 32 bytes transmitted per memory sector (a stride
+   between threads wastes 75% of every transaction), while SoA utilizes 30.1
+   of 32 bytes (94%, close to ideal). This is precisely the coalesced-access
+   mechanism hypothesized in observation 1 above, now measured rather than
+   inferred, and Nsight Compute's own optimization estimate agrees: it
+   reports fixing AoS's uncoalesced pattern at this instantiation would be
+   worth an estimated 73.9% speedup.
+3. **Zero local-memory (spill) traffic at runtime**, corroborating the static
+   `nvcc --resource-usage` result above with a direct runtime measurement at
+   the largest required state size (double/N=100/AoS): `0 bytes` for both
+   `l1tex__t_bytes_pipe_lsu_mem_local_op_ld.sum` and `..._st.sum`.
+4. **N=1's 793.9 GB/s (89.4% of the V100-SXM2-32GB's ~888 GB/s published HBM2
+   peak)** is the cleanest achieved-bandwidth reference this kernel produces
+   on this GPU: full occupancy (51.2 waves/SM), identical layouts, no
+   coalescing penalty possible with a single component.
 
 ## What this resolves from ADR 0001 / ADR 0002
 
