@@ -395,3 +395,138 @@ Unchanged: get CUDA verified on real hardware (Orchard access expected
 soon). Separately, `tasks/0002-phase1-cartesian-grid-scalar-transport.md`
 is already scoped and stored on `cfe/development/phase_0002` for after
 PR #1 merges.
+
+---
+
+## 2026-09-08 — CUDA verified on real hardware (PSC Bridges-2, V100)
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Close Phase 0's single largest known limitation: get the CUDA backend
+actually compiled, run, tested, and benchmarked on real NVIDIA hardware
+(PSC Bridges-2, GPU-shared partition), fix whatever that surfaces, update
+ADR 0001/0002 with the resulting evidence, and prepare PR #1 for merge.
+
+Files changed:
+- `tests/unit/test_backend_execution_cuda.cu` -- fixed a real nvcc
+  rejection: the extended `__device__` lambda passed to
+  `cfe::backend::cuda::parallel_for` was defined directly inside the
+  generic (`auto`-parameter) lambda passed to `for_each_component_count`,
+  which nvcc disallows ("An extended __device__ lambda cannot be defined
+  inside a generic lambda expression"). Extracted the per-N body into its
+  own `run_case_for_n<Scalar, Layout, N>()` template function, matching the
+  pattern `benchmarks/memory/bench_field_update_cuda.cu` already used
+  successfully.
+- `tests/unit/test_backend_execution.cpp` -- fixed a flaky (compiler- and
+  platform-dependent) failure in
+  `test_threaded_backend_matches_serial_backend_bitwise`: it reproducibly
+  failed under GCC 13.3.1/Linux but never under AppleClang/macOS. Root
+  cause (confirmed with AddressSanitizer/UBSan -- clean -- and by toggling
+  `-ffp-contract`/vectorization flags in isolation): GCC's default
+  `-ffp-contract=fast` permits fusing `CFE_CHECK_NEAR`'s separate
+  "materialize `q(i,k)*q(i,k)`" and "subtract" statements into a single
+  FMA, computing the exact infinite-precision residual instead of
+  double-rounding through an intermediate value -- a few ULP different
+  from the plain multiply used to produce `out_serial`/`out_threaded`,
+  even though both are individually correctly rounded. Clang defaults to
+  `-ffp-contract=on` (single-expression only), never crossing that
+  statement boundary, which is why this was never seen before. The actual
+  invariant the test is named for (serial and threaded execution agree
+  exactly) was never violated -- `CFE_CHECK(out_serial == out_threaded)`
+  passed in every run. Loosened only the secondary "matches a freshly
+  recomputed reference" check from an implicit bitwise expectation
+  (`1e-15`) to a real tolerance (`1e-12`).
+- `docs/performance/0002-phase0-cuda-results.md` -- new; full CUDA
+  benchmark + profiling write-up (see Benchmarks run below).
+- `benchmarks/results/phase0_field_update_v100.csv` -- new; raw benchmark
+  data, all 24 required (precision, N, layout) combinations.
+- `benchmarks/results/ncu_reports/` -- new; raw `nvcc --resource-usage`
+  and `ncu --set full` reports backing the write-up.
+- `docs/adr/0001-execution-backend.md` -- CUDA backend section rewritten
+  from "unverified" to verified, with the nvcc lambda-nesting bug and its
+  fix documented; status line updated; revisit criterion for CUDA evidence
+  removed (satisfied).
+- `docs/adr/0002-state-memory-layout.md` -- added the GPU evidence section
+  and changed the decision from "Proposed, CPU-only evidence" to
+  "Accepted: per-backend default" (see Architecture decisions below).
+
+Tests added:
+None new (the two fixes above touch existing tests). All 27 tests
+(23 CPU + 4 CUDA) pass together on the V100
+(`srun --jobid=... ./build/tests/cfe_unit_tests`), confirmed in 3
+repeated runs for determinism after the FP-contraction fix.
+
+Benchmarks run:
+`cfe_bench_field_update_cuda`, all 24 required combinations (2 precisions
+x 6 component counts x 2 layouts), on PSC Bridges-2 (NVIDIA Tesla
+V100-SXM2-32GB, compute capability 7.0, CUDA 12.9.86, GCC 13.3.1 host
+compiler, `-DCMAKE_CUDA_ARCHITECTURES=70`). Also ran
+`scripts/profile_cuda.sh`'s full procedure: static register/spill sweep
+(`nvcc --resource-usage`) for all 24 instantiations, and Nsight Compute
+(`ncu --set full` plus a targeted local-memory-traffic metric query) for a
+representative subset (double/N=1 and double/N=100, AoS and SoA) --
+scoped to a subset because the runtime profiling step requires a live GPU
+allocation, unlike the static sweep. Full results and raw reports in
+`docs/performance/0002-phase0-cuda-results.md` and
+`benchmarks/results/`.
+
+Performance change:
+First CUDA baseline; no prior GPU numbers existed. Headline finding: SoA
+wins decisively on this GPU (up to ~33x over AoS at N=100/float), the
+mirror image of the CPU result where AoS won (up to ~8x over SoA at
+N=100) -- confirmed by Nsight Compute as a coalescing effect (AoS
+utilizes only 8.0 of 32 bytes per memory transaction at double/N=100 vs.
+SoA's 30.1 of 32), not an occupancy effect (both layouts show the same
+~51% achieved occupancy at N=100, a shared problem-size effect from
+`n_cells` shrinking to hold the working set at large N). Zero register
+spilling observed for every one of the 24 required instantiations, both
+statically and at runtime.
+
+Scientific verification:
+CUDA backend results verified against the CPU reference within the
+tolerance appropriate for cross-backend floating-point comparison
+(`VERIFICATION.md` #3), via the 4 CUDA correctness tests -- all passing.
+The FP-contraction root-cause diagnosis was itself verified rather than
+assumed: reproduced deterministically across 3 repeated runs, ruled out
+memory corruption (AddressSanitizer + UBSan clean), ruled out
+auto-vectorization involvement (`-fno-tree-vectorize -fno-tree-slp-vectorize`
+made no difference), and confirmed the actual mechanism directly
+(`-ffp-contract=off` alone fixed it).
+
+Architecture decisions:
+- ADR 0001 (execution backend): CUDA backend moves from "implemented but
+  unverified" to Accepted, on the same evidentiary basis as the CPU
+  backends.
+- ADR 0002 (state memory layout): accepted a per-backend default (AoS for
+  CPU, SoA for CUDA) rather than one global default, since CPU and GPU
+  evidence disagree and the GPU effect size is much larger than the CPU
+  effect size in either direction. This is a decision for ADR 0003's
+  case-specific compiler to apply (select `Layout` alongside backend/
+  precision/dimension); `Field`/`FieldView` themselves need no interface
+  change, since they were already layout-agnostic by design.
+
+Known limitations:
+- Nsight Compute runtime profiling covered a representative subset (2 of
+  6 component counts, double precision only) rather than the full
+  24-instantiation sweep, due to the time cost of holding a live GPU
+  allocation for `--set full` profiling; the static register/spill sweep
+  (which doesn't require a GPU allocation) does cover all 24.
+- The per-backend memory-layout default (ADR 0002) is not yet wired into
+  a builder/compiler that actually selects `Layout` automatically per
+  backend -- that is ADR 0003's case-specific compilation layer, not yet
+  implemented. Until then, call sites must still choose `Layout`
+  explicitly.
+- GPU evidence is V100/sm_70-specific; a different GPU architecture could
+  in principle show different coalescing behavior (noted in ADR 0002's
+  revisit criteria).
+
+Next recommended task:
+Merge PR #1, then proceed to `tasks/0002-phase1-cartesian-grid-scalar-transport.md`
+(already scoped on `cfe/development/phase_0002`). When ADR 0003
+(case-specific compilation) is eventually implemented, it should select
+`Field`'s `Layout` parameter per-backend per ADR 0002's decision above.
