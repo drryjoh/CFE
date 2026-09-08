@@ -1,7 +1,7 @@
 # ADR 0001: Minimal execution backend abstraction
 
-**Status:** Accepted as the Phase 0 reference implementation for serial/threaded CPU backends -- not yet a settled production CPU backend, see the threaded-backend caveat below; CUDA backend implemented but unverified  
-**Date:** 2026-08-30 (updated 2026-08-31, PR #1 review correction)
+**Status:** Accepted as the Phase 0 reference implementation for serial/threaded/CUDA backends -- not yet a settled production CPU backend, see the threaded-backend caveat below  
+**Date:** 2026-08-30 (updated 2026-08-31, PR #1 review correction; updated 2026-09-08, CUDA verified on PSC Bridges-2)
 
 ## Context
 
@@ -90,15 +90,29 @@ which is worth noting precisely because it means the *true* achievable
 threaded speedup, with thread creation removed from the critical path, is
 at least as good as what was measured, likely better.
 
-**CUDA backend: unverified.** No CUDA toolkit or NVIDIA GPU was available in
-the Phase 0 development environment (`nvcc` not found; CMake's
-`check_language(CUDA)` returned not-found and `CFE_ENABLE_CUDA` was forced
-`OFF`). `cuda_backend.cuh`, `device_field.cuh`,
-`benchmarks/memory/bench_field_update_cuda.cu`, and
-`tests/unit/test_backend_execution_cuda.cu` were written to the same
-interface and reviewed, but have not been compiled by `nvcc`, let alone run
-or benchmarked. Register/occupancy/spill inspection
-(`scripts/profile_cuda.sh`) is likewise documented but unexecuted.
+**CUDA backend: verified on real hardware (2026-09-08).** Built and run on
+PSC Bridges-2 (NVIDIA Tesla V100-SXM2-32GB, compute capability 7.0, CUDA
+12.9.86, GCC 13.3.1 host compiler, `-DCMAKE_CUDA_ARCHITECTURES=70`). All 4
+CUDA correctness tests (`tests/unit/test_backend_execution_cuda.cu`: both
+precisions x both layouts) pass, matching the CPU reference within the
+tolerance appropriate for cross-backend floating-point comparison
+(VERIFICATION.md #3). `cfe_bench_field_update_cuda` ran the full required
+sweep (6 component counts x 2 precisions x 2 layouts); `scripts/
+profile_cuda.sh` was executed (static register/spill sweep for all 24
+instantiations, plus Nsight Compute occupancy/coalescing/local-memory
+profiling for a representative subset). See
+`docs/performance/0002-phase0-cuda-results.md` for full results; headline
+findings: zero register spilling at any required component count, and SoA
+substantially outperforms AoS on this GPU (opposite of the CPU result --
+see ADR 0002).
+
+Fixed one real nvcc-specific bug found during this verification:
+`test_backend_execution_cuda.cu` originally defined its extended
+`__device__` lambda directly inside the generic (`auto`-parameter) lambda
+passed to `for_each_component_count`, which nvcc rejects ("An extended
+__device__ lambda cannot be defined inside a generic lambda expression").
+Fixed by extracting the per-N body into its own template function, matching
+the pattern already used in `bench_field_update_cuda.cu`.
 
 ## Decision
 
@@ -116,10 +130,11 @@ anticipation) and it does not invalidate the correctness results, but it
 does mean this implementation should not be assumed adequate once
 `parallel_for` is called at the frequency later phases will require.
 
-The CUDA backend remains a reviewed but unverified proposal. Do not treat
-CUDA support as validated until it has actually been compiled and run on
-CUDA hardware; the next task that has access to an NVIDIA GPU should do so
-before any physics work depends on it.
+The CUDA backend is now accepted on the same basis: it compiles, runs, and
+produces correct results on real NVIDIA hardware (V100), with no register
+spilling observed at any required state size. This does not by itself
+imply a memory-layout default -- see ADR 0002, where CPU and GPU evidence
+disagree.
 
 ## Consequences
 
@@ -127,10 +142,9 @@ Physics and numerics code should not contain raw launch syntax.
 
 Backend APIs must remain intentionally small.
 
-Because CUDA is unverified, any near-term task targeting GPU execution
-should budget time to first get `cfe_bench_field_update_cuda` and
-`cfe_unit_tests` (CUDA-enabled) compiling and passing before building
-anything physics-related on top of the CUDA backend.
+CUDA is now verified; near-term tasks targeting GPU execution can build on
+the CUDA backend directly rather than budgeting time to first get it
+compiling.
 
 The threaded CPU backend should not be treated as production-ready for
 repeated per-timestep kernel launches. A task that introduces a real
@@ -147,9 +161,6 @@ Revisit if:
 - backend maintenance becomes disproportionate;
 - another framework provides measured performance/portability benefits;
 - additional accelerators become a near-term requirement;
-- CUDA compilation/execution evidence becomes available and contradicts the
-  design assumptions above (revisit this ADR's status to fully "Accepted"
-  once that evidence exists, or "Rejected"/revised if it does not hold up);
 - the threaded backend is measured under a realistic repeated-launch
   workload (e.g. once real timestep code exists) and thread-creation
   overhead proves material -- at that point replace the per-call
