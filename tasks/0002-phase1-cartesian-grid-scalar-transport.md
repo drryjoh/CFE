@@ -65,10 +65,13 @@ both) do not require redesigning this layer.
    why (e.g. stability region vs. cost).
 7. CPU execution, reusing Phase 0's `cfe::parallel_for` (serial and
    threaded backends).
-8. CUDA execution. Orchard GPU access is expected to be available for this
-   task -- if it is not yet by the time this task runs, document that
-   explicitly and proceed CPU-only, matching Phase 0's precedent (do not
-   invent numbers; do not block the rest of the task on it).
+8. CUDA execution. Target PSC Bridges-2 V100 GPUs, the same hardware and
+   workflow verified in Phase 0 (see `docs/bridges2-setup.md`) -- not
+   Orchard, which this task originally assumed before Phase 0's actual GPU
+   access landed on Bridges-2 instead. If GPU access is not available by
+   the time this task runs, document that explicitly and proceed
+   CPU-only, matching Phase 0's precedent (do not invent numbers; do not
+   block the rest of the task on it).
 9. Formal convergence test: verify the expected 2nd-order accuracy via a
    grid-refinement study (e.g. halve `dx` repeatedly, confirm error drops
    ~4x each time). "It ran and looked reasonable" does not satisfy this.
@@ -95,6 +98,25 @@ both) do not require redesigning this layer.
   (AGENTS.md #17).
 - Do not allocate inside parallel loops.
 - Do not introduce external portability/mesh frameworks.
+- **Do not implement AMR in this task** (PI direction, 2026-09-10): a
+  single fixed-resolution grid is sufficient for -- and preferable to --
+  Phase 1's convergence study, which needs to isolate the base scheme's
+  order of accuracy without also conflating refinement-interface error.
+  More sophisticated adaptive refinement techniques are still immature
+  and explicitly out of scope for now.
+- However, the grid/ghost-cell layer must not foreclose adding **fixed,
+  block-based static refinement** (a small number of refinement levels,
+  per `ARCHITECTURE.md`'s AMR sketch) within roughly the next development
+  cycle -- same spirit as the DG-readiness constraint above, just for
+  AMR. Concretely:
+  - grid spacing (`dx`/`dy`/`dz`) must be a property scoped to a block,
+    not a single value assumed globally, even though Phase 1 only ever
+    instantiates one block;
+  - ghost-cell neighbor resolution must be expressed as a swappable
+    interface ("fill these ghost cells from a neighbor provider"), not
+    hardwired same-array `(i,j,k) +/- 1` indexing, so a future
+    coarse-fine neighbor provider (needed once blocks can differ in
+    resolution) can be substituted without redesigning this layer.
 
 ## Tests
 
