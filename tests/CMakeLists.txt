@@ -8,6 +8,7 @@ add_executable(cfe_unit_tests
   unit/test_math_operations.cpp
   unit/test_field_storage.cpp
   unit/test_backend_execution.cpp
+  unit/test_grid_indexing.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
