@@ -66,7 +66,9 @@ A feature is complete only when:
 - no unexplained regression exists;
 - documentation is updated;
 - a tutorial exists when applicable;
-- `agent_history.md` is updated.
+- `agent_history.md` is updated;
+- `docs/type-reference.md` reflects every new or changed public type
+  (section 27).
 
 "Code generated successfully" is not a definition of done.
 
@@ -510,3 +512,21 @@ the follow-up is large enough to deserve its own PR and its own
 presentation file -- use judgment; the goal is a presentation file a
 student could read start-to-finish and understand the state of that
 specific piece of work.
+
+## 27. Type reference maintenance
+
+Every new public type (a class, struct, alias, or free function meant to
+be called from outside its own file) must be added to
+`docs/type-reference.md` in the same change that introduces it -- not as
+a follow-up. If a change alters an existing type's public shape (renamed
+member, changed signature, removed method), update its entry there too.
+
+This is a reference, not a tutorial: one row (name, file, one- or
+two-sentence description of what it is and its key members), organized
+under the module it belongs to. Design rationale belongs in an ADR, not
+here -- link to one if it exists.
+
+`docs/type-reference.md` is expected to drift out of date the moment this
+rule is skipped, and a stale type reference is worse than none (it actively
+misleads). Treat keeping it current as part of the definition of done
+(section 5), on the same footing as updating `agent_history.md`.
