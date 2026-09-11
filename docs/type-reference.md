@@ -67,6 +67,12 @@ scalar-advection solver) land next and should be added here when they do.*
 | `cfe::StaticBoundary<Scalar, N>` | `grid/boundary/boundary_condition.hpp` | Writes a fixed `State<Scalar,N>` into every ghost cell on the low/high side of one axis (the two sides may differ). Same `fill_x`/`fill_y`/`fill_z` shape as `PeriodicBoundary` — duck-typed, no common base (AGENTS.md #12: no virtual functions inside kernels). |
 | `cfe::fill_ghost_cells(field, grid, axis, boundary)` | `grid/ghost/ghost_fill.hpp` | The single call site solver code uses to fill ghost cells. This is the actual swappable seam: solver code never touches `(i,j,k)±1` indexing directly, so a future MPI halo-exchange or coarse-fine-AMR-interpolation provider is a new `boundary` type at this same call shape, not a redesign. |
 
+## `cfe::solver` — time integration (Phase 1)
+
+| Type / function | File | What it is |
+|---|---|---|
+| `cfe::ssp_rk2_step<Scalar>(q, stage1, r_buf, dt, residual)` | `solver/time_integration/ssp_rk2.hpp` | Advances `q` in place by one SSP-RK2 (Heun's method) step. Generic over a `residual(q_in, out)` callable computing `out := dQ/dt`; has no knowledge of grids or boundary conditions. `stage1`/`r_buf` are caller-allocated scratch storage of the same shape as `q`, reused every call. Chosen over SSP-RK3 because the paired spatial scheme is 2nd-order (see ADR 0007 once written). |
+
 ## Test framework
 
 | Macro | File | What it is |
