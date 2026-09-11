@@ -67,6 +67,14 @@ scalar-advection solver) land next and should be added here when they do.*
 | `cfe::StaticBoundary<Scalar, N>` | `grid/boundary/boundary_condition.hpp` | Writes a fixed `State<Scalar,N>` into every ghost cell on the low/high side of one axis (the two sides may differ). Same `fill_x`/`fill_y`/`fill_z` shape as `PeriodicBoundary` — duck-typed, no common base (AGENTS.md #12: no virtual functions inside kernels). |
 | `cfe::fill_ghost_cells(field, grid, axis, boundary)` | `grid/ghost/ghost_fill.hpp` | The single call site solver code uses to fill ghost cells. This is the actual swappable seam: solver code never touches `(i,j,k)±1` indexing directly, so a future MPI halo-exchange or coarse-fine-AMR-interpolation provider is a new `boundary` type at this same call shape, not a redesign. |
 
+## `cfe::numerics` — interface reconstruction and flux (Phase 1)
+
+| Function | File | What it is |
+|---|---|---|
+| `cfe::fvm::interface_value_right(q_left, q_self, q_right)` | `numerics/fvm/interface_value.hpp` | This cell's own value at its `+axis` face: central-difference linear extrapolation, `q_self + (q_right - q_left)/4`, using only its immediate ("1-ring") neighbors. |
+| `cfe::fvm::interface_value_left(q_left, q_self, q_right)` | `numerics/fvm/interface_value.hpp` | Mirror image, for the `-axis` face: `q_self - (q_right - q_left)/4`. Together with `interface_value_right`, this is the FVM implementation of "produce my value at a face from my own representation" — a future DG element could implement the same shape from its own internal DOFs instead. |
+| `cfe::upwind_flux(left_value, right_value, advection_speed)` | `numerics/numerical_flux/upwind.hpp` | Combines two independently-computed face values into one flux by upwind selection on the sign of `advection_speed`. Method-agnostic: never knows how either value was produced. |
+
 ## `cfe::solver` — time integration (Phase 1)
 
 | Type / function | File | What it is |

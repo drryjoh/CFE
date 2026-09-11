@@ -11,6 +11,7 @@ add_executable(cfe_unit_tests
   unit/test_grid_indexing.cpp
   unit/test_boundary_conditions.cpp
   unit/test_ssp_rk2.cpp
+  unit/test_interface_flux.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
