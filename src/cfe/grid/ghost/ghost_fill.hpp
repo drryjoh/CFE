@@ -16,7 +16,7 @@
 namespace cfe {
 
 template <class Scalar, std::size_t N, class Layout, class Boundary>
-void fill_ghost_cells(FieldView<Scalar, N, Layout> field, const CartesianGrid& grid, Axis axis,
+void fill_ghost_cells(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar>& grid, Axis axis,
                       const Boundary& boundary)
 {
   switch (axis) {

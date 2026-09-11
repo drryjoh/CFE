@@ -7,10 +7,9 @@ one is added; do not let it drift from the code. It is a reference, not
 a tutorial: for the reasoning behind a design, see the relevant ADR under
 `docs/adr/`.
 
-*Covers through Phase 1's grid/boundary-condition work in progress
-(`cfe::CartesianGrid`, `cfe::PeriodicBoundary`, `cfe::StaticBoundary`).
-Numerics/solver types (interface-value, numerical flux, SSP-RK,
-scalar-advection solver) land next and should be added here when they do.*
+*Covers through Phase 1's scalar-advection solver (grid, boundary
+conditions, interface-value/numerical-flux, SSP-RK2, the
+`ScalarAdvectionField`/`FvmSolver` split).*
 
 ## `cfe::core` — precision, indexing, host/device macros
 
@@ -19,6 +18,8 @@ scalar-advection solver) land next and should be added here when they do.*
 | `cfe::scalar` | `core/types.hpp` | Project-wide default floating-point precision (`float` or `double`), selected at configure time via `CFE_SCALAR_TYPE`. Most code is templated on `Scalar` directly rather than using this alias, so both precisions can be exercised in one build. |
 | `cfe::local_index` | `core/types.hpp` | `std::int32_t`. Within-partition/rank indices. |
 | `cfe::global_index` | `core/types.hpp` | `std::int64_t`. Indices that may need to address a distributed problem larger than 2^31 elements. |
+| `cfe::Axis` | `core/types.hpp` | `{X=0, Y=1, Z=2}`. Lives in `core/` (not `grid/`) so numerics code (`numerics/numerical_flux/upwind.hpp`) can use it without depending on the grid module. Values are stable so `static_cast<std::size_t>(axis)` indexes a per-axis `Vector`/`FixedArray` directly. |
+| `cfe::Side` | `core/types.hpp` | `{Low, High}`. |
 | `CFE_HOST_DEVICE`, `CFE_DEVICE`, `CFE_HOST`, `CFE_GLOBAL` | `core/macros.hpp` | Expand to `__host__ __device__` / `__device__` / `__host__` / `__global__` when compiled by `nvcc` (`__CUDACC__` defined), and to nothing otherwise. **The only place any code may know whether it's being compiled by nvcc** — physics/numerics code must use these macros, never raw CUDA attributes. |
 | `CFE_FORCEINLINE` | `core/macros.hpp` | `__forceinline__` under nvcc, `inline __attribute__((always_inline))` under GCC/Clang, plain `inline` otherwise. |
 | `cfe::ComponentCounts` | `core/component_counts.hpp` | `std::index_sequence<1,5,10,20,50,100>` — the required component-count sweep (AGENTS.md #8). |
@@ -60,26 +61,37 @@ scalar-advection solver) land next and should be added here when they do.*
 
 | Type / function | File | What it is |
 |---|---|---|
-| `cfe::CartesianGrid` | `grid/structured/cartesian_grid.hpp` | Describes one block: real cell counts, ghost-layer depth, and spacing (`dx`/`dy`/`dz`) per dimension, plus interior origin. `flat_index(i,j,k)` is the *only* place `(i,j,k)` becomes the flat `cell` index `Field`/`FieldView` expect — ghost cells live in the same contiguous array as real cells, at padded indices outside `[n_ghost, n_ghost+n_cells)`. Spacing/extents are scoped to this one object (not global) so a second block at a different resolution — fixed-block AMR — doesn't require redesigning this type. |
-| `cfe::Axis` | `grid/structured/cartesian_grid.hpp` | `{X, Y, Z}`. |
-| `cfe::Side` | `grid/structured/cartesian_grid.hpp` | `{Low, High}`. |
+| `cfe::CartesianGrid<Scalar>` | `grid/structured/cartesian_grid.hpp` | Describes one block: real cell counts, ghost-layer depth (`std::size_t`), and spacing (`dx`/`dy`/`dz`, type `Scalar`) per dimension, plus interior origin. Templated on `Scalar` (not hardcoded `double`) so a `float`-precision solver carries no hidden conversion for its grid spacing. `flat_index(i,j,k)` is the *only* place `(i,j,k)` becomes the flat `cell` index `Field`/`FieldView` expect — ghost cells live in the same contiguous array as real cells, at padded indices outside `[n_ghost, n_ghost+n_cells)`. Spacing/extents are scoped to this one object (not global) so a second block at a different resolution — fixed-block AMR — doesn't require redesigning this type. |
 | `cfe::PeriodicBoundary` | `grid/boundary/boundary_condition.hpp` | Wraps one axis's ghost layer from the opposite real boundary. `fill_x`/`fill_y`/`fill_z`, each dispatched via `cfe::parallel_for`. Stateless. |
 | `cfe::StaticBoundary<Scalar, N>` | `grid/boundary/boundary_condition.hpp` | Writes a fixed `State<Scalar,N>` into every ghost cell on the low/high side of one axis (the two sides may differ). Same `fill_x`/`fill_y`/`fill_z` shape as `PeriodicBoundary` — duck-typed, no common base (AGENTS.md #12: no virtual functions inside kernels). |
 | `cfe::fill_ghost_cells(field, grid, axis, boundary)` | `grid/ghost/ghost_fill.hpp` | The single call site solver code uses to fill ghost cells. This is the actual swappable seam: solver code never touches `(i,j,k)±1` indexing directly, so a future MPI halo-exchange or coarse-fine-AMR-interpolation provider is a new `boundary` type at this same call shape, not a redesign. |
 
-## `cfe::numerics` — interface reconstruction and flux (Phase 1)
+## `cfe::numerics` — interface reconstruction and flux combinator (Phase 1)
 
-| Function | File | What it is |
-|---|---|---|
-| `cfe::fvm::interface_value_right(q_left, q_self, q_right)` | `numerics/fvm/interface_value.hpp` | This cell's own value at its `+axis` face: central-difference linear extrapolation, `q_self + (q_right - q_left)/4`, using only its immediate ("1-ring") neighbors. |
-| `cfe::fvm::interface_value_left(q_left, q_self, q_right)` | `numerics/fvm/interface_value.hpp` | Mirror image, for the `-axis` face: `q_self - (q_right - q_left)/4`. Together with `interface_value_right`, this is the FVM implementation of "produce my value at a face from my own representation" — a future DG element could implement the same shape from its own internal DOFs instead. |
-| `cfe::upwind_flux(left_value, right_value, advection_speed)` | `numerics/numerical_flux/upwind.hpp` | Combines two independently-computed face values into one flux by upwind selection on the sign of `advection_speed`. Method-agnostic: never knows how either value was produced. |
-
-## `cfe::solver` — time integration (Phase 1)
+Physics-agnostic by design: neither of these knows what PDE it's being used
+for. The physics lives in `cfe::fields` instead (below).
 
 | Type / function | File | What it is |
 |---|---|---|
-| `cfe::ssp_rk2_step<Scalar>(q, stage1, r_buf, dt, residual)` | `solver/time_integration/ssp_rk2.hpp` | Advances `q` in place by one SSP-RK2 (Heun's method) step. Generic over a `residual(q_in, out)` callable computing `out := dQ/dt`; has no knowledge of grids or boundary conditions. `stage1`/`r_buf` are caller-allocated scratch storage of the same shape as `q`, reused every call. Chosen over SSP-RK3 because the paired spatial scheme is 2nd-order (see ADR 0007 once written). |
+| `cfe::fvm::interface_value_right(q_left, q_self, q_right)` / `cfe::fvm::interface_value_left(...)` | `numerics/fvm/interface_value.hpp` | This cell's own value at its `+axis`/`-axis` face: central-difference linear extrapolation (`q_self ± (q_right - q_left)/4`), using only its immediate ("1-ring") neighbors. Together, the FVM implementation of "produce my value at a face from my own representation" — a future DG element could implement the same shape from its own internal DOFs instead. |
+| `cfe::fvm::CentralDifferenceReconstruction` | `numerics/fvm/interface_value.hpp` | Stateless functor wrapping the two functions above into the `.right(...)`/`.left(...)` shape `FvmSolver` is generic over (its default `Reconstruction`). A future MUSCL/PPM/WENO reconstruction is a new type with this same shape. |
+| `cfe::upwind_flux(left_value, right_value, axis, field)` / `cfe::UpwindFlux` | `numerics/numerical_flux/upwind.hpp` | Combines two independently-computed face values into one flux by upwind selection on the sign of `field.wave_speed(left_value, right_value, axis)`, then evaluates `field.physical_flux(...)` on the upwind side. Never knows what those two Calculator methods actually compute — that's `Field`'s job. `UpwindFlux` is the functor form (`FvmSolver`'s default `NumericalFlux`); a future Rusanov/HLLC/AUSM flux is a new type with the same `operator()(left, right, axis, field)` shape. |
+
+## `cfe::fields` — the physics (Phase 1)
+
+Where the physics-specific Calculator functions actually live (ARCHITECTURE.md
+#2's "Field" concept), kept separate from the physics-agnostic numerics above.
+
+| Type | File | What it is |
+|---|---|---|
+| `cfe::ScalarAdvectionField<Scalar, Dim>` | `fields/scalar_advection/field.hpp` | The linear scalar-advection equation `dQ/dt + velocity·grad(Q) = 0`. Holds a `Vector<Scalar, Dim>` velocity (one component per active axis — a 1D problem uses `Dim=1`, 2D uses `Dim=2`, etc.) and provides the two Calculator methods `NumericalFlux` needs: `physical_flux(q, axis) -> velocity[axis]*q` and `wave_speed(q_left, q_right, axis) -> velocity[axis]`. Exposes `static constexpr std::size_t dim = Dim` so `FvmSolver` can select 1D/2D/3D behavior with `if constexpr` at compile time rather than a per-cell runtime check. A future Burgers/Euler field supplies its own Calculator methods under this same `(state, axis)`-in shape. |
+
+## `cfe::solver` — orchestration, no physics (Phase 1)
+
+| Type / function | File | What it is |
+|---|---|---|
+| `cfe::ssp_rk2_step<Scalar>(q, stage1, residual_scratch, dt, residual)` | `solver/time_integration/ssp_rk2.hpp` | Advances `q` in place by one SSP-RK2 (Heun's method) step. Generic over a `residual(q_in, out)` callable computing `out := dQ/dt`; has no knowledge of grids or boundary conditions. `stage1`/`residual_scratch` are caller-allocated scratch storage of the same shape as `q`, reused every call. Chosen over SSP-RK3 because the paired spatial scheme is 2nd-order. |
+| `cfe::FvmSolver<Scalar, Layout, Field, BoundaryX, BoundaryY=BoundaryX, BoundaryZ=BoundaryX, Reconstruction=fvm::CentralDifferenceReconstruction, NumericalFlux=UpwindFlux>` | `solver/explicit/fvm_solver.hpp` | Assembles a flux-form residual for a single-component conservation law. Dimension-agnostic: the residual loop and ghost-fill both run over however many axes are active, decided at compile time from `Field::dim` (`if constexpr`, not a per-cell runtime branch). Contains no physics itself — only orchestrates `Field` (physics), `Reconstruction`+`NumericalFlux` (numerics), and `BoundaryX`/`Y`/`Z` (ghost-cell filling), calling only their public interfaces. Requires `grid.ngx/ngy/ngz >= 2` on every active axis (each cell's residual needs both its faces, and each face's two one-sided reconstructions each reach one cell further out). |
 
 ## Test framework
 

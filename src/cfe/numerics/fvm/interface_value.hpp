@@ -37,5 +37,26 @@ CFE_HOST_DEVICE Scalar interface_value_left(Scalar q_left_neighbor, Scalar q_sel
   return q_self - (q_right_neighbor - q_left_neighbor) * Scalar(0.25);
 }
 
+// Stateless functor wrapping the two free functions above into the
+// swappable shape solver code (solver/scalar_advection/solver.hpp) is
+// generic over: `Reconstruction::right(...)` / `::left(...)`. A future
+// MUSCL/PPM/WENO reconstruction -- or a DG element's own trace evaluation
+// -- is a new type with this same two-method shape, substituted as a
+// template argument; solver residual code never changes.
+struct CentralDifferenceReconstruction
+{
+  template <class Scalar>
+  CFE_HOST_DEVICE Scalar right(Scalar q_left_neighbor, Scalar q_self, Scalar q_right_neighbor) const
+  {
+    return interface_value_right(q_left_neighbor, q_self, q_right_neighbor);
+  }
+
+  template <class Scalar>
+  CFE_HOST_DEVICE Scalar left(Scalar q_left_neighbor, Scalar q_self, Scalar q_right_neighbor) const
+  {
+    return interface_value_left(q_left_neighbor, q_self, q_right_neighbor);
+  }
+};
+
 }  // namespace fvm
 }  // namespace cfe

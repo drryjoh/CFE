@@ -1,18 +1,25 @@
 // Uniform Cartesian grid, generic over 1D/2D/3D (task spec item 1,
 // ARCHITECTURE.md #6, ADR 0004).
 //
-// A `CartesianGrid` describes ONE block: real (interior) cell counts,
-// ghost-layer depth, and cell spacing per dimension, plus the physical
-// origin of the interior domain's lower corner. Unused dimensions (for a
-// 1D or 2D problem) are represented by `n_cells == 1, n_ghost == 0` --
-// there is no separate 1D/2D/3D type, to avoid combinatorial
-// specialization for a small block description.
+// A `CartesianGrid<Scalar>` describes ONE block: real (interior) cell
+// counts, ghost-layer depth, and cell spacing per dimension, plus the
+// physical origin of the interior domain's lower corner. Unused
+// dimensions (for a 1D or 2D problem) are represented by `n_cells == 1,
+// n_ghost == 0` -- there is no separate 1D/2D/3D type, to avoid
+// combinatorial specialization for a small block description.
 //
 // `CartesianGrid` has NO notion of storage: it only converts a padded
 // (i,j,k) triple (including ghost layers) to the single flat `cell` index
 // that `cfe::Field`/`FieldView` already index by (see field/field.hpp).
 // This is deliberate -- Field/FieldView need no changes at all to support
 // a grid.
+//
+// Templated on `Scalar` (matching every other type in this codebase --
+// `Field`, `FixedArray`, etc.) rather than hardcoding `double`: spacing
+// and origin are used directly alongside state values in per-timestep
+// code (see solver/explicit/fvm_solver.hpp), so a `float`-precision
+// solver should not carry a hidden `double` conversion for its grid
+// spacing.
 //
 // Per AGENTS.md #2 (build for measured/anticipated needs, not
 // speculation) and the AMR-readiness direction recorded in
@@ -26,25 +33,11 @@
 #include <cstddef>
 
 #include "cfe/core/macros.hpp"
+#include "cfe/core/types.hpp"
 
 namespace cfe {
 
-// Which face of the block a boundary condition or ghost-fill operation
-// applies to. Only the faces relevant to active dimensions (n_cells > 1
-// or explicitly enabled) are ever used; see CartesianGrid::n_ghost_*.
-enum class Axis
-{
-  X,
-  Y,
-  Z
-};
-
-enum class Side
-{
-  Low,
-  High
-};
-
+template <class Scalar>
 struct CartesianGrid
 {
   // Real (non-ghost) cell counts per dimension. 1 for an unused dimension.
@@ -61,14 +54,14 @@ struct CartesianGrid
 
   // Cell spacing per dimension. Meaningless (and unused) on an axis with
   // n_cells == 1.
-  double dx = 1.0;
-  double dy = 1.0;
-  double dz = 1.0;
+  Scalar dx = Scalar(1);
+  Scalar dy = Scalar(1);
+  Scalar dz = Scalar(1);
 
   // Physical coordinate of the interior domain's lower corner.
-  double origin_x = 0.0;
-  double origin_y = 0.0;
-  double origin_z = 0.0;
+  Scalar origin_x = Scalar(0);
+  Scalar origin_y = Scalar(0);
+  Scalar origin_z = Scalar(0);
 
   CFE_HOST_DEVICE
   std::size_t padded_nx() const { return nx + 2 * ngx; }
@@ -93,17 +86,17 @@ struct CartesianGrid
   // Physical cell-center coordinate for a padded index. Host-only: used
   // for setting initial conditions and evaluating exact solutions, never
   // inside a per-timestep kernel.
-  double x_center(std::size_t i) const
+  Scalar x_center(std::size_t i) const
   {
-    return origin_x + (static_cast<double>(i) - static_cast<double>(ngx) + 0.5) * dx;
+    return origin_x + (static_cast<Scalar>(i) - static_cast<Scalar>(ngx) + Scalar(0.5)) * dx;
   }
-  double y_center(std::size_t j) const
+  Scalar y_center(std::size_t j) const
   {
-    return origin_y + (static_cast<double>(j) - static_cast<double>(ngy) + 0.5) * dy;
+    return origin_y + (static_cast<Scalar>(j) - static_cast<Scalar>(ngy) + Scalar(0.5)) * dy;
   }
-  double z_center(std::size_t k) const
+  Scalar z_center(std::size_t k) const
   {
-    return origin_z + (static_cast<double>(k) - static_cast<double>(ngz) + 0.5) * dz;
+    return origin_z + (static_cast<Scalar>(k) - static_cast<Scalar>(ngz) + Scalar(0.5)) * dz;
   }
 };
 

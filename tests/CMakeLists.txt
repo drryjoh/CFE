@@ -12,6 +12,9 @@ add_executable(cfe_unit_tests
   unit/test_boundary_conditions.cpp
   unit/test_ssp_rk2.cpp
   unit/test_interface_flux.cpp
+  unit/test_scalar_advection_convergence.cpp
+  unit/test_scalar_advection_conservation.cpp
+  unit/test_scalar_advection_2d_sanity.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)

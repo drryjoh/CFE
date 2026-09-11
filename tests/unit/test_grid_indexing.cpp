@@ -8,7 +8,7 @@
 
 CFE_TEST(test_1d_grid_flat_index_matches_i_when_y_and_z_are_size_one)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = 5;
   grid.ngx = 2;
   grid.dx = 0.1;
@@ -25,7 +25,7 @@ CFE_TEST(test_1d_grid_flat_index_matches_i_when_y_and_z_are_size_one)
 
 CFE_TEST(test_2d_grid_flat_index_is_row_major_in_x_then_y)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = 4;
   grid.ny = 3;
   grid.ngx = 1;
@@ -44,7 +44,7 @@ CFE_TEST(test_2d_grid_flat_index_is_row_major_in_x_then_y)
 
 CFE_TEST(test_3d_grid_flat_index_covers_all_cells_without_gaps_or_overlap)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = grid.ny = grid.nz = 2;
   grid.ngx = grid.ngy = grid.ngz = 1;
 
@@ -68,7 +68,7 @@ CFE_TEST(test_3d_grid_flat_index_covers_all_cells_without_gaps_or_overlap)
 
 CFE_TEST(test_grid_ghost_cell_is_adjacent_to_first_and_last_real_cell)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = 5;
   grid.ngx = 2;
 
@@ -96,7 +96,7 @@ CFE_TEST(test_grid_ghost_cell_is_adjacent_to_first_and_last_real_cell)
 
 CFE_TEST(test_grid_cell_center_coordinates_are_spaced_by_dx)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = 4;
   grid.ngx = 1;
   grid.dx = 0.5;

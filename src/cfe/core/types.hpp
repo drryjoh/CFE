@@ -25,4 +25,23 @@ using scalar = double;
 using local_index = std::int32_t;
 using global_index = std::int64_t;
 
+// Which spatial axis. Lives here (not in grid/) because numerics code
+// (numerics/numerical_flux/upwind.hpp) needs it to index a per-axis
+// velocity/flux without depending on the grid module -- it is a
+// fundamental dimensional concept, not a grid-storage detail. Values are
+// stable (X=0, Y=1, Z=2) so `static_cast<std::size_t>(axis)` can index a
+// per-axis Vector/FixedArray directly.
+enum class Axis
+{
+  X = 0,
+  Y = 1,
+  Z = 2
+};
+
+enum class Side
+{
+  Low,
+  High
+};
+
 }  // namespace cfe

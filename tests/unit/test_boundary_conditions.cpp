@@ -9,9 +9,9 @@
 
 namespace {
 
-cfe::CartesianGrid make_1d_grid(std::size_t nx, std::size_t ngx)
+cfe::CartesianGrid<double> make_1d_grid(std::size_t nx, std::size_t ngx)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = nx;
   grid.ngx = ngx;
   grid.dx = 1.0;
@@ -83,7 +83,7 @@ CFE_TEST(test_static_boundary_is_generic_over_component_count)
 
 CFE_TEST(test_periodic_boundary_fills_y_axis_ghost_cells_in_2d_grid)
 {
-  cfe::CartesianGrid grid;
+  cfe::CartesianGrid<double> grid;
   grid.nx = 3;
   grid.ny = 4;
   grid.ngx = 1;

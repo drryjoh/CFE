@@ -27,7 +27,7 @@ namespace cfe {
 struct PeriodicBoundary
 {
   template <class Scalar, std::size_t N, class Layout>
-  void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid grid) const
+  void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
     const std::size_t py = grid.padded_ny();
@@ -51,7 +51,7 @@ struct PeriodicBoundary
   }
 
   template <class Scalar, std::size_t N, class Layout>
-  void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid grid) const
+  void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
     const std::size_t px = grid.padded_nx();
@@ -75,7 +75,7 @@ struct PeriodicBoundary
   }
 
   template <class Scalar, std::size_t N, class Layout>
-  void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid grid) const
+  void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
     const std::size_t px = grid.padded_nx();
@@ -115,7 +115,7 @@ struct StaticBoundary
   }
 
   template <class Layout>
-  void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid grid) const
+  void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
     const std::size_t py = grid.padded_ny();
@@ -139,7 +139,7 @@ struct StaticBoundary
   }
 
   template <class Layout>
-  void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid grid) const
+  void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
     const std::size_t px = grid.padded_nx();
@@ -163,7 +163,7 @@ struct StaticBoundary
   }
 
   template <class Layout>
-  void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid grid) const
+  void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
     const std::size_t px = grid.padded_nx();
