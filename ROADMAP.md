@@ -205,7 +205,16 @@ Acceptance:
 - lightweight Cartesian AMR;
 - implicit source integration;
 - broader MPI scaling;
-- ML inference experiments.
+- ML inference experiments;
+- machine-configuration abstraction: a per-cluster `cfe_machine.yaml`
+  (compiler paths, module names/versions, GPU architecture flags) read at
+  compile time so students never need to manually `module load` on a
+  known cluster (starts with PSC Bridges-2, see `docs/bridges2-setup.md`
+  for the manual procedure this would replace); paired with scheduled
+  testing on each registered machine so that if a cluster's environment
+  drifts (a module renamed/removed, a compiler upgraded), that drift is
+  caught automatically and flagged as a `cfe_machine.yaml` update needed,
+  instead of a student silently hitting a broken build.
 
 ## Scope guardrails
 

@@ -1,0 +1,122 @@
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm100ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm100ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 28 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 33.176 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm100ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm100ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 20 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 16.753 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm50ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm50ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 28 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 11.191 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm50ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm50ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 18 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 6.374 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm20ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm20ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 26 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 4.901 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm20ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm20ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 18 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 2.477 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm10ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm10ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 26 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 2.596 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm10ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm10ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 18 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 1.616 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm5ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm5ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 26 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 1.759 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm5ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm5ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 18 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 1.219 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm1ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm1ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 0.833 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm1ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIdLm1ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 0.883 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm100ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm100ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 29.193 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm100ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm100ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 14.608 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm50ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm50ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 26 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 10.910 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm50ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm50ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 5.707 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm20ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm20ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 4.323 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm20ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm20ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 2.379 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm10ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm10ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 2.585 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm10ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm10ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 1.564 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm5ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm5ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 24 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 1.686 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm5ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm5ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 16 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 1.187 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm1ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm1ENS_9SoALayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 0.840 ms
+ptxas info    : Compiling entry function '_ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm1ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_' for 'sm_70'
+ptxas info    : Function properties for _ZN3cfe7backend4cuda19parallel_for_kernelImZZN53_INTERNAL_bf6c1b88_26_bench_field_update_cuda_cu_main55_GLOBAL__N__bf6c1b88_26_bench_field_update_cuda_cu_main8run_caseIfLm1ENS_9AoSLayoutEEEvPKcENUlvE_clEvEUlmE_EEvT_T0_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 10 registers, used 0 barriers, 392 bytes cmem[0]
+ptxas info    : Compile time = 0.822 ms

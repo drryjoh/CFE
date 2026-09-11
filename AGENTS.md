@@ -51,7 +51,9 @@ After a change:
 7. add or update a tutorial for user-facing functionality;
 8. update documentation;
 9. append an entry to `agent_history.md`;
-10. create or update an ADR for major architectural decisions.
+10. create or update an ADR for major architectural decisions;
+11. add a presentation summary under `presentations/` for the PR (see
+    section 26).
 
 ## 5. Definition of done
 
@@ -460,3 +462,51 @@ compile
 ```
 
 The compiler, tests, convergence data, canonical solutions, and profilers are the referees.
+
+## 26. Presentation summaries
+
+Every PR must include a markdown file under `presentations/`, named to match
+the PR/task it covers (e.g. `presentations/0001-phase0-execution-foundation.md`
+for `tasks/0001-phase0-execution-foundation.md`). This is a distinct
+document from `agent_history.md` and the ADRs: those are engineering
+records; this one is a weekly/biweekly progress-review script for a
+non-CS audience.
+
+Audience: bright students without a CS/CE background. They know GPUs are
+"fast" but do not necessarily know what a kernel, a thread, a cache, or a
+memory layout is. Do not assume prior exposure to any of these terms --
+define each one in plain language the first time it is used.
+
+Format: write it so it can be copied directly into presentation slides.
+That means:
+
+- short, slide-sized sections with a clear title each (one idea per
+  section, not one giant wall of text);
+- bullet points over paragraphs;
+- plain-language analogies where they help (a mesh cell, a thread, a
+  memory layout are all things worth grounding in an everyday comparison);
+- numbers/results presented as the takeaway ("AoS was up to 8x faster"),
+  not as a raw data dump -- the CSV/results doc is already the place for
+  the full data.
+
+Content: explain, at a conceptual level and in this rough order --
+
+1. what problem this PR's code is actually solving, in one sentence a
+   non-CS student would understand;
+2. what the core execution pattern does (e.g. "loop over every cell and do
+   the same small operation" -- this is what `parallel_for` is) and why
+   that pattern matters for performance work;
+3. why something was tested locally/on CPU first rather than jumping
+   straight to GPU;
+4. what any benchmark/test comparison actually showed and why it matters
+   (e.g. AoS vs. SoA), stated as a takeaway, not just a result;
+5. what remains untested/unverified and why (e.g. "needs real GPU
+   hardware"), framed as the natural next step rather than a shortcoming.
+
+A presentation file for a PR whose story continues in a later PR (e.g.
+Phase 0's CUDA backend, pending GPU access) should be appended to when that
+follow-up evidence arrives, not abandoned in favor of a new file, unless
+the follow-up is large enough to deserve its own PR and its own
+presentation file -- use judgment; the goal is a presentation file a
+student could read start-to-finish and understand the state of that
+specific piece of work.
