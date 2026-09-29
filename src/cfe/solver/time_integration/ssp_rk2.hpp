@@ -29,28 +29,29 @@
 
 namespace cfe {
 
-// `stage1` and `r_buf` are caller-provided scratch storage, the same
-// shape as `q`, reused across calls -- never allocated here (AGENTS.md
-// #10: no allocation inside a per-timestep hot path).
+// `stage1` and `residual_scratch` are caller-provided scratch storage,
+// the same shape as `q`, reused across calls -- never allocated here
+// (AGENTS.md #10: no allocation inside a per-timestep hot path).
 template <class Scalar, class FieldViewT, class Residual, class Backend = CpuParallelFor>
-void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT r_buf, Scalar dt, Residual residual)
+void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
+                   Residual residual)
 {
   const std::size_t n_cells = q.n_cells();
   constexpr std::size_t n_components = FieldViewT::n_components();
 
   // Stage 1: stage1 = q + dt * residual(q)
-  residual(q, r_buf);
+  residual(q, residual_scratch);
   Backend::run(n_cells, [=] CFE_HOST_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
-      stage1(cell, c) = q(cell, c) + dt * r_buf(cell, c);
+      stage1(cell, c) = q(cell, c) + dt * residual_scratch(cell, c);
     }
   });
 
   // Stage 2: q = 0.5*q + 0.5*(stage1 + dt*residual(stage1))
-  residual(stage1, r_buf);
+  residual(stage1, residual_scratch);
   Backend::run(n_cells, [=] CFE_HOST_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
-      q(cell, c) = Scalar(0.5) * q(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * r_buf(cell, c));
+      q(cell, c) = Scalar(0.5) * q(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * residual_scratch(cell, c));
     }
   });
 }

@@ -57,31 +57,33 @@ namespace detail {
 // written out by hand.
 template <Axis A, class Scalar, class FieldViewT, class Reconstruction, class NumericalFlux,
           class Field>
-CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT q, const CartesianGrid<Scalar>& g, std::size_t i,
-                                            std::size_t j, std::size_t k,
+CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT q, const CartesianGrid<Scalar>& grid,
+                                            std::size_t i, std::size_t j, std::size_t k,
                                             const Reconstruction& reconstruction,
-                                            const NumericalFlux& numerical_flux, const Field& field,
-                                            Scalar spacing)
+                                            const NumericalFlux& numerical_flux, const Field& field)
 {
-  Scalar q_m2, q_m1, q_c, q_p1, q_p2;
+  Scalar q_m2, q_m1, q_c, q_p1, q_p2, spacing;
   if constexpr (A == Axis::X) {
-    q_m2 = q(g.flat_index(i - 2, j, k), 0);
-    q_m1 = q(g.flat_index(i - 1, j, k), 0);
-    q_c = q(g.flat_index(i, j, k), 0);
-    q_p1 = q(g.flat_index(i + 1, j, k), 0);
-    q_p2 = q(g.flat_index(i + 2, j, k), 0);
+    q_m2 = q(grid.flat_index(i - 2, j, k), 0);
+    q_m1 = q(grid.flat_index(i - 1, j, k), 0);
+    q_c = q(grid.flat_index(i, j, k), 0);
+    q_p1 = q(grid.flat_index(i + 1, j, k), 0);
+    q_p2 = q(grid.flat_index(i + 2, j, k), 0);
+    spacing = grid.dx;
   } else if constexpr (A == Axis::Y) {
-    q_m2 = q(g.flat_index(i, j - 2, k), 0);
-    q_m1 = q(g.flat_index(i, j - 1, k), 0);
-    q_c = q(g.flat_index(i, j, k), 0);
-    q_p1 = q(g.flat_index(i, j + 1, k), 0);
-    q_p2 = q(g.flat_index(i, j + 2, k), 0);
+    q_m2 = q(grid.flat_index(i, j - 2, k), 0);
+    q_m1 = q(grid.flat_index(i, j - 1, k), 0);
+    q_c = q(grid.flat_index(i, j, k), 0);
+    q_p1 = q(grid.flat_index(i, j + 1, k), 0);
+    q_p2 = q(grid.flat_index(i, j + 2, k), 0);
+    spacing = grid.dy;
   } else {
-    q_m2 = q(g.flat_index(i, j, k - 2), 0);
-    q_m1 = q(g.flat_index(i, j, k - 1), 0);
-    q_c = q(g.flat_index(i, j, k), 0);
-    q_p1 = q(g.flat_index(i, j, k + 1), 0);
-    q_p2 = q(g.flat_index(i, j, k + 2), 0);
+    q_m2 = q(grid.flat_index(i, j, k - 2), 0);
+    q_m1 = q(grid.flat_index(i, j, k - 1), 0);
+    q_c = q(grid.flat_index(i, j, k), 0);
+    q_p1 = q(grid.flat_index(i, j, k + 1), 0);
+    q_p2 = q(grid.flat_index(i, j, k + 2), 0);
+    spacing = grid.dz;
   }
 
   // Right face: left value is this cell's own reconstruction, right value
@@ -145,7 +147,7 @@ struct FvmSolver
       fill_ghost_cells<Scalar, 1, Layout, BoundaryZ, Backend>(q, grid, Axis::Z, boundary_z);
     }
 
-    const CartesianGrid<Scalar> g = grid;
+    const CartesianGrid<Scalar> grid = this->grid;
     // Copied into locals (rather than capturing `this`) so the lambda
     // below holds self-contained, trivially-copyable state -- capturing
     // `this` would capture a host pointer, which breaks once this same
@@ -154,28 +156,28 @@ struct FvmSolver
     const Reconstruction reconstruction = this->reconstruction;
     const NumericalFlux numerical_flux = this->numerical_flux;
 
-    Backend::run(g.nx * g.ny * g.nz, [=] CFE_HOST_DEVICE(std::size_t linear) mutable {
-      const std::size_t local_i = linear % g.nx;
-      const std::size_t local_j = (linear / g.nx) % g.ny;
-      const std::size_t local_k = linear / (g.nx * g.ny);
+    Backend::run(grid.nx * grid.ny * grid.nz, [=] CFE_HOST_DEVICE(std::size_t linear) mutable {
+      const std::size_t local_i = linear % grid.nx;
+      const std::size_t local_j = (linear / grid.nx) % grid.ny;
+      const std::size_t local_k = linear / (grid.nx * grid.ny);
 
-      const std::size_t i = g.ngx + local_i;
-      const std::size_t j = g.ngy + local_j;
-      const std::size_t k = g.ngz + local_k;
+      const std::size_t i = grid.ngx + local_i;
+      const std::size_t j = grid.ngy + local_j;
+      const std::size_t k = grid.ngz + local_k;
 
       Scalar total_flux_difference = detail::axis_flux_difference<Axis::X>(
-          q, g, i, j, k, reconstruction, numerical_flux, field, g.dx);
+          q, grid, i, j, k, reconstruction, numerical_flux, field);
 
       if constexpr (y_active) {
         total_flux_difference += detail::axis_flux_difference<Axis::Y>(
-            q, g, i, j, k, reconstruction, numerical_flux, field, g.dy);
+            q, grid, i, j, k, reconstruction, numerical_flux, field);
       }
       if constexpr (z_active) {
         total_flux_difference += detail::axis_flux_difference<Axis::Z>(
-            q, g, i, j, k, reconstruction, numerical_flux, field, g.dz);
+            q, grid, i, j, k, reconstruction, numerical_flux, field);
       }
 
-      out(g.flat_index(i, j, k), 0) = total_flux_difference;
+      out(grid.flat_index(i, j, k), 0) = total_flux_difference;
     });
   }
 };

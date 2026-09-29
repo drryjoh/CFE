@@ -17,7 +17,7 @@ double integrate_exponential_decay(double dt, int n_steps)
 {
   cfe::Field<double, 1> q(1);
   cfe::Field<double, 1> stage1(1);
-  cfe::Field<double, 1> r_buf(1);
+  cfe::Field<double, 1> residual_scratch(1);
   q(0, 0) = 1.0;
 
   auto residual = [](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
@@ -25,7 +25,7 @@ double integrate_exponential_decay(double dt, int n_steps)
   };
 
   for (int step = 0; step < n_steps; ++step) {
-    cfe::ssp_rk2_step<double>(q.view(), stage1.view(), r_buf.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(q.view(), stage1.view(), residual_scratch.view(), dt, residual);
   }
   return q(0, 0);
 }
