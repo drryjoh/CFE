@@ -26,6 +26,7 @@ if(CFE_ENABLE_CUDA)
   target_sources(cfe_unit_tests PRIVATE
     unit/test_backend_execution_cuda.cu
     unit/test_scalar_advection_cuda.cu
+    unit/test_scalar_advection_3d_cuda.cu
   )
   set_target_properties(cfe_unit_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()
