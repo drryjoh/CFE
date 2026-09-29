@@ -64,7 +64,7 @@ int main()
   grid.dy = kDx;
   grid.dz = kDx;
 
-  cfe::Field<double, 1> q(grid.n_cells_total());
+  cfe::Field<double, 1> state(grid.n_cells_total());
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
@@ -76,7 +76,7 @@ int main()
         const double z = grid.z_center(grid.ngz + k);
         const double r2 = (x - kBumpCenter) * (x - kBumpCenter) + (y - kBumpCenter) * (y - kBumpCenter) +
                            (z - kBumpCenter) * (z - kBumpCenter);
-        q(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0) =
+        state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0) =
             std::exp(-r2 / (2.0 * kBumpSigma * kBumpSigma));
       }
     }
@@ -100,7 +100,7 @@ int main()
   double t = 0.0;
   auto write_frame = [&]() {
     const std::string path = frame_path(out_dir, frame);
-    cfe::io::write_vtk_structured_points_cell_scalar(path, grid, q.view(), "q");
+    cfe::io::write_vtk_structured_points_cell_scalar(path, grid, state.view(), "state");
     pvd << "  <DataSet timestep=\"" << t << "\" file=\"" << std::filesystem::path(path).filename().string()
         << "\"/>\n";
     std::printf("wrote %s (t=%.4f)\n", path.c_str(), t);
@@ -109,7 +109,7 @@ int main()
 
   write_frame();
   for (int step = 1; step <= kTotalSteps; ++step) {
-    cfe::ssp_rk2_step<double>(q.view(), stage1.view(), scratch.view(), kDt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), kDt, residual);
     t += kDt;
     if (step % kOutputEvery == 0) write_frame();
   }

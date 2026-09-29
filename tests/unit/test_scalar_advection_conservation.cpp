@@ -18,11 +18,11 @@
 
 namespace {
 
-double total_quantity(const cfe::Field<double, 1>& q, const cfe::CartesianGrid<double>& grid)
+double total_quantity(const cfe::Field<double, 1>& state, const cfe::CartesianGrid<double>& grid)
 {
   double sum = 0.0;
   for (std::size_t i = 0; i < grid.nx; ++i) {
-    sum += q(grid.flat_index(grid.ngx + i, 0, 0), 0);
+    sum += state(grid.flat_index(grid.ngx + i, 0, 0), 0);
   }
   return sum * grid.dx;
 }
@@ -38,7 +38,7 @@ CFE_TEST(test_scalar_advection_conserves_total_quantity_over_periodic_domain)
   grid.ngx = 2;
   grid.dx = 1.0 / static_cast<double>(grid.nx);
 
-  cfe::Field<double, 1> q(grid.n_cells_total());
+  cfe::Field<double, 1> state(grid.n_cells_total());
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> residual_scratch(grid.n_cells_total());
 
@@ -46,10 +46,10 @@ CFE_TEST(test_scalar_advection_conserves_total_quantity_over_periodic_domain)
   // accidentally testing a special-case symmetry.
   for (std::size_t i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
-    q(grid.flat_index(grid.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x) + 0.3 * std::cos(4.0 * kPi * x);
+    state(grid.flat_index(grid.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x) + 0.3 * std::cos(4.0 * kPi * x);
   }
 
-  const double initial_total = total_quantity(q, grid);
+  const double initial_total = total_quantity(state, grid);
 
   cfe::ScalarAdvectionField<double, 1> field{cfe::Vector<double, 1>(1.3)};
   cfe::FvmSolver<double, cfe::AoSLayout, cfe::ScalarAdvectionField<double, 1>, cfe::PeriodicBoundary>
@@ -61,9 +61,9 @@ CFE_TEST(test_scalar_advection_conserves_total_quantity_over_periodic_domain)
 
   const double dt = 0.4 * grid.dx / 1.3;
   for (int step = 0; step < 200; ++step) {
-    cfe::ssp_rk2_step<double>(q.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
   }
 
-  const double final_total = total_quantity(q, grid);
+  const double final_total = total_quantity(state, grid);
   CFE_CHECK_NEAR(final_total, initial_total, 1e-9);
 }

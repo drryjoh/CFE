@@ -19,22 +19,22 @@ namespace fvm {
 
 // This cell's value at its RIGHT (+axis) face: linear extrapolation using
 // a central-difference slope estimate from its own left/right neighbors.
-//   Q_face = Q_self + (Q_right_neighbor - Q_left_neighbor) / 4
+//   State_face = State_self + (State_right_neighbor - State_left_neighbor) / 4
 template <class Scalar>
-CFE_HOST_DEVICE Scalar interface_value_right(Scalar q_left_neighbor, Scalar q_self,
-                                              Scalar q_right_neighbor)
+CFE_HOST_DEVICE Scalar interface_value_right(Scalar state_left_neighbor, Scalar state_self,
+                                              Scalar state_right_neighbor)
 {
-  return q_self + (q_right_neighbor - q_left_neighbor) * Scalar(0.25);
+  return state_self + (state_right_neighbor - state_left_neighbor) * Scalar(0.25);
 }
 
 // This cell's value at its LEFT (-axis) face -- the mirror image of
 // interface_value_right, same 3-point stencil:
-//   Q_face = Q_self - (Q_right_neighbor - Q_left_neighbor) / 4
+//   State_face = State_self - (State_right_neighbor - State_left_neighbor) / 4
 template <class Scalar>
-CFE_HOST_DEVICE Scalar interface_value_left(Scalar q_left_neighbor, Scalar q_self,
-                                             Scalar q_right_neighbor)
+CFE_HOST_DEVICE Scalar interface_value_left(Scalar state_left_neighbor, Scalar state_self,
+                                             Scalar state_right_neighbor)
 {
-  return q_self - (q_right_neighbor - q_left_neighbor) * Scalar(0.25);
+  return state_self - (state_right_neighbor - state_left_neighbor) * Scalar(0.25);
 }
 
 // Stateless functor wrapping the two free functions above into the
@@ -46,15 +46,17 @@ CFE_HOST_DEVICE Scalar interface_value_left(Scalar q_left_neighbor, Scalar q_sel
 struct CentralDifferenceReconstruction
 {
   template <class Scalar>
-  CFE_HOST_DEVICE Scalar right(Scalar q_left_neighbor, Scalar q_self, Scalar q_right_neighbor) const
+  CFE_HOST_DEVICE Scalar right(Scalar state_left_neighbor, Scalar state_self,
+                                Scalar state_right_neighbor) const
   {
-    return interface_value_right(q_left_neighbor, q_self, q_right_neighbor);
+    return interface_value_right(state_left_neighbor, state_self, state_right_neighbor);
   }
 
   template <class Scalar>
-  CFE_HOST_DEVICE Scalar left(Scalar q_left_neighbor, Scalar q_self, Scalar q_right_neighbor) const
+  CFE_HOST_DEVICE Scalar left(Scalar state_left_neighbor, Scalar state_self,
+                               Scalar state_right_neighbor) const
   {
-    return interface_value_left(q_left_neighbor, q_self, q_right_neighbor);
+    return interface_value_left(state_left_neighbor, state_self, state_right_neighbor);
   }
 };
 

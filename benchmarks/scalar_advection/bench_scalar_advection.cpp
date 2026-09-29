@@ -57,12 +57,12 @@ void run_case(const char* backend_name, std::size_t nx)
   grid.ngx = 2;
   grid.dx = 1.0 / static_cast<double>(nx);
 
-  cfe::Field<double, 1> q(grid.n_cells_total());
+  cfe::Field<double, 1> state(grid.n_cells_total());
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
   for (std::size_t i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
-    q(grid.flat_index(grid.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x);
+    state(grid.flat_index(grid.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x);
   }
 
   cfe::ScalarAdvectionField<double, 1> field{cfe::Vector<double, 1>(kSpeed)};
@@ -77,7 +77,7 @@ void run_case(const char* backend_name, std::size_t nx)
   const double dt = 0.4 * grid.dx / kSpeed;
   auto one_step = [&]() {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), Backend>(
-        q.view(), stage1.view(), scratch.view(), dt, residual);
+        state.view(), stage1.view(), scratch.view(), dt, residual);
   };
 
   one_step();  // warm-up: first-touch faulting, thread-pool spin-up.

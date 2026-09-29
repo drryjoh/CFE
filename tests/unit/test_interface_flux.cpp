@@ -9,13 +9,13 @@
 
 CFE_TEST(test_interface_value_right_matches_hand_computed_linear_extrapolation)
 {
-  // q_{i-1}=1, q_i=2, q_{i+1}=4 -> Q_face = 2 + (4-1)/4 = 2.75
+  // state_{i-1}=1, state_i=2, state_{i+1}=4 -> State_face = 2 + (4-1)/4 = 2.75
   CFE_CHECK_NEAR(cfe::fvm::interface_value_right(1.0, 2.0, 4.0), 2.75, 1e-12);
 }
 
 CFE_TEST(test_interface_value_left_matches_hand_computed_linear_extrapolation)
 {
-  // Same stencil, opposite sign: Q_face = 2 - (4-1)/4 = 1.25
+  // Same stencil, opposite sign: State_face = 2 - (4-1)/4 = 1.25
   CFE_CHECK_NEAR(cfe::fvm::interface_value_left(1.0, 2.0, 4.0), 1.25, 1e-12);
 }
 

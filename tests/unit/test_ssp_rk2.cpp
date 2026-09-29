@@ -15,19 +15,19 @@ namespace {
 // taking `n_steps` of size `dt` and returning the numerical y(n_steps*dt).
 double integrate_exponential_decay(double dt, int n_steps)
 {
-  cfe::Field<double, 1> q(1);
+  cfe::Field<double, 1> state(1);
   cfe::Field<double, 1> stage1(1);
   cfe::Field<double, 1> residual_scratch(1);
-  q(0, 0) = 1.0;
+  state(0, 0) = 1.0;
 
   auto residual = [](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
     out(0, 0) = -in(0, 0);
   };
 
   for (int step = 0; step < n_steps; ++step) {
-    cfe::ssp_rk2_step<double>(q.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
   }
-  return q(0, 0);
+  return state(0, 0);
 }
 
 }  // namespace

@@ -44,13 +44,13 @@ double run_and_measure_l2_error(std::size_t nx)
   grid.dx = kDomainLength / static_cast<double>(nx);
   grid.origin_x = 0.0;
 
-  cfe::Field<double, 1> q(grid.n_cells_total());
+  cfe::Field<double, 1> state(grid.n_cells_total());
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> residual_scratch(grid.n_cells_total());
 
   for (std::size_t i = 0; i < grid.nx; ++i) {
     const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-    q(cell, 0) = exact_solution(grid.x_center(grid.ngx + i), 0.0);
+    state(cell, 0) = exact_solution(grid.x_center(grid.ngx + i), 0.0);
   }
 
   cfe::ScalarAdvectionField<double, 1> field{cfe::Vector<double, 1>(kAdvectionSpeed)};
@@ -65,14 +65,14 @@ double run_and_measure_l2_error(std::size_t nx)
     solver.residual(in, out);
   };
   for (int step = 0; step < n_steps; ++step) {
-    cfe::ssp_rk2_step<double>(q.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
   }
 
   double sum_sq_error = 0.0;
   for (std::size_t i = 0; i < grid.nx; ++i) {
     const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
     const double exact = exact_solution(grid.x_center(grid.ngx + i), kFinalTime);
-    const double error = q(cell, 0) - exact;
+    const double error = state(cell, 0) - exact;
     sum_sq_error += error * error;
   }
   return std::sqrt(sum_sq_error / static_cast<double>(grid.nx));

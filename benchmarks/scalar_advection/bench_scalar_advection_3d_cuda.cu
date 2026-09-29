@@ -57,10 +57,10 @@ void run_case(std::size_t n_per_axis)
     }
   }
 
-  cfe::backend::cuda::DeviceField<double, 1> q(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<double, 1> state(grid.n_cells_total());
   cfe::backend::cuda::DeviceField<double, 1> stage1(grid.n_cells_total());
   cfe::backend::cuda::DeviceField<double, 1> scratch(grid.n_cells_total());
-  q.copy_from_host(host_ic.data());
+  state.copy_from_host(host_ic.data());
 
   cfe::Vector<double, 3> velocity;
   velocity[0] = kUx;
@@ -76,7 +76,7 @@ void run_case(std::size_t n_per_axis)
   const double dt = 0.25 * grid.dx / (kUx + kUy + kUz);
   auto one_step = [&]() {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), cfe::CudaParallelFor>(
-        q.view(), stage1.view(), scratch.view(), dt, residual);
+        state.view(), stage1.view(), scratch.view(), dt, residual);
     cfe::backend::cuda::synchronize();
   };
 

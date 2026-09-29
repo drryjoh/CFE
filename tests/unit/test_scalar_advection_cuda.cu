@@ -44,10 +44,10 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
   cfe::ScalarAdvectionField<double, 1> field{cfe::Vector<double, 1>(kSpeed)};
 
   // --- CPU reference ---
-  cfe::Field<double, 1> q_cpu(grid.n_cells_total());
+  cfe::Field<double, 1> state_cpu(grid.n_cells_total());
   cfe::Field<double, 1> stage1_cpu(grid.n_cells_total());
   cfe::Field<double, 1> scratch_cpu(grid.n_cells_total());
-  for (std::size_t idx = 0; idx < host_ic.size(); ++idx) q_cpu.data()[idx] = host_ic[idx];
+  for (std::size_t idx = 0; idx < host_ic.size(); ++idx) state_cpu.data()[idx] = host_ic[idx];
 
   cfe::FvmSolver<double, cfe::AoSLayout, cfe::ScalarAdvectionField<double, 1>, cfe::PeriodicBoundary>
       solver_cpu{grid, field, cfe::PeriodicBoundary{}};
@@ -58,14 +58,14 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
   // comment in fvm_solver.hpp).
   cfe::SolverResidual<decltype(solver_cpu)> residual_cpu{&solver_cpu};
   for (int step = 0; step < kSteps; ++step) {
-    cfe::ssp_rk2_step<double>(q_cpu.view(), stage1_cpu.view(), scratch_cpu.view(), kDt, residual_cpu);
+    cfe::ssp_rk2_step<double>(state_cpu.view(), stage1_cpu.view(), scratch_cpu.view(), kDt, residual_cpu);
   }
 
   // --- CUDA ---
-  cfe::backend::cuda::DeviceField<double, 1> q_gpu(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<double, 1> state_gpu(grid.n_cells_total());
   cfe::backend::cuda::DeviceField<double, 1> stage1_gpu(grid.n_cells_total());
   cfe::backend::cuda::DeviceField<double, 1> scratch_gpu(grid.n_cells_total());
-  q_gpu.copy_from_host(host_ic.data());
+  state_gpu.copy_from_host(host_ic.data());
 
   cfe::FvmSolver<double, cfe::AoSLayout, cfe::ScalarAdvectionField<double, 1>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary,
@@ -74,15 +74,15 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
   cfe::SolverResidual<decltype(solver_gpu)> residual_gpu{&solver_gpu};
   for (int step = 0; step < kSteps; ++step) {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual_gpu), cfe::CudaParallelFor>(
-        q_gpu.view(), stage1_gpu.view(), scratch_gpu.view(), kDt, residual_gpu);
+        state_gpu.view(), stage1_gpu.view(), scratch_gpu.view(), kDt, residual_gpu);
   }
   cfe::backend::cuda::synchronize();
 
   std::vector<double> host_result(grid.n_cells_total());
-  q_gpu.copy_to_host(host_result.data());
+  state_gpu.copy_to_host(host_result.data());
 
   for (std::size_t i = 0; i < grid.nx; ++i) {
     const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-    CFE_CHECK_NEAR(host_result[cell], q_cpu.data()[cell], 1e-9);
+    CFE_CHECK_NEAR(host_result[cell], state_cpu.data()[cell], 1e-9);
   }
 }

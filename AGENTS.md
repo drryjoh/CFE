@@ -203,9 +203,9 @@ Physics states should have compile-time-known structure whenever practical.
 Physics code should use semantic accessors:
 
 ```cpp
-auto rho = density(q);
-auto mom = momentum(q);
-auto E   = total_energy(q);
+auto rho = density(state);
+auto mom = momentum(state);
+auto E   = total_energy(state);
 ```
 
 rather than scattering raw positional indices throughout the code.

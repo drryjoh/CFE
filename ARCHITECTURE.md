@@ -273,9 +273,9 @@ using global_index = ...;
 Physics-facing code should use semantic accessors:
 
 ```cpp
-auto rho = density(q);
-auto mom = momentum(q);
-auto E   = total_energy(q);
+auto rho = density(state);
+auto mom = momentum(state);
+auto E   = total_energy(state);
 ```
 
 The storage representation must remain performance-oriented and may use SoA, AoS, AoSoA, or another contiguous organization.

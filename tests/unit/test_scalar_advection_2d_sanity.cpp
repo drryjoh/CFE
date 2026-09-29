@@ -40,12 +40,12 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
   grid_1d.ngx = 2;
   grid_1d.dx = kDx;
 
-  cfe::Field<double, 1> q_1d(grid_1d.n_cells_total());
+  cfe::Field<double, 1> state_1d(grid_1d.n_cells_total());
   cfe::Field<double, 1> stage1_1d(grid_1d.n_cells_total());
   cfe::Field<double, 1> scratch_1d(grid_1d.n_cells_total());
   for (std::size_t i = 0; i < grid_1d.nx; ++i) {
     const double x = grid_1d.x_center(grid_1d.ngx + i);
-    q_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x);
+    state_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x);
   }
 
   cfe::ScalarAdvectionField<double, 1> field_1d{cfe::Vector<double, 1>(kSpeed)};
@@ -55,7 +55,7 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
     solver_1d.residual(in, out);
   };
   for (int step = 0; step < kSteps; ++step) {
-    cfe::ssp_rk2_step<double>(q_1d.view(), stage1_1d.view(), scratch_1d.view(), kDt, residual_1d);
+    cfe::ssp_rk2_step<double>(state_1d.view(), stage1_1d.view(), scratch_1d.view(), kDt, residual_1d);
   }
 
   // --- 2D solve: same X profile repeated across every row, zero Y velocity ---
@@ -67,13 +67,13 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
   grid_2d.dx = kDx;
   grid_2d.dy = 0.3;  // deliberately different from dx -- should have no effect
 
-  cfe::Field<double, 1> q_2d(grid_2d.n_cells_total());
+  cfe::Field<double, 1> state_2d(grid_2d.n_cells_total());
   cfe::Field<double, 1> stage1_2d(grid_2d.n_cells_total());
   cfe::Field<double, 1> scratch_2d(grid_2d.n_cells_total());
   for (std::size_t j = 0; j < grid_2d.ny; ++j) {
     for (std::size_t i = 0; i < grid_2d.nx; ++i) {
       const double x = grid_2d.x_center(grid_2d.ngx + i);
-      q_2d(grid_2d.flat_index(grid_2d.ngx + i, grid_2d.ngy + j, 0), 0) = std::sin(2.0 * kPi * x);
+      state_2d(grid_2d.flat_index(grid_2d.ngx + i, grid_2d.ngy + j, 0), 0) = std::sin(2.0 * kPi * x);
     }
   }
 
@@ -87,7 +87,7 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
     solver_2d.residual(in, out);
   };
   for (int step = 0; step < kSteps; ++step) {
-    cfe::ssp_rk2_step<double>(q_2d.view(), stage1_2d.view(), scratch_2d.view(), kDt, residual_2d);
+    cfe::ssp_rk2_step<double>(state_2d.view(), stage1_2d.view(), scratch_2d.view(), kDt, residual_2d);
   }
 
   // Every row of the 2D solve should match the 1D reference exactly (both
@@ -95,8 +95,8 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
   // arithmetic repeated).
   for (std::size_t j = 0; j < grid_2d.ny; ++j) {
     for (std::size_t i = 0; i < grid_2d.nx; ++i) {
-      const double value_1d = q_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0);
-      const double value_2d = q_2d(grid_2d.flat_index(grid_2d.ngx + i, grid_2d.ngy + j, 0), 0);
+      const double value_1d = state_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0);
+      const double value_2d = state_2d(grid_2d.flat_index(grid_2d.ngx + i, grid_2d.ngy + j, 0), 0);
       CFE_CHECK_NEAR(value_2d, value_1d, 1e-12);
     }
   }

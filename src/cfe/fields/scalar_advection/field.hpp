@@ -41,18 +41,18 @@ struct ScalarAdvectionField
 
   Vector<Scalar, Dim> velocity;
 
-  // The physical flux Calculator for one axis: F_axis(q) = velocity[axis] * q.
-  CFE_HOST_DEVICE Scalar physical_flux(Scalar q, Axis axis) const
+  // The physical flux Calculator for one axis: F_axis(state) = velocity[axis] * state.
+  CFE_HOST_DEVICE Scalar physical_flux(Scalar state, Axis axis) const
   {
-    return velocity[static_cast<std::size_t>(axis)] * q;
+    return velocity[static_cast<std::size_t>(axis)] * state;
   }
 
   // The wave speed a numerical-flux combinator uses to pick an upwind
   // direction along one axis. Takes both one-sided face values so a
   // future field with a state-dependent characteristic speed (e.g.
-  // Burgers, where it's q itself) can use them; this field's wave speed
-  // is simply that axis's velocity component.
-  CFE_HOST_DEVICE Scalar wave_speed(Scalar /*q_left*/, Scalar /*q_right*/, Axis axis) const
+  // Burgers, where it's state itself) can use them; this field's wave
+  // speed is simply that axis's velocity component.
+  CFE_HOST_DEVICE Scalar wave_speed(Scalar /*state_left*/, Scalar /*state_right*/, Axis axis) const
   {
     return velocity[static_cast<std::size_t>(axis)];
   }

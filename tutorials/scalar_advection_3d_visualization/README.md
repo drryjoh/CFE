@@ -10,7 +10,7 @@ can open in ParaView or VisIt.
 
 ## What it does
 
-A Gaussian bump, `q = exp(-r^2 / (2*sigma^2))` centered near one corner
+A Gaussian bump, `state = exp(-r^2 / (2*sigma^2))` centered near one corner
 of a unit cube (`sigma = 0.08`), advects with velocity `(0.5, 0.3, 0.2)`
 on a periodic `64^3` grid for 640 SSP-RK2 steps, writing a snapshot every
 16 steps (41 frames total, including the initial condition). CPU-only
@@ -20,7 +20,7 @@ measurement (see the CUDA benchmark above for that).
 Output goes to `vtk_output/` (created next to wherever you run the
 binary from):
 - `frame_0000.vtk` .. `frame_0040.vtk` — legacy VTK `STRUCTURED_POINTS`,
-  ASCII, one cell-centered scalar field `q` each (see `src/cfe/io/vtk_writer.hpp`).
+  ASCII, one cell-centered scalar field `state` each (see `src/cfe/io/vtk_writer.hpp`).
 - `series.pvd` — a manifest referencing every frame with its simulation
   time, so ParaView can load the whole run as one time series with a
   slider instead of opening 41 files by hand.
@@ -39,7 +39,7 @@ backend by default).
 ## Viewing it
 
 Open `vtk_output/series.pvd` in ParaView (File > Open), apply a
-`Threshold` or `Contour` filter on `q` (a raw volume render also works),
+`Threshold` or `Contour` filter on `state` (a raw volume render also works),
 and press play — the bump should visibly translate diagonally through
 the domain and wrap around the periodic boundary. `series.pvd`'s
 timesteps let ParaView's time controls work directly; each individual

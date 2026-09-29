@@ -57,46 +57,46 @@ namespace detail {
 // written out by hand.
 template <Axis A, class Scalar, class FieldViewT, class Reconstruction, class NumericalFlux,
           class Field>
-CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT q, const CartesianGrid<Scalar>& grid,
+CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT state, const CartesianGrid<Scalar>& grid,
                                             std::size_t i, std::size_t j, std::size_t k,
                                             const Reconstruction& reconstruction,
                                             const NumericalFlux& numerical_flux, const Field& field)
 {
-  Scalar q_m2, q_m1, q_c, q_p1, q_p2, spacing;
+  Scalar state_m2, state_m1, state_c, state_p1, state_p2, spacing;
   if constexpr (A == Axis::X) {
-    q_m2 = q(grid.flat_index(i - 2, j, k), 0);
-    q_m1 = q(grid.flat_index(i - 1, j, k), 0);
-    q_c = q(grid.flat_index(i, j, k), 0);
-    q_p1 = q(grid.flat_index(i + 1, j, k), 0);
-    q_p2 = q(grid.flat_index(i + 2, j, k), 0);
+    state_m2 = state(grid.flat_index(i - 2, j, k), 0);
+    state_m1 = state(grid.flat_index(i - 1, j, k), 0);
+    state_c = state(grid.flat_index(i, j, k), 0);
+    state_p1 = state(grid.flat_index(i + 1, j, k), 0);
+    state_p2 = state(grid.flat_index(i + 2, j, k), 0);
     spacing = grid.dx;
   } else if constexpr (A == Axis::Y) {
-    q_m2 = q(grid.flat_index(i, j - 2, k), 0);
-    q_m1 = q(grid.flat_index(i, j - 1, k), 0);
-    q_c = q(grid.flat_index(i, j, k), 0);
-    q_p1 = q(grid.flat_index(i, j + 1, k), 0);
-    q_p2 = q(grid.flat_index(i, j + 2, k), 0);
+    state_m2 = state(grid.flat_index(i, j - 2, k), 0);
+    state_m1 = state(grid.flat_index(i, j - 1, k), 0);
+    state_c = state(grid.flat_index(i, j, k), 0);
+    state_p1 = state(grid.flat_index(i, j + 1, k), 0);
+    state_p2 = state(grid.flat_index(i, j + 2, k), 0);
     spacing = grid.dy;
   } else {
-    q_m2 = q(grid.flat_index(i, j, k - 2), 0);
-    q_m1 = q(grid.flat_index(i, j, k - 1), 0);
-    q_c = q(grid.flat_index(i, j, k), 0);
-    q_p1 = q(grid.flat_index(i, j, k + 1), 0);
-    q_p2 = q(grid.flat_index(i, j, k + 2), 0);
+    state_m2 = state(grid.flat_index(i, j, k - 2), 0);
+    state_m1 = state(grid.flat_index(i, j, k - 1), 0);
+    state_c = state(grid.flat_index(i, j, k), 0);
+    state_p1 = state(grid.flat_index(i, j, k + 1), 0);
+    state_p2 = state(grid.flat_index(i, j, k + 2), 0);
     spacing = grid.dz;
   }
 
   // Right face: left value is this cell's own reconstruction, right value
   // is the next cell's own reconstruction.
-  const Scalar q_left_of_right_face = reconstruction.right(q_m1, q_c, q_p1);
-  const Scalar q_right_of_right_face = reconstruction.left(q_c, q_p1, q_p2);
-  const Scalar flux_right = numerical_flux(q_left_of_right_face, q_right_of_right_face, A, field);
+  const Scalar state_left_of_right_face = reconstruction.right(state_m1, state_c, state_p1);
+  const Scalar state_right_of_right_face = reconstruction.left(state_c, state_p1, state_p2);
+  const Scalar flux_right = numerical_flux(state_left_of_right_face, state_right_of_right_face, A, field);
 
   // Left face: left value is the previous cell's own reconstruction,
   // right value is this cell's own reconstruction.
-  const Scalar q_left_of_left_face = reconstruction.right(q_m2, q_m1, q_c);
-  const Scalar q_right_of_left_face = reconstruction.left(q_m1, q_c, q_p1);
-  const Scalar flux_left = numerical_flux(q_left_of_left_face, q_right_of_left_face, A, field);
+  const Scalar state_left_of_left_face = reconstruction.right(state_m2, state_m1, state_c);
+  const Scalar state_right_of_left_face = reconstruction.left(state_m1, state_c, state_p1);
+  const Scalar flux_left = numerical_flux(state_left_of_left_face, state_right_of_left_face, A, field);
 
   return -(flux_right - flux_left) / spacing;
 }
@@ -117,7 +117,7 @@ struct FvmSolver
   NumericalFlux numerical_flux{};
 
   // Computes out := dQ/dt for every real cell. Fills ghost cells on every
-  // active axis in-place first, so `q` must be mutable storage, not a
+  // active axis in-place first, so `state` must be mutable storage, not a
   // read-only view.
   // Which axes are active is a property of `Field::dim` (a compile-time
   // constant, see fields/scalar_advection/field.hpp), not a runtime grid
@@ -129,7 +129,7 @@ struct FvmSolver
   static constexpr bool y_active = Field::dim >= 2;
   static constexpr bool z_active = Field::dim >= 3;
 
-  void residual(FieldView<Scalar, 1, Layout> q, FieldView<Scalar, 1, Layout> out) const
+  void residual(FieldView<Scalar, 1, Layout> state, FieldView<Scalar, 1, Layout> out) const
   {
     assert(grid.ngx >= 2 && "FvmSolver needs at least 2 ghost layers on every active axis");
     if constexpr (y_active) {
@@ -139,12 +139,12 @@ struct FvmSolver
       assert(grid.ngz >= 2 && "FvmSolver needs at least 2 ghost layers on every active axis");
     }
 
-    fill_ghost_cells<Scalar, 1, Layout, BoundaryX, Backend>(q, grid, Axis::X, boundary_x);
+    fill_ghost_cells<Scalar, 1, Layout, BoundaryX, Backend>(state, grid, Axis::X, boundary_x);
     if constexpr (y_active) {
-      fill_ghost_cells<Scalar, 1, Layout, BoundaryY, Backend>(q, grid, Axis::Y, boundary_y);
+      fill_ghost_cells<Scalar, 1, Layout, BoundaryY, Backend>(state, grid, Axis::Y, boundary_y);
     }
     if constexpr (z_active) {
-      fill_ghost_cells<Scalar, 1, Layout, BoundaryZ, Backend>(q, grid, Axis::Z, boundary_z);
+      fill_ghost_cells<Scalar, 1, Layout, BoundaryZ, Backend>(state, grid, Axis::Z, boundary_z);
     }
 
     const CartesianGrid<Scalar> grid = this->grid;
@@ -166,15 +166,15 @@ struct FvmSolver
       const std::size_t k = grid.ngz + local_k;
 
       Scalar total_flux_difference = detail::axis_flux_difference<Axis::X>(
-          q, grid, i, j, k, reconstruction, numerical_flux, field);
+          state, grid, i, j, k, reconstruction, numerical_flux, field);
 
       if constexpr (y_active) {
         total_flux_difference += detail::axis_flux_difference<Axis::Y>(
-            q, grid, i, j, k, reconstruction, numerical_flux, field);
+            state, grid, i, j, k, reconstruction, numerical_flux, field);
       }
       if constexpr (z_active) {
         total_flux_difference += detail::axis_flux_difference<Axis::Z>(
-            q, grid, i, j, k, reconstruction, numerical_flux, field);
+            state, grid, i, j, k, reconstruction, numerical_flux, field);
       }
 
       out(grid.flat_index(i, j, k), 0) = total_flux_difference;
@@ -183,7 +183,7 @@ struct FvmSolver
 };
 
 // A named (namespace-scope) functor wrapping `Solver::residual` as a
-// `residual(q_in, out)` callable for `ssp_rk2_step`. Required specifically
+// `residual(state_in, out)` callable for `ssp_rk2_step`. Required specifically
 // for CUDA: nvcc forbids passing a *locally-defined* lambda (a closure
 // type local to a function, e.g. `auto residual = [&](...){...}` written
 // inside `main()` or a test body) as a template argument to a function

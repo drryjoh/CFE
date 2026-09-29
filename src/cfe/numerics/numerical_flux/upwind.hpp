@@ -3,7 +3,7 @@
 // already-computed face values into one flux by upwind selection, using
 // only `field.wave_speed(...)` and `field.physical_flux(...)` for the
 // given axis -- it never knows what those formulas actually are
-// (per-axis velocity * q for linear scalar advection; a Burgers or Euler
+// (per-axis velocity * state for linear scalar advection; a Burgers or Euler
 // field would supply different formulas under this same shape), and no
 // idea whether the two face values came from FVM reconstruction
 // (fvm/interface_value.hpp) or, later, a DG element's own trace. Keeping

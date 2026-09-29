@@ -9,8 +9,8 @@
 // bounded by the lower-order term regardless, so RK3's third stage would
 // only add cost, not accuracy, here. See docs/adr/0007-interface-flux-and-time-integration.md.
 //
-// Generic over a Residual callable: `residual(q_in, out)` must compute
-// `out := dQ/dt` given `q_in`, including any ghost-cell fill the residual
+// Generic over a Residual callable: `residual(state_in, out)` must compute
+// `out := dQ/dt` given `state_in`, including any ghost-cell fill the residual
 // needs internally -- this stepper has no knowledge of grids or boundary
 // conditions, only of FieldView. Each combine step is dispatched through
 // `Backend::run` (default `CpuParallelFor`; pass `CudaParallelFor` from a
@@ -30,28 +30,29 @@
 namespace cfe {
 
 // `stage1` and `residual_scratch` are caller-provided scratch storage,
-// the same shape as `q`, reused across calls -- never allocated here
+// the same shape as `state`, reused across calls -- never allocated here
 // (AGENTS.md #10: no allocation inside a per-timestep hot path).
 template <class Scalar, class FieldViewT, class Residual, class Backend = CpuParallelFor>
-void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
+void ssp_rk2_step(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
                    Residual residual)
 {
-  const std::size_t n_cells = q.n_cells();
+  const std::size_t n_cells = state.n_cells();
   constexpr std::size_t n_components = FieldViewT::n_components();
 
-  // Stage 1: stage1 = q + dt * residual(q)
-  residual(q, residual_scratch);
+  // Stage 1: stage1 = state + dt * residual(state)
+  residual(state, residual_scratch);
   Backend::run(n_cells, [=] CFE_HOST_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
-      stage1(cell, c) = q(cell, c) + dt * residual_scratch(cell, c);
+      stage1(cell, c) = state(cell, c) + dt * residual_scratch(cell, c);
     }
   });
 
-  // Stage 2: q = 0.5*q + 0.5*(stage1 + dt*residual(stage1))
+  // Stage 2: state = 0.5*state + 0.5*(stage1 + dt*residual(stage1))
   residual(stage1, residual_scratch);
   Backend::run(n_cells, [=] CFE_HOST_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
-      q(cell, c) = Scalar(0.5) * q(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * residual_scratch(cell, c));
+      state(cell, c) =
+          Scalar(0.5) * state(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * residual_scratch(cell, c));
     }
   });
 }
