@@ -39,6 +39,7 @@
 #include <cstddef>
 
 #include "cfe/backend/parallel_for.hpp"
+#include "cfe/core/macros.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/ghost/ghost_fill.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
@@ -102,7 +103,7 @@ CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT q, const CartesianGrid<Sc
 
 template <class Scalar, class Layout, class Field, class BoundaryX, class BoundaryY = BoundaryX,
           class BoundaryZ = BoundaryX, class Reconstruction = fvm::CentralDifferenceReconstruction,
-          class NumericalFlux = UpwindFlux>
+          class NumericalFlux = UpwindFlux, class Backend = CpuParallelFor>
 struct FvmSolver
 {
   CartesianGrid<Scalar> grid;
@@ -136,9 +137,13 @@ struct FvmSolver
       assert(grid.ngz >= 2 && "FvmSolver needs at least 2 ghost layers on every active axis");
     }
 
-    fill_ghost_cells(q, grid, Axis::X, boundary_x);
-    if constexpr (y_active) fill_ghost_cells(q, grid, Axis::Y, boundary_y);
-    if constexpr (z_active) fill_ghost_cells(q, grid, Axis::Z, boundary_z);
+    fill_ghost_cells<Scalar, 1, Layout, BoundaryX, Backend>(q, grid, Axis::X, boundary_x);
+    if constexpr (y_active) {
+      fill_ghost_cells<Scalar, 1, Layout, BoundaryY, Backend>(q, grid, Axis::Y, boundary_y);
+    }
+    if constexpr (z_active) {
+      fill_ghost_cells<Scalar, 1, Layout, BoundaryZ, Backend>(q, grid, Axis::Z, boundary_z);
+    }
 
     const CartesianGrid<Scalar> g = grid;
     // Copied into locals (rather than capturing `this`) so the lambda
@@ -149,7 +154,7 @@ struct FvmSolver
     const Reconstruction reconstruction = this->reconstruction;
     const NumericalFlux numerical_flux = this->numerical_flux;
 
-    cfe::parallel_for(g.nx * g.ny * g.nz, [=](std::size_t linear) mutable {
+    Backend::run(g.nx * g.ny * g.nz, [=] CFE_DEVICE(std::size_t linear) mutable {
       const std::size_t local_i = linear % g.nx;
       const std::size_t local_j = (linear / g.nx) % g.ny;
       const std::size_t local_k = linear / (g.nx * g.ny);
@@ -161,11 +166,11 @@ struct FvmSolver
       Scalar total_flux_difference = detail::axis_flux_difference<Axis::X>(
           q, g, i, j, k, reconstruction, numerical_flux, field, g.dx);
 
-      if (y_active) {
+      if constexpr (y_active) {
         total_flux_difference += detail::axis_flux_difference<Axis::Y>(
             q, g, i, j, k, reconstruction, numerical_flux, field, g.dy);
       }
-      if (z_active) {
+      if constexpr (z_active) {
         total_flux_difference += detail::axis_flux_difference<Axis::Z>(
             q, g, i, j, k, reconstruction, numerical_flux, field, g.dz);
       }

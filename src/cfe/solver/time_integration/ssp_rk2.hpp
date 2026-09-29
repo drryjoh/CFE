@@ -12,21 +12,24 @@
 // Generic over a Residual callable: `residual(q_in, out)` must compute
 // `out := dQ/dt` given `q_in`, including any ghost-cell fill the residual
 // needs internally -- this stepper has no knowledge of grids or boundary
-// conditions, only of FieldView. Each combine step is dispatched via
-// cfe::parallel_for with a lambda, exactly like every other kernel in
-// this codebase (see backend/parallel_for.hpp).
+// conditions, only of FieldView. Each combine step is dispatched through
+// `Backend::run` (default `CpuParallelFor`; pass `CudaParallelFor` from a
+// `.cu` translation unit) with a `CFE_DEVICE`-annotated lambda, exactly
+// like every other kernel in this codebase (see backend/parallel_for.hpp,
+// backend/cuda/cuda_backend.cuh).
 #pragma once
 
 #include <cstddef>
 
 #include "cfe/backend/parallel_for.hpp"
+#include "cfe/core/macros.hpp"
 
 namespace cfe {
 
 // `stage1` and `r_buf` are caller-provided scratch storage, the same
 // shape as `q`, reused across calls -- never allocated here (AGENTS.md
 // #10: no allocation inside a per-timestep hot path).
-template <class Scalar, class FieldViewT, class Residual>
+template <class Scalar, class FieldViewT, class Residual, class Backend = CpuParallelFor>
 void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT r_buf, Scalar dt, Residual residual)
 {
   const std::size_t n_cells = q.n_cells();
@@ -34,7 +37,7 @@ void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT r_buf, Scalar dt, 
 
   // Stage 1: stage1 = q + dt * residual(q)
   residual(q, r_buf);
-  cfe::parallel_for(n_cells, [=](std::size_t cell) mutable {
+  Backend::run(n_cells, [=] CFE_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
       stage1(cell, c) = q(cell, c) + dt * r_buf(cell, c);
     }
@@ -42,7 +45,7 @@ void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT r_buf, Scalar dt, 
 
   // Stage 2: q = 0.5*q + 0.5*(stage1 + dt*residual(stage1))
   residual(stage1, r_buf);
-  cfe::parallel_for(n_cells, [=](std::size_t cell) mutable {
+  Backend::run(n_cells, [=] CFE_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
       q(cell, c) = Scalar(0.5) * q(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * r_buf(cell, c));
     }

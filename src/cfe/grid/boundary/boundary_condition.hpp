@@ -1,7 +1,8 @@
 // Boundary conditions: static (fixed value) and periodic only (task spec
 // item 3). Each fills the ghost layer of one axis of a CartesianGrid,
-// dispatched via cfe::parallel_for so the same code works whether the
-// field lives in host or device memory (see field/field.hpp's
+// dispatched through `Backend::run` (default `CpuParallelFor`; pass
+// `CudaParallelFor` from a `.cu` translation unit) so the same code works
+// whether the field lives in host or device memory (see field/field.hpp's
 // backend-agnostic FieldView).
 //
 // Deliberately not a polymorphic base class (AGENTS.md #12: no virtual
@@ -17,6 +18,7 @@
 #include <cstddef>
 
 #include "cfe/backend/parallel_for.hpp"
+#include "cfe/core/macros.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 #include "cfe/math/fixed_array.hpp"
@@ -26,13 +28,13 @@ namespace cfe {
 // Wraps ghost cells from the opposite real boundary of the same axis.
 struct PeriodicBoundary
 {
-  template <class Scalar, std::size_t N, class Layout>
+  template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
     const std::size_t py = grid.padded_ny();
     const std::size_t pz = grid.padded_nz();
-    cfe::parallel_for(grid.ngx * py * pz, [=](std::size_t idx) mutable {
+    Backend::run(grid.ngx * py * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngx;
       const std::size_t rem = idx / grid.ngx;
       const std::size_t j = rem % py;
@@ -50,13 +52,13 @@ struct PeriodicBoundary
     });
   }
 
-  template <class Scalar, std::size_t N, class Layout>
+  template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
     const std::size_t px = grid.padded_nx();
     const std::size_t pz = grid.padded_nz();
-    cfe::parallel_for(grid.ngy * px * pz, [=](std::size_t idx) mutable {
+    Backend::run(grid.ngy * px * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngy;
       const std::size_t rem = idx / grid.ngy;
       const std::size_t i = rem % px;
@@ -74,13 +76,13 @@ struct PeriodicBoundary
     });
   }
 
-  template <class Scalar, std::size_t N, class Layout>
+  template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
     const std::size_t px = grid.padded_nx();
     const std::size_t py = grid.padded_ny();
-    cfe::parallel_for(grid.ngz * px * py, [=](std::size_t idx) mutable {
+    Backend::run(grid.ngz * px * py, [=] CFE_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngz;
       const std::size_t rem = idx / grid.ngz;
       const std::size_t i = rem % px;
@@ -114,7 +116,7 @@ struct StaticBoundary
   {
   }
 
-  template <class Layout>
+  template <class Backend = CpuParallelFor, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
@@ -122,7 +124,7 @@ struct StaticBoundary
     const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    cfe::parallel_for(grid.ngx * py * pz, [=](std::size_t idx) mutable {
+    Backend::run(grid.ngx * py * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngx;
       const std::size_t rem = idx / grid.ngx;
       const std::size_t j = rem % py;
@@ -138,7 +140,7 @@ struct StaticBoundary
     });
   }
 
-  template <class Layout>
+  template <class Backend = CpuParallelFor, class Layout>
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
@@ -146,7 +148,7 @@ struct StaticBoundary
     const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    cfe::parallel_for(grid.ngy * px * pz, [=](std::size_t idx) mutable {
+    Backend::run(grid.ngy * px * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngy;
       const std::size_t rem = idx / grid.ngy;
       const std::size_t i = rem % px;
@@ -162,7 +164,7 @@ struct StaticBoundary
     });
   }
 
-  template <class Layout>
+  template <class Backend = CpuParallelFor, class Layout>
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
@@ -170,7 +172,7 @@ struct StaticBoundary
     const std::size_t py = grid.padded_ny();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    cfe::parallel_for(grid.ngz * px * py, [=](std::size_t idx) mutable {
+    Backend::run(grid.ngz * px * py, [=] CFE_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngz;
       const std::size_t rem = idx / grid.ngz;
       const std::size_t i = rem % px;

@@ -10,24 +10,25 @@
 // never change.
 #pragma once
 
+#include "cfe/backend/parallel_for.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 
 namespace cfe {
 
-template <class Scalar, std::size_t N, class Layout, class Boundary>
+template <class Scalar, std::size_t N, class Layout, class Boundary, class Backend = CpuParallelFor>
 void fill_ghost_cells(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar>& grid, Axis axis,
                       const Boundary& boundary)
 {
   switch (axis) {
     case Axis::X:
-      boundary.fill_x(field, grid);
+      boundary.template fill_x<Backend>(field, grid);
       return;
     case Axis::Y:
-      boundary.fill_y(field, grid);
+      boundary.template fill_y<Backend>(field, grid);
       return;
     case Axis::Z:
-      boundary.fill_z(field, grid);
+      boundary.template fill_z<Backend>(field, grid);
       return;
   }
 }

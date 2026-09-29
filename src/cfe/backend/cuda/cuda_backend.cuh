@@ -69,4 +69,25 @@ inline void synchronize()
 
 }  // namespace cuda
 }  // namespace backend
+
+// Backend-selection tag counterpart to `cfe::CpuParallelFor`
+// (backend/parallel_for.hpp): lets grid/boundary/solver/time-integration
+// code written once dispatch to CUDA instead of CPU by a template
+// parameter. Deliberately does NOT call `synchronize()` per launch --
+// every kernel here goes to the (implicit) default stream, so CUDA's own
+// in-order-per-stream guarantee is what keeps a dependent sequence of
+// launches (ghost-fill -> residual -> RK combine -> ...) correct without
+// host-side synchronization between them. Callers still must call
+// `cfe::backend::cuda::synchronize()` once before reading a result back
+// on the host or ending a timed region, exactly as elsewhere in this
+// codebase.
+struct CudaParallelFor
+{
+  template <class Index, class Functor>
+  static void run(Index n, Functor f)
+  {
+    cfe::backend::cuda::parallel_for(n, f);
+  }
+};
+
 }  // namespace cfe

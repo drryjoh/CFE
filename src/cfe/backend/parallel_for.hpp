@@ -25,4 +25,19 @@ using backend::threaded::parallel_for;
 using backend::serial::parallel_for;
 #endif
 
+// Backend-selection tag, so kernel-launching code written once (grid/
+// boundary conditions, solvers, time integrators) can dispatch to either
+// CPU or CUDA by a template parameter, rather than being duplicated
+// per-backend the way Phase 0's much simpler kernels were.
+// `backend/cuda/cuda_backend.cuh` provides the CUDA counterpart
+// (`CudaParallelFor`), usable only from a `.cu` translation unit.
+struct CpuParallelFor
+{
+  template <class Index, class Functor>
+  static void run(Index n, Functor f)
+  {
+    cfe::parallel_for(n, f);
+  }
+};
+
 }  // namespace cfe
