@@ -50,9 +50,9 @@ void run_case(std::size_t nx)
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary,
                  cfe::fvm::CentralDifferenceReconstruction, cfe::UpwindFlux, cfe::CudaParallelFor>
       solver{grid, field, cfe::PeriodicBoundary{}};
-  auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
-    solver.residual(in, out);
-  };
+  // A named functor, not a local lambda -- see SolverResidual's doc
+  // comment in fvm_solver.hpp for why nvcc requires this here.
+  cfe::SolverResidual<decltype(solver)> residual{&solver};
 
   const double dt = 0.4 * grid.dx / kSpeed;
   auto one_step = [&]() {

@@ -180,4 +180,28 @@ struct FvmSolver
   }
 };
 
+// A named (namespace-scope) functor wrapping `Solver::residual` as a
+// `residual(q_in, out)` callable for `ssp_rk2_step`. Required specifically
+// for CUDA: nvcc forbids passing a *locally-defined* lambda (a closure
+// type local to a function, e.g. `auto residual = [&](...){...}` written
+// inside `main()` or a test body) as a template argument to a function
+// whose body contains an extended `__device__` lambda -- which
+// `ssp_rk2_step` always does, in any `.cu` translation unit, regardless
+// of which `Backend` a given call site actually selects. A named functor
+// at namespace scope is not a local type, so it sidesteps the
+// restriction. CPU-only call sites may still use a local lambda if they
+// are compiled as plain `.cpp` (not `.cu`); use this whenever the same
+// call site must also work compiled by nvcc.
+template <class Solver>
+struct SolverResidual
+{
+  const Solver* solver;
+
+  template <class FieldViewT>
+  void operator()(FieldViewT in, FieldViewT out) const
+  {
+    solver->residual(in, out);
+  }
+};
+
 }  // namespace cfe

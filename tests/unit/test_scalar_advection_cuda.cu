@@ -51,9 +51,12 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
 
   cfe::FvmSolver<double, cfe::AoSLayout, cfe::ScalarAdvectionField<double, 1>, cfe::PeriodicBoundary>
       solver_cpu{grid, field, cfe::PeriodicBoundary{}};
-  auto residual_cpu = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
-    solver_cpu.residual(in, out);
-  };
+  // A named functor, not a local lambda: nvcc forbids a locally-defined
+  // lambda as a template argument to ssp_rk2_step, since its body always
+  // contains an extended __device__ lambda in a .cu file regardless of
+  // which Backend a call actually selects (see SolverResidual's doc
+  // comment in fvm_solver.hpp).
+  cfe::SolverResidual<decltype(solver_cpu)> residual_cpu{&solver_cpu};
   for (int step = 0; step < kSteps; ++step) {
     cfe::ssp_rk2_step<double>(q_cpu.view(), stage1_cpu.view(), scratch_cpu.view(), kDt, residual_cpu);
   }
@@ -68,9 +71,7 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary,
                  cfe::fvm::CentralDifferenceReconstruction, cfe::UpwindFlux, cfe::CudaParallelFor>
       solver_gpu{grid, field, cfe::PeriodicBoundary{}};
-  auto residual_gpu = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
-    solver_gpu.residual(in, out);
-  };
+  cfe::SolverResidual<decltype(solver_gpu)> residual_gpu{&solver_gpu};
   for (int step = 0; step < kSteps; ++step) {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual_gpu), cfe::CudaParallelFor>(
         q_gpu.view(), stage1_gpu.view(), scratch_gpu.view(), kDt, residual_gpu);
