@@ -320,6 +320,17 @@ Required early boundary capabilities include:
 - reflective/slip;
 - no-slip where appropriate.
 
+"Extrapolation/outflow" includes characteristic-based (partial-specification)
+inflow/outflow conditions -- e.g. a subsonic inlet where the user specifies
+temperature but pressure is extrapolated from the interior, the split
+decided by which way each characteristic points at that face. Unlike
+periodic/Dirichlet ghost-cell filling, this requires an equation of state
+and wave-speed information (physics), plus a read of the adjacent interior
+cell's state (not just a stored constant) -- see ARCHITECTURE.md #11 for
+the resulting interface shape. Only meaningful once a field has an equation
+of state (compressible Euler, ROADMAP.md Phase 3); Burgers (Phase 2) has no
+such structure.
+
 Moving-frame/grid-recycling behavior is a separate capability and must not be conflated with ordinary static boundary conditions.
 
 ## 18. Numerical methods
