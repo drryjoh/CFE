@@ -1,0 +1,2 @@
+add_executable(cfe_advect_gaussian_3d advect_gaussian_3d.cpp)
+target_link_libraries(cfe_advect_gaussian_3d PRIVATE cfe_core)
