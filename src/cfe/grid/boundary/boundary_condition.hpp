@@ -34,7 +34,7 @@ struct PeriodicBoundary
     if (grid.ngx == 0) return;
     const std::size_t py = grid.padded_ny();
     const std::size_t pz = grid.padded_nz();
-    Backend::run(grid.ngx * py * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
+    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngx;
       const std::size_t rem = idx / grid.ngx;
       const std::size_t j = rem % py;
@@ -58,7 +58,7 @@ struct PeriodicBoundary
     if (grid.ngy == 0) return;
     const std::size_t px = grid.padded_nx();
     const std::size_t pz = grid.padded_nz();
-    Backend::run(grid.ngy * px * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
+    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngy;
       const std::size_t rem = idx / grid.ngy;
       const std::size_t i = rem % px;
@@ -82,7 +82,7 @@ struct PeriodicBoundary
     if (grid.ngz == 0) return;
     const std::size_t px = grid.padded_nx();
     const std::size_t py = grid.padded_ny();
-    Backend::run(grid.ngz * px * py, [=] CFE_DEVICE(std::size_t idx) mutable {
+    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngz;
       const std::size_t rem = idx / grid.ngz;
       const std::size_t i = rem % px;
@@ -124,7 +124,7 @@ struct StaticBoundary
     const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    Backend::run(grid.ngx * py * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
+    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngx;
       const std::size_t rem = idx / grid.ngx;
       const std::size_t j = rem % py;
@@ -148,7 +148,7 @@ struct StaticBoundary
     const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    Backend::run(grid.ngy * px * pz, [=] CFE_DEVICE(std::size_t idx) mutable {
+    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngy;
       const std::size_t rem = idx / grid.ngy;
       const std::size_t i = rem % px;
@@ -172,7 +172,7 @@ struct StaticBoundary
     const std::size_t py = grid.padded_ny();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    Backend::run(grid.ngz * px * py, [=] CFE_DEVICE(std::size_t idx) mutable {
+    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
       const std::size_t g = idx % grid.ngz;
       const std::size_t rem = idx / grid.ngz;
       const std::size_t i = rem % px;

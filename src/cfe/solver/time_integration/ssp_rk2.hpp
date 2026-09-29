@@ -14,9 +14,12 @@
 // needs internally -- this stepper has no knowledge of grids or boundary
 // conditions, only of FieldView. Each combine step is dispatched through
 // `Backend::run` (default `CpuParallelFor`; pass `CudaParallelFor` from a
-// `.cu` translation unit) with a `CFE_DEVICE`-annotated lambda, exactly
-// like every other kernel in this codebase (see backend/parallel_for.hpp,
-// backend/cuda/cuda_backend.cuh).
+// `.cu` translation unit) with a `CFE_HOST_DEVICE`-annotated lambda (not
+// `CFE_DEVICE`: these kernels must also be host-callable, since the
+// default `CpuParallelFor` backend invokes them from a plain host loop
+// even when this file is compiled by nvcc), exactly like every other
+// Backend-generic kernel in this codebase (see backend/parallel_for.hpp,
+// backend/cuda/cuda_backend.cuh, grid/boundary/boundary_condition.hpp).
 #pragma once
 
 #include <cstddef>
@@ -37,7 +40,7 @@ void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT r_buf, Scalar dt, 
 
   // Stage 1: stage1 = q + dt * residual(q)
   residual(q, r_buf);
-  Backend::run(n_cells, [=] CFE_DEVICE(std::size_t cell) mutable {
+  Backend::run(n_cells, [=] CFE_HOST_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
       stage1(cell, c) = q(cell, c) + dt * r_buf(cell, c);
     }
@@ -45,7 +48,7 @@ void ssp_rk2_step(FieldViewT q, FieldViewT stage1, FieldViewT r_buf, Scalar dt, 
 
   // Stage 2: q = 0.5*q + 0.5*(stage1 + dt*residual(stage1))
   residual(stage1, r_buf);
-  Backend::run(n_cells, [=] CFE_DEVICE(std::size_t cell) mutable {
+  Backend::run(n_cells, [=] CFE_HOST_DEVICE(std::size_t cell) mutable {
     for (std::size_t c = 0; c < n_components; ++c) {
       q(cell, c) = Scalar(0.5) * q(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * r_buf(cell, c));
     }

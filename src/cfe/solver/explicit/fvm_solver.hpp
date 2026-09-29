@@ -154,7 +154,7 @@ struct FvmSolver
     const Reconstruction reconstruction = this->reconstruction;
     const NumericalFlux numerical_flux = this->numerical_flux;
 
-    Backend::run(g.nx * g.ny * g.nz, [=] CFE_DEVICE(std::size_t linear) mutable {
+    Backend::run(g.nx * g.ny * g.nz, [=] CFE_HOST_DEVICE(std::size_t linear) mutable {
       const std::size_t local_i = linear % g.nx;
       const std::size_t local_j = (linear / g.nx) % g.ny;
       const std::size_t local_k = linear / (g.nx * g.ny);
