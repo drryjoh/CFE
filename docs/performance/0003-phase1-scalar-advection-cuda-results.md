@@ -1,13 +1,15 @@
 # Phase 1 scalar-advection CUDA benchmark results
 
-Raw CSV: [`benchmarks/results/phase1_scalar_advection_v100.csv`](../../benchmarks/results/phase1_scalar_advection_v100.csv).
+Raw CSV (1D): [`benchmarks/results/phase1_scalar_advection_v100.csv`](../../benchmarks/results/phase1_scalar_advection_v100.csv).
+Raw CSV (3D): [`benchmarks/results/phase1_scalar_advection_3d_v100.csv`](../../benchmarks/results/phase1_scalar_advection_3d_v100.csv).
 
 This is the "at scale" evidence requested for Phase 1
 (`tasks/0002-phase1-cartesian-grid-scalar-transport.md`): the full FVM
 scalar-advection solver (`FvmSolver` + `ScalarAdvectionField` +
 `CentralDifferenceReconstruction` + `UpwindFlux` + SSP-RK2), running one
 complete two-stage SSP-RK2 time step per measurement, on 1D grids from
-one million up to one hundred million real cells.
+one million up to one hundred million real cells, and (added below) on
+3D cube grids up to 512^3 (~134 million cells).
 
 ## Kernel and methodology
 
@@ -65,6 +67,56 @@ reference to `1e-9` cell-by-cell.
    0's raw bandwidth numbers without accounting for that difference; it
    is reported here as this solver's own standalone throughput baseline.
 
+## 3D results (2026-09-29 follow-up)
+
+The 1D results above only exercise the `Axis::X` branch of
+`detail::axis_flux_difference` (`src/cfe/solver/explicit/fvm_solver.hpp`).
+The 1D correctness test alone does not prove the Y and Z branches, or a
+direction-dependent velocity, work on real hardware. `cfe_bench_scalar_
+advection_3d_cuda` (`benchmarks/scalar_advection/bench_scalar_advection_3d_cuda.cu`)
+sweeps cube grids (`nx = ny = nz`) with velocity `(1.0, 0.6, 0.3)` and a
+`sin(x)*sin(y)*sin(z)` initial condition, so all three axes are active
+and none degenerates into a zero-flux special case. Same
+warm-up/median-of-10 methodology, same V100 (node `v020`, job
+`47269636`).
+
+Correctness verified immediately before this run, same allocation:
+`test_scalar_advection_3d_cuda_matches_cpu_reference`
+(`tests/unit/test_scalar_advection_3d_cuda.cu`) — 32^3 grid, 30 SSP-RK2
+steps, GPU matching the CPU reference to `1e-9` cell-by-cell — with all
+49/49 unit tests green.
+
+| n per axis | n_cells | median ms/step | cell-updates/s |
+|---|---|---|---|
+| 64 | 262,144 | 0.069 | 3.78e9 |
+| 128 | 2,097,152 | 0.417 | 5.03e9 |
+| 256 | 16,777,216 | 2.955 | 5.68e9 |
+| 400 | 64,000,000 | 14.088 | 4.54e9 |
+| 512 | 134,217,728 | 30.624 | 4.38e9 |
+
+### Observations
+
+1. **512^3 (~134 million cells) completes one full SSP-RK2 step in 30.6
+   ms** — the 3D "at scale" demonstration, comparable in cell count to
+   the 1D 10^8-cell case above but doing three times the per-cell flux
+   work (X, Y, *and* Z, plus three ghost-fills per stage instead of one).
+2. **Peak 3D throughput (~5.7e9 cell-updates/s at 256^3) is lower than
+   1D's plateau (~8.8e9)**, consistent with observation 1: roughly 3x the
+   memory traffic and arithmetic per cell for a similar total cell count
+   should cost roughly 3x the time per cell-update, which is
+   approximately what these numbers show (8.8e9 / 3 ~= 2.9e9, same order
+   of magnitude as the measured ~4.4-5.7e9 — the actual ratio is better
+   than a naive 3x because ghost-fill cost scales with surface area, not
+   volume, and shrinks relative to the residual kernel as the grid grows).
+3. **Throughput dips slightly at 400^3 and 512^3 relative to the 256^3
+   peak** (5.68e9 -> 4.54e9 -> 4.38e9). Unlike the 1D sweep, this is not
+   a flat plateau; the largest cases are big enough (400^3 padded is
+   404^3 elements per field, ~2.4 GB across `q`/`stage1`/`scratch` at
+   double precision) that they may be starting to press on L2/HBM
+   contention in ways the smaller cubes don't -- not root-caused further
+   here since correctness, not roofline optimization, was this session's
+   goal.
+
 ## Bug this validates
 
 This is also the run that confirmed the fix in commit `fa0cc88`
@@ -88,6 +140,8 @@ development.
 - A comparable CPU-only benchmark sweep for this same solver (smaller
   scale, matching `bench_field_update`'s CPU/GPU pairing convention) is
   not yet written.
-- Multi-dimensional (2D/3D) and multi-block/AMR-relevant scaling are out
-  of scope for Phase 1 (see the task file's PI direction: fixed
-  refinement only, AMR-ready seams).
+- The 400^3/512^3 throughput dip noted above is not root-caused (no
+  Nsight Compute profiling run against the 3D kernel yet, unlike Phase
+  0's memory-layout study).
+- Multi-block/AMR-relevant scaling is out of scope for Phase 1 (see the
+  task file's PI direction: fixed refinement only, AMR-ready seams).
