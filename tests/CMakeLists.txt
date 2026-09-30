@@ -4,6 +4,7 @@
 
 add_executable(cfe_unit_tests
   unit/test_main.cpp
+  unit/test_test_framework.cpp
   unit/test_fixed_array.cpp
   unit/test_math_operations.cpp
   unit/test_field_storage.cpp
@@ -17,6 +18,7 @@ add_executable(cfe_unit_tests
   unit/test_scalar_advection_conservation.cpp
   unit/test_scalar_advection_2d_sanity.cpp
   unit/test_scalar_advection_2d_convergence.cpp
+  unit/test_fvm_solver_ghost_residual.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)

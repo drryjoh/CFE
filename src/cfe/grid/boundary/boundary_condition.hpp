@@ -15,8 +15,9 @@
 // AMR/MPI-readiness reasoning.
 #pragma once
 
-#include <cassert>
 #include <cstddef>
+#include <stdexcept>
+#include <string>
 
 #include "cfe/backend/parallel_for.hpp"
 #include "cfe/core/macros.hpp"
@@ -25,6 +26,30 @@
 #include "cfe/math/fixed_array.hpp"
 
 namespace cfe {
+
+namespace detail {
+
+// A plain, always-on runtime check (never an `assert`): the invariant
+// below must hold in every build configuration, including Release
+// (`NDEBUG`), because this project's own default and benchmarked build
+// type *is* Release -- an `assert`-based guard would silently compile
+// out exactly where it matters most (caught in code review; see
+// agent_history.md's 2026-09-30 follow-up entry). Host-only; called
+// once per `fill_x/y/z` invocation, not per cell, so this costs nothing
+// measurable even though it runs unconditionally.
+inline void require_periodic_extent_covers_ghost_depth(std::size_t extent, std::size_t ghost_depth,
+                                                        const char* axis_name)
+{
+  if (extent < ghost_depth) {
+    throw std::invalid_argument(
+        std::string("PeriodicBoundary needs n") + axis_name + " >= ng" + axis_name +
+        ": a narrower real extent would make the opposite-boundary source index read a "
+        "ghost cell instead of a real one (got n" + axis_name + "=" + std::to_string(extent) +
+        ", ng" + axis_name + "=" + std::to_string(ghost_depth) + ")");
+  }
+}
+
+}  // namespace detail
 
 // Wraps ghost cells from the opposite real boundary of the same axis.
 //
@@ -37,19 +62,18 @@ namespace cfe {
 // backends/execution orders then read that other ghost cell before it
 // has been written, a genuine cross-thread race (caught in code review
 // with a forced-reverse-order repro at nx=1, ngx=2; see
-// agent_history.md) -- not merely a "looks wrong" result. Asserted
-// rather than handled (e.g. via modulo-wrapped source indices) because
-// no current grid configuration needs nx < ngx; lift this restriction
-// with real modulo-wrapping if a future AMR block genuinely needs it.
+// agent_history.md) -- not merely a "looks wrong" result. Rejected via
+// an always-on runtime check (not handled with modulo-wrapped source
+// indices) because no current grid configuration needs nx < ngx; lift
+// this restriction with real modulo-wrapping if a future AMR block
+// genuinely needs it.
 struct PeriodicBoundary
 {
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
-    assert(grid.nx >= grid.ngx &&
-           "PeriodicBoundary needs nx >= ngx: a narrower real extent would make the "
-           "opposite-boundary source index read a ghost cell instead of a real one");
+    detail::require_periodic_extent_covers_ghost_depth(grid.nx, grid.ngx, "x");
     const std::size_t py = grid.padded_ny();
     const std::size_t pz = grid.padded_nz();
     Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
@@ -74,9 +98,7 @@ struct PeriodicBoundary
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
-    assert(grid.ny >= grid.ngy &&
-           "PeriodicBoundary needs ny >= ngy: a narrower real extent would make the "
-           "opposite-boundary source index read a ghost cell instead of a real one");
+    detail::require_periodic_extent_covers_ghost_depth(grid.ny, grid.ngy, "y");
     const std::size_t px = grid.padded_nx();
     const std::size_t pz = grid.padded_nz();
     Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
@@ -101,9 +123,7 @@ struct PeriodicBoundary
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
-    assert(grid.nz >= grid.ngz &&
-           "PeriodicBoundary needs nz >= ngz: a narrower real extent would make the "
-           "opposite-boundary source index read a ghost cell instead of a real one");
+    detail::require_periodic_extent_covers_ghost_depth(grid.nz, grid.ngz, "z");
     const std::size_t px = grid.padded_nx();
     const std::size_t py = grid.padded_ny();
     Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {

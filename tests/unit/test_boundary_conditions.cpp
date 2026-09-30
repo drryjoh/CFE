@@ -1,6 +1,8 @@
 // Unit tests for ghost-cell filling (task spec item 3/tests: "static and
 // periodic boundary conditions produce the correct ghost-cell values at
 // domain edges").
+#include <stdexcept>
+
 #include "cfe/field/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/ghost/ghost_fill.hpp"
@@ -102,4 +104,59 @@ CFE_TEST(test_periodic_boundary_fills_y_axis_ghost_cells_in_2d_grid)
   // (padded j=5) mirrors the first real row (100).
   CFE_CHECK_NEAR(state(grid.flat_index(i, 0, 0), 0), 400.0, 1e-12);
   CFE_CHECK_NEAR(state(grid.flat_index(i, grid.ngy + grid.ny, 0), 0), 100.0, 1e-12);
+}
+
+// Regression test for a code-review finding (see agent_history.md's
+// 2026-09-30 follow-up entry): PeriodicBoundary::fill_x/y/z must reject
+// nx < ngx (ny < ngy, nz < ngz) with an *always-on* runtime check, not an
+// `assert` that silently compiles out under `NDEBUG` -- this project's
+// own default and benchmarked build type is Release, so a guard that
+// only exists in Debug builds would never actually fire where it
+// matters. This test exercises the real, as-built binary (whatever
+// CMAKE_BUILD_TYPE configured it, Release by default) rather than only a
+// Debug configuration, specifically to catch a regression back to
+// `assert`.
+CFE_TEST(test_periodic_boundary_rejects_narrower_extent_than_ghost_depth_on_every_axis)
+{
+  {
+    cfe::CartesianGrid<double> grid = make_1d_grid(1, 2);  // nx=1 < ngx=2
+    cfe::Field<double, 1> state(grid.n_cells_total());
+    bool threw = false;
+    try {
+      cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::X, cfe::PeriodicBoundary{});
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    CFE_CHECK(threw);
+  }
+  {
+    cfe::CartesianGrid<double> grid;
+    grid.nx = 3;
+    grid.ny = 1;
+    grid.ngx = 1;
+    grid.ngy = 2;  // ny=1 < ngy=2
+    cfe::Field<double, 1> state(grid.n_cells_total());
+    bool threw = false;
+    try {
+      cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::Y, cfe::PeriodicBoundary{});
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    CFE_CHECK(threw);
+  }
+  {
+    cfe::CartesianGrid<double> grid;
+    grid.nx = 3;
+    grid.nz = 1;
+    grid.ngx = 1;
+    grid.ngz = 2;  // nz=1 < ngz=2
+    cfe::Field<double, 1> state(grid.n_cells_total());
+    bool threw = false;
+    try {
+      cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::Z, cfe::PeriodicBoundary{});
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    CFE_CHECK(threw);
+  }
 }
