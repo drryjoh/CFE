@@ -7,9 +7,17 @@
 // the numerical-flux combinator, time integration) is generic and knows
 // nothing about this field's physics; it only ever calls into this type,
 // passing whichever `Axis` it's currently assembling a flux for. A future
-// Burgers or Euler field supplies its own physical_flux()/wave_speed()
-// with this same (state, axis)-in shape -- solver/explicit/fvm_solver.hpp
-// and numerics/numerical_flux/upwind.hpp would need zero changes.
+// Burgers field -- still single-component, like this one -- can supply
+// its own nonlinear `physical_flux()`/`wave_speed()` under this exact
+// `(state, axis)`-in shape, with zero interface changes to
+// solver/explicit/fvm_solver.hpp. That claim does NOT extend to Euler
+// (corrected in code review -- see agent_history.md): Euler's state is
+// multi-component (density/momentum/energy), and `FvmSolver` currently
+// hardcodes `FieldView<Scalar, 1, Layout>` and component `0` throughout
+// -- Euler needs that solver generalized over `NComponents` first, not
+// just a new `Field`. Nor does it mean `UpwindFlux` is a complete,
+// entropy-correct Burgers solver as-is; see
+// numerics/numerical_flux/upwind.hpp's own caveat on that.
 //
 // `Dim` is a compile-time choice (matching this project's compile-time
 // state sizing, AGENTS.md #8), made per solver instantiation: a 1D

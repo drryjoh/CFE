@@ -15,6 +15,7 @@
 // AMR/MPI-readiness reasoning.
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 
 #include "cfe/backend/parallel_for.hpp"
@@ -26,12 +27,29 @@
 namespace cfe {
 
 // Wraps ghost cells from the opposite real boundary of the same axis.
+//
+// Requires nx (ny/nz) >= ngx (ngy/ngz) on the axis being filled: the
+// "opposite real boundary" index arithmetic below reads real-cell
+// indices [ngx, ngx+nx); if the real extent is *narrower* than the
+// ghost depth, that arithmetic underflows into the ghost region itself
+// -- one ghost cell's "source" becomes another ghost cell being written
+// by this same parallel fill, at a different thread/iteration. Some
+// backends/execution orders then read that other ghost cell before it
+// has been written, a genuine cross-thread race (caught in code review
+// with a forced-reverse-order repro at nx=1, ngx=2; see
+// agent_history.md) -- not merely a "looks wrong" result. Asserted
+// rather than handled (e.g. via modulo-wrapped source indices) because
+// no current grid configuration needs nx < ngx; lift this restriction
+// with real modulo-wrapping if a future AMR block genuinely needs it.
 struct PeriodicBoundary
 {
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
+    assert(grid.nx >= grid.ngx &&
+           "PeriodicBoundary needs nx >= ngx: a narrower real extent would make the "
+           "opposite-boundary source index read a ghost cell instead of a real one");
     const std::size_t py = grid.padded_ny();
     const std::size_t pz = grid.padded_nz();
     Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
@@ -56,6 +74,9 @@ struct PeriodicBoundary
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
+    assert(grid.ny >= grid.ngy &&
+           "PeriodicBoundary needs ny >= ngy: a narrower real extent would make the "
+           "opposite-boundary source index read a ghost cell instead of a real one");
     const std::size_t px = grid.padded_nx();
     const std::size_t pz = grid.padded_nz();
     Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
@@ -80,6 +101,9 @@ struct PeriodicBoundary
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
+    assert(grid.nz >= grid.ngz &&
+           "PeriodicBoundary needs nz >= ngz: a narrower real extent would make the "
+           "opposite-boundary source index read a ghost cell instead of a real one");
     const std::size_t px = grid.padded_nx();
     const std::size_t py = grid.padded_ny();
     Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {

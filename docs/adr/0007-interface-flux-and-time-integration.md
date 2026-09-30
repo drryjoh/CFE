@@ -75,11 +75,20 @@ not a code change inside `residual()`.
 `NumericalFlux` also does not hardcode a physical-flux formula: it takes
 the `Field` object itself and calls `field.physical_flux(...)`/
 `field.wave_speed(...)` (`src/cfe/numerics/numerical_flux/upwind.hpp`),
-so a future Burgers or Euler `Field` supplies its own physics with zero
-changes to the numerical-flux combinator — this is the Field/Calculator
-split described in ARCHITECTURE.md #2, and is the other half of what
-keeps this abstraction genuinely physics-agnostic, not just
-DG/FVM-agnostic.
+so a future Burgers `Field` (still single-component) supplies its own
+physics with zero changes to the numerical-flux combinator's *interface*
+— this is the Field/Calculator split described in ARCHITECTURE.md #2.
+**Corrected in code review** (see `agent_history.md`): this is narrower
+than "Burgers or Euler... with zero changes" as originally written here.
+Euler is multi-component and needs `FvmSolver` (which currently
+hardcodes `FieldView<Scalar, 1, Layout>`) generalized over `NComponents`
+first — a new `Field` alone is not sufficient. And `UpwindFlux`'s
+specific algorithm (switch on the sign of one scalar wave speed) is not
+itself an entropy-correct Riemann solver for Burgers or a valid one for
+Euler at all — a genuinely nonlinear or multi-component equation would
+need a different `NumericalFlux` type (Rusanov/HLLC/AUSM, or an
+entropy-fixed upwind scheme), substituted through the same template
+parameter, not this one reused unchanged.
 
 ## Time integration: SSP-RK2 vs. SSP-RK3
 
@@ -96,14 +105,27 @@ region, standard choice for many explicit FVM codes.
 The spatial scheme this phase pairs the time integrator with
 (`CentralDifferenceReconstruction`, a central-difference-style 1-ring
 reconstruction) is itself 2nd-order accurate in space. For an explicit
-method-of-lines scheme, the overall observed convergence order is
-bounded by the *lower* of the spatial and temporal orders — a 3rd-order
-time integrator paired with a 2nd-order spatial scheme cannot produce
-better than 2nd-order overall convergence, since the spatial truncation
-error dominates asymptotically. SSP-RK3's third stage would therefore
-add computational cost without improving the actual quantity Phase 1's
-acceptance bar measures (observed convergence order under grid
+method-of-lines scheme with `dt` tied to `dx` by a fixed CFL number (as
+this solver does), the overall *asymptotic convergence order* is bounded
+by the lower of the spatial and temporal orders — a 3rd-order time
+integrator paired with a 2nd-order spatial scheme cannot achieve better
+than 2nd-order *asymptotic* convergence, since the spatial truncation
+error dominates as `dx -> 0`. SSP-RK3's third stage would therefore add
+computational cost without improving the specific quantity Phase 1's
+acceptance bar measures (observed convergence *order* under grid
 refinement), for this specific pairing.
+
+**This is a claim about asymptotic order, not about absolute error at
+any one fixed resolution** (caught in code review — see
+`agent_history.md`): a 3rd-order time integrator has a smaller error
+*constant* than a 2nd-order one, so SSP-RK3 could still produce a
+measurably smaller absolute error than SSP-RK2 at a specific, finite
+`dx`, even though both would converge at the same asymptotic rate as
+`dx` continues to shrink. Nothing measured here rules that out, and this
+ADR does not claim otherwise: the decision is that SSP-RK2 is sufficient
+for the quantity Phase 1's acceptance bar actually requires (order, not
+a minimal-error-at-fixed-cost optimization), not that SSP-RK3 would be
+strictly wasteful in every sense.
 
 This was verified directly, not just argued: `test_scalar_advection_second_order_convergence`
 (`tests/unit/test_scalar_advection_convergence.cpp`) measures the observed
@@ -121,9 +143,11 @@ at 320 too) and finds it converging to almost exactly 2:
 The observed order converges toward 2.0000 as resolution increases (the
 small excess above 2.0 at coarser resolutions is the expected higher-order
 correction term, shrinking as `dx` shrinks) — direct confirmation that
-SSP-RK2 is not leaving accuracy on the table relative to what the spatial
-scheme can deliver, and that a 3rd-stage time integrator would not have
-changed this result.
+SSP-RK2 already achieves the 2nd-order *convergence rate* the spatial
+scheme is capable of, and that a 3rd-stage time integrator would not
+have changed *this specific measurement*. It says nothing about whether
+SSP-RK3 would reduce the absolute error magnitude at any one of these
+resolutions (see the caveat above) — that was not measured.
 
 ## Decision
 
@@ -144,17 +168,21 @@ integrator, for the reasons above.
   which measured benchmarks (`docs/performance/0003-...`,
   `docs/performance/0004-...`) show is not a bottleneck at any tested
   scale.
-- **Future constraint**: if a future spatial scheme is 3rd-order or
-  higher accurate (e.g. MUSCL, WENO), SSP-RK2 would then become the
-  accuracy-limiting factor and this decision would need revisiting (see
-  Revisit criteria).
+- **Future constraint**: if a future spatial scheme is *higher* than
+  2nd-order accurate — WENO is the relevant example; standard MUSCL with
+  a slope limiter is itself typically only 2nd-order, the same order as
+  `CentralDifferenceReconstruction` already used here, so swapping to
+  MUSCL alone would not by itself create this constraint — SSP-RK2 would
+  then become the accuracy-limiting factor and this decision would need
+  revisiting (see Revisit criteria).
 
 ## Revisit criteria
 
 Revisit the SSP-RK2 choice specifically once a spatial reconstruction
-scheme with formal order > 2 is introduced (MUSCL, WENO, or similar) —
-at that point SSP-RK2 would become the limiting term and SSP-RK3 (or
-higher) would be needed to realize the spatial scheme's full accuracy.
+scheme with formal order > 2 is introduced (WENO or similar; not MUSCL,
+which is itself ordinarily 2nd-order) — at that point SSP-RK2 would
+become the limiting term and SSP-RK3 (or higher) would be needed to
+realize the spatial scheme's full accuracy.
 Revisit the interface-flux design if implementing an actual DG side
 reveals the `Reconstruction` contract's assumed shape (two scalar
 one-sided face values in, one flux out) does not fit DG's actual needs

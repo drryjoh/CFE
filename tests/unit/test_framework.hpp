@@ -83,15 +83,30 @@ inline int run_all()
     }                                                                                              \
   } while (0)
 
-#define CFE_CHECK_NEAR(a, b, tol)                                                             \
-  do {                                                                                        \
-    const auto cfe_check_near_a_ = (a);                                                       \
-    const auto cfe_check_near_b_ = (b);                                                       \
-    const auto cfe_check_near_diff_ = std::fabs(static_cast<double>(cfe_check_near_a_) -      \
-                                                static_cast<double>(cfe_check_near_b_));      \
-    if (cfe_check_near_diff_ > (tol)) {                                                       \
-      throw ::cfe::testing::AssertionFailure{                                                 \
-          std::string("CFE_CHECK_NEAR(" #a ", " #b ") failed at ") + __FILE__ + ":" +         \
-          std::to_string(__LINE__) + " (diff " + std::to_string(cfe_check_near_diff_) + ")"}; \
-    }                                                                                         \
+// Non-finite values must fail this check explicitly, not slip through:
+// `std::fabs(NaN - x) > tol` is always false (every comparison against
+// NaN is false in IEEE 754), so without this guard a NaN on either side
+// would silently PASS a "near" comparison -- exactly the failure mode a
+// CPU/GPU cross-backend agreement test (this project's primary
+// correctness gate for CUDA) must not have (caught in code review; see
+// agent_history.md).
+#define CFE_CHECK_NEAR(a, b, tol)                                                              \
+  do {                                                                                         \
+    const auto cfe_check_near_a_ = (a);                                                        \
+    const auto cfe_check_near_b_ = (b);                                                         \
+    const double cfe_check_near_a_d_ = static_cast<double>(cfe_check_near_a_);                 \
+    const double cfe_check_near_b_d_ = static_cast<double>(cfe_check_near_b_);                 \
+    if (!std::isfinite(cfe_check_near_a_d_) || !std::isfinite(cfe_check_near_b_d_)) {          \
+      throw ::cfe::testing::AssertionFailure{                                                  \
+          std::string("CFE_CHECK_NEAR(" #a ", " #b ") failed at ") + __FILE__ + ":" +          \
+          std::to_string(__LINE__) + " (non-finite value: " +                                  \
+          std::to_string(cfe_check_near_a_d_) + " vs " + std::to_string(cfe_check_near_b_d_) + \
+          ")"};                                                                                \
+    }                                                                                           \
+    const double cfe_check_near_diff_ = std::fabs(cfe_check_near_a_d_ - cfe_check_near_b_d_);  \
+    if (cfe_check_near_diff_ > (tol)) {                                                        \
+      throw ::cfe::testing::AssertionFailure{                                                  \
+          std::string("CFE_CHECK_NEAR(" #a ", " #b ") failed at ") + __FILE__ + ":" +          \
+          std::to_string(__LINE__) + " (diff " + std::to_string(cfe_check_near_diff_) + ")"};  \
+    }                                                                                           \
   } while (0)

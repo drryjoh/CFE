@@ -791,3 +791,160 @@ proceed to Phase 2 (per ROADMAP.md) -- the first nonlinear equation, and
 the point at which the `Reconstruction`/`NumericalFlux` genericity and
 the DG-hybridizable interface-flux shape (ADR 0007) get their first real
 test beyond linear scalar advection.
+
+---
+
+## 2026-09-30 — PR #2 code review response
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Respond to a local code review of PR #2 (`docs/pr-2-review.md`-style
+findings, not posted to GitHub): two "request changes" findings and six
+advisory recommendations. For each, independently verify the claim
+before acting on it, then implement a fix or give evidence for declining.
+
+Files changed:
+- `src/cfe/solver/explicit/fvm_solver.hpp` -- `residual()` now writes a
+  defined value (0) to every *ghost* cell of `out`, not just real cells,
+  via new `detail::zero_ghost_residual_x/y/z` helpers (mirroring
+  `PeriodicBoundary::fill_x/y/z`'s own index enumeration, minus the
+  "read a source" part). Added host-side assertions for positive
+  extent/spacing and documented inactive-axis shape (`ny==1, ngy==0`
+  when `Field::dim<2`, etc.). Corrected the header comment's claim that
+  "a future Burgers or Euler field plugs in here unchanged" -- Euler
+  needs this type generalized over `NComponents` first, since it
+  hardcodes `FieldView<Scalar,1,Layout>` and component `0` throughout.
+  Trimmed a duplicative "why dimension-agnostic" paragraph, pointing to
+  ADR 0004/type-reference.md instead of re-deriving it inline.
+- `src/cfe/grid/boundary/boundary_condition.hpp` -- `PeriodicBoundary::
+  fill_x/y/z` now assert `nx>=ngx` (`ny>=ngy`, `nz>=ngz`): on a grid
+  narrower than its own ghost depth, the "opposite real boundary" index
+  arithmetic underflows into the ghost region itself, making one ghost
+  cell's "source" another ghost cell written by the same parallel fill
+  -- a genuine cross-thread race on some execution orders, not merely
+  "looks wrong."
+- `src/cfe/fields/scalar_advection/field.hpp`,
+  `src/cfe/numerics/numerical_flux/upwind.hpp`,
+  `docs/adr/0007-interface-flux-and-time-integration.md`,
+  `docs/type-reference.md` -- corrected the same "Burgers or Euler plugs
+  in unchanged" overclaim everywhere it appeared. Burgers (still
+  single-component) genuinely needs zero interface changes; Euler does
+  not, and `UpwindFlux`'s plain sign-of-wave-speed switch is not itself
+  an entropy-correct Burgers solver or a valid Euler Riemann solver
+  either way -- a different `NumericalFlux` type would be needed, not
+  just a different `Field`.
+- `docs/adr/0007-...md` -- corrected an overclaim conflating asymptotic
+  convergence *order* with absolute error at a fixed resolution (SSP-RK2
+  vs. SSP-RK3): the order argument is correct and was verified, but does
+  not by itself prove SSP-RK3 couldn't reduce absolute error at any one
+  resolution. Corrected MUSCL's order (ordinarily 2nd, same as the
+  scheme already used here) out of an incorrect ">2nd order" grouping
+  with WENO.
+- `tests/unit/test_framework.hpp` -- `CFE_CHECK_NEAR` now explicitly
+  rejects non-finite values before the tolerance comparison:
+  `std::fabs(NaN - x) > tol` is always false, so a NaN on either side
+  previously passed silently -- a real gap in this project's primary
+  CPU/GPU cross-backend acceptance gate.
+- `tests/unit/test_scalar_advection_convergence_variants.cpp` (new) --
+  2nd-order convergence at negative advection speed (double) and at
+  float precision, both against the analytic solution (not just
+  cross-backend agreement).
+- `tests/unit/test_scalar_advection_2d_convergence.cpp` (new) -- genuine
+  multi-axis analytic-solution convergence check: nonzero velocity on
+  *both* X and Y (existing 2D test deliberately zeroed Y-velocity,
+  degenerating every row into an independent 1D problem), checked
+  against the exact product-of-sines traveling-wave solution, not just
+  CPU/GPU agreement.
+- `docs/performance/0004-...md`, `benchmarks/results/phase1_scalar_advection_cpu_apple_m5.csv`
+  -- re-measured after the fixes above; see Performance change below.
+
+Tests added:
+`test_scalar_advection_second_order_convergence_negative_velocity`,
+`test_scalar_advection_second_order_convergence_float_precision`,
+`test_scalar_advection_2d_second_order_convergence_with_nonzero_xy_velocity`.
+46/46 tests pass (43 existing + 3 new), on both serial and threaded
+backends, clean under AddressSanitizer + UndefinedBehaviorSanitizer.
+
+Benchmarks run:
+Re-ran `cfe_bench_scalar_advection` (Apple M5) after the ghost-residual
+fix; see Performance change and `docs/performance/0004-...md` Observation
+4 for the full investigation.
+
+Performance change:
+A first, naive fix (zero-fill `out`'s *entire* padded range before the
+real-cell kernel) regressed serial 10M-cell performance from 15.135ms to
+21.21ms/step (~40%) -- root-caused to rewriting every real cell's
+residual twice (once as 0, once with its actual value), confirmed by a
+controlled same-session A/B against the pre-fix code. Replaced with a
+ghost-cells-only fix (`zero_ghost_residual_x/y/z`, touching only the
+thin ghost shell via the same index enumeration `PeriodicBoundary`
+already uses), which reduced but did not eliminate the regression: serial
+10M cells now measures ~19.79ms/step (~30% slower than the original
+15.135ms baseline), while the threaded backend shows no measurable
+regression at any tested size. Investigated directly (same-session A/B
+isolation, an `__attribute__((noinline))` experiment that made things
+markedly worse, ruling out an inlining-pollution theory) and traced to a
+serial-backend-specific compiler code-generation sensitivity around the
+extra small kernel launch, not a genuine per-cell cost (the data touched
+is a handful of ghost cells, far too little to explain 30% on its own).
+Not fully root-caused further -- see `docs/performance/0004-...md`
+Observation 4 for the full reasoning on why this was an acceptable place
+to stop (correctness priority, threaded backend unaffected, GPU is the
+actual "at scale" evidence).
+
+Scientific verification:
+Both P2 findings were independently reproduced before being trusted:
+a standalone repro poisoning `residual_scratch` with NaN before a
+constant-periodic-field step confirmed NaN leaking into the output
+state's ghost cells (matching the review's predicted symptom exactly);
+a standalone repro using a custom reverse-iteration-order `Backend` tag
+on an `nx=1, ngx=2` grid reproduced the exact `0 7 | 7 | 7 0` wrong-ghost
+pattern the review predicted by hand-derivation. Both repros were re-run
+after each fix: the NaN repro now shows no NaN anywhere in the output;
+the small-grid repro now fails its new assertion instead of silently
+producing wrong values. Full suite re-verified clean under ASan+UBSan on
+both serial and threaded backends after all fixes.
+
+Architecture decisions:
+- Declined one recommendation, with reasoning recorded rather than
+  silently ignored: shortening every header comment to "contracts,
+  stencil requirements, and surprising constraints," moving all
+  architectural narrative to ADRs. Applied narrowly to the single
+  worst-offending duplication (`fvm_solver.hpp`'s dimension-agnostic
+  paragraph, now a pointer to ADR 0004/type-reference.md instead of a
+  re-derivation), but declined as a blanket sweep: this project's
+  comments-with-rationale style has been an explicit, repeated
+  preference throughout Phase 0 and Phase 1 (not merely an oversight),
+  and has concretely paid for itself this session -- several of the PI's
+  own questions this session ("what is q", "should I be concerned about
+  ijk", "is this efficient, can we use compile time") were answerable
+  quickly precisely because the relevant reasoning already lived next
+  to the code, not only in an ADR several files away.
+- PeriodicBoundary's `nx < ngx` restriction is enforced via `assert`
+  (compiled out under `NDEBUG`/Release, matching the existing `ngx>=2`
+  precedent in the same function), not a runtime-checked exception:
+  no current grid configuration in this codebase needs `nx < ngx`, and
+  the reviewer's own recommendation explicitly allowed "rejecting them
+  is also a valid initial contract."
+
+Known limitations:
+- The ~30% serial-backend-only performance regression at large
+  `n_cells` (see Performance change above) is measured and disclosed,
+  not resolved to its true root cause.
+- CUDA correctness and benchmarks were re-verified on real hardware
+  after these fixes (see the follow-up note below/next entry if a
+  separate session recorded it) -- the reviewer's own validation could
+  not cover CUDA (no hardware available to them).
+- Euler support remains entirely out of scope, as it was before this
+  review; the comment corrections above only make that explicit where
+  it was previously (incorrectly) implied otherwise.
+
+Next recommended task:
+Re-verify this entry's CUDA claims on PSC Bridges-2 if not already done
+in the same session, then proceed with opening/updating PR #2 for
+review of these fixes.
