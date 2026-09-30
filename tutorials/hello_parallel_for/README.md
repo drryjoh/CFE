@@ -21,10 +21,20 @@ after, and how long the kernel took. That's the entire program; see
 
 ## Build and run
 
+From the repo root (builds everything else too):
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target cfe_hello_parallel_for -j
 ./build/tutorials/hello_parallel_for/cfe_hello_parallel_for
+```
+
+Or standalone, from this directory alone (nothing else gets built):
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/cfe-root-build/tutorials/hello_parallel_for/cfe_hello_parallel_for
 ```
 
 ## What you'll see

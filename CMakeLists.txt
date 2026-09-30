@@ -62,7 +62,12 @@ find_package(Threads REQUIRED)
 # --- Core library (header-only) ---------------------------------------------
 
 add_library(cfe_core INTERFACE)
-target_include_directories(cfe_core INTERFACE ${CMAKE_SOURCE_DIR}/src)
+# CMAKE_CURRENT_SOURCE_DIR, not CMAKE_SOURCE_DIR: this file is sometimes
+# pulled in as a *nested* subdirectory (a tutorial configured standalone
+# from its own folder does this to obtain cfe_core -- see
+# tutorials/*/CMakeLists.txt), in which case CMAKE_SOURCE_DIR points at
+# that outer standalone invocation's directory, not here.
+target_include_directories(cfe_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(cfe_core INTERFACE Threads::Threads)
 target_compile_features(cfe_core INTERFACE cxx_std_20)
 

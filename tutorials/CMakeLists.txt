@@ -1,3 +1,13 @@
+# Every tutorial subdirectory's CMakeLists.txt is buildable BOTH ways:
+# as part of this whole-project build (the normal case, reached via this
+# file), and standalone (`cmake -S . -B build` run directly inside that
+# tutorial's own directory, with no reference to the repo root) -- for a
+# student who just wants to poke at one example without the rest of the
+# project. The `if(NOT TARGET cfe_core) ... return()` block at the top of
+# each tutorial's CMakeLists.txt is what makes the standalone case work
+# (it pulls in this repo's root CMakeLists.txt as a nested subdirectory
+# purely to obtain cfe_core); new tutorials should copy that same block.
+#
 # A tiny, dependency-free hands-on example (task spec item 14: "one
 # tutorial demonstrating the benchmark"). See benchmarks/memory/ for the
 # real 48-combination timing sweep this is deliberately not a replacement

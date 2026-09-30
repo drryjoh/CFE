@@ -27,10 +27,20 @@ binary from):
 
 ## Build and run
 
+From the repo root (builds everything else too):
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target cfe_advect_gaussian_3d -j
 ./build/tutorials/scalar_advection_3d_visualization/cfe_advect_gaussian_3d
+```
+
+Or standalone, from this directory alone (nothing else gets built):
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/cfe-root-build/tutorials/scalar_advection_3d_visualization/cfe_advect_gaussian_3d
 ```
 
 Takes well under a second on a laptop (64^3 = 262,144 cells, CPU serial
