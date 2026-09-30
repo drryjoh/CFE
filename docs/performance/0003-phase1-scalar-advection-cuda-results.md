@@ -135,6 +135,27 @@ initial condition, which is not a plausible real answer. On plain
 was invisible across all 43 CPU-only unit tests throughout Phase 1's
 development.
 
+## Code-review fixes re-verified on the V100 (2026-09-30)
+
+PR #2 code review found two real correctness issues in `FvmSolver`/
+`PeriodicBoundary` (see `agent_history.md`'s 2026-09-30 entry) — one of
+them specifically a CUDA uninitialized-memory read (ghost-cell residual
+entries were never written, and `cudaMalloc` doesn't zero-initialize).
+After fixing both:
+
+- **52/52 unit tests pass** (up from 49; 3 new tests added in the same
+  response), including both CUDA correctness tests, on this V100 (job
+  `47300907`, node `v012`).
+- **`compute-sanitizer --tool initcheck` reports 0 errors** across the
+  full test suite — direct tool confirmation the uninitialized-read fix
+  actually works, using the exact verification method the review itself
+  recommended, not just inferred from the fix's logic.
+- **Both 1D and 3D benchmarks re-run, no meaningful regression**: 1D at
+  10^8 cells, 11.30ms/step (was 11.34ms); 3D at 512^3, 31.17ms/step (was
+  30.62ms) — both within a few percent, i.e. noise. The fix's CPU-side
+  cost (see `docs/performance/0004-...md` Observation 4) does not show
+  up on the GPU path at all.
+
 ## Follow-ups not yet done
 
 - A comparable CPU-only benchmark sweep for this same solver (smaller
