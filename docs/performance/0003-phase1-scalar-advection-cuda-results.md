@@ -156,6 +156,41 @@ After fixing both:
   cost (see `docs/performance/0004-...md` Observation 4) does not show
   up on the GPU path at all.
 
+## ssp_rk2_step made interior-cells-only, re-verified on the V100 (2026-10-01)
+
+`ssp_rk2_step` was changed from "touch every padded cell" (round 1's
+ghost-zero-fill workaround) to "only ever touch real cells, via
+`FvmSolver::active_cell_index_map()`" — the actual root-cause fix,
+matching standard FVM practice (fill ghosts -> compute residual on
+interior cells -> integrate interior cells only) rather than inventing a
+defined-but-meaningless ghost-cell residual value. See
+`docs/performance/0004-...md` Observation 4 for the CPU-side story (a
+real, bounded, serial-only regression traced to lost auto-vectorization).
+
+This change surfaced a second, genuine bug, caught only by re-running
+`compute-sanitizer --tool initcheck` on real hardware rather than trusting
+the CPU tests alone: `stage1`/`residual_scratch` (freshly `cudaMalloc`'d,
+never host-initialized) have cells that are real on one axis but ghost on
+another for a 2D/3D grid -- legitimate read sources for `PeriodicBoundary::
+fill_x`'s corner/edge handling, but never written by the now-interior-only
+combine step. Initcheck reported **1600 errors**, entirely isolated to
+`test_scalar_advection_3d_cuda_matches_cpu_reference` (the 1D test was
+clean, since 1D has no second axis to go wrong on). Fixed by
+zero-initializing `DeviceField` at construction (`cudaMemset` after
+`cudaMalloc`, matching `cfe::Field`'s host-side `std::vector` semantics) —
+re-verified clean:
+
+- **57/57 unit tests pass** (up from 52; 5 new tests from the full
+  follow-up review response), on this V100 (job `47314879`, node `v006`).
+- **`compute-sanitizer --tool initcheck` reports 0 errors** again, after
+  the `DeviceField` fix (it reported 1600 before the fix, confirming this
+  was a real, newly-introduced bug, not a false positive).
+- **Both 1D and 3D benchmarks re-run, no change at all**: 1D at 10^8
+  cells, 11.48ms/step (was 11.30-11.34ms across every prior measurement);
+  3D at 512^3, 30.70ms/step (was 30.62-31.17ms) — all within noise. The
+  CPU-side regression and the `DeviceField` zero-init fix both have zero
+  measurable cost on the GPU path.
+
 ## Follow-ups not yet done
 
 - A comparable CPU-only benchmark sweep for this same solver (smaller

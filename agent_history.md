@@ -948,3 +948,138 @@ Next recommended task:
 Re-verify this entry's CUDA claims on PSC Bridges-2 if not already done
 in the same session, then proceed with opening/updating PR #2 for
 review of these fixes.
+
+---
+
+## 2026-10-01 — Fix ssp_rk2_step at its root: interior-cells-only (PR #2 follow-up review, continued)
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Finish the 2026-09-30 follow-up review's two remaining items (serial
+performance root cause, standalone-tutorial-build docs). Item 3 changed
+scope mid-session: the user, independently reasoning through the ghost-
+cell architecture, correctly identified that `ssp_rk2_step` touching
+ghost cells at all (requiring round 1's zero-fill workaround) was itself
+the actual bug -- not something to optimize around. This entry covers
+implementing that root-cause fix and everything it surfaced; item 4
+(tutorial build docs) remains for a later session.
+
+Files changed:
+- `src/cfe/solver/time_integration/ssp_rk2.hpp` -- new `IdentityIndexMap`
+  (default, for no-grid callers); `ssp_rk2_step` gains `n_active` and
+  `IndexMap index_map = IndexMap{}` trailing parameters. Combine kernels
+  now iterate `[0, n_active)` through `index_map(r)`, never touching any
+  index outside that set -- ghost cells are structurally never read or
+  written, matching standard FVM practice (fill ghosts -> compute
+  residual on interior cells -> integrate interior cells only) rather
+  than the previous "touch everything, including ghosts" design that
+  made round 1's zero-fill workaround necessary in the first place.
+- `src/cfe/solver/explicit/fvm_solver.hpp` -- removed
+  `zero_ghost_residual_x/y/z` entirely (nothing reads `out`'s ghost cells
+  anymore, so nothing needs to define them). Added
+  `detail::CartesianRealCellIndexMap<Scalar, Dim>` (the index-map
+  implementation, specialized per `Dim` via `if constexpr` -- see
+  Performance change) and `FvmSolver::active_cell_count()`/
+  `active_cell_index_map()` accessors.
+- Every `ssp_rk2_step` call site updated (two trailing arguments):
+  `test_ssp_rk2.cpp` (uses `state.n_cells()` + default `IdentityIndexMap`,
+  no grid at all), the five CPU convergence/conservation/sanity tests,
+  both CUDA tests, all three benchmarks, the visualization tutorial.
+- `tests/unit/test_fvm_solver_ghost_residual.cpp` -- header comment
+  updated to describe the new mechanism (structural impossibility, not a
+  defined placeholder) while keeping the same NaN-poisoning regression
+  test, now poisoning the *entire* padded `residual_scratch` range.
+- `src/cfe/backend/cuda/device_field.cuh` -- `DeviceField` now
+  zero-initializes via `cudaMemset` right after `cudaMalloc` (see
+  Scientific verification).
+- `docs/performance/0003-...md`, `0004-...md`,
+  `benchmarks/results/phase1_scalar_advection_cpu_apple_m5.csv` --
+  updated with this round's final, re-verified numbers.
+
+Tests added:
+None new (the existing 51 CPU + 6 CUDA tests cover this change; no new
+test was needed beyond updating existing call sites). 51/51 CPU, 57/57
+total with CUDA.
+
+Benchmarks run:
+`cfe_bench_scalar_advection` (Apple M5, serial + threaded, repeated
+many times for stability — this session's numbers were unusually noisy
+at first, requiring several repeated full sweeps to separate signal from
+thermal/background-load noise), plus an ad-hoc extended sweep to 50M/
+100M cells (beyond the committed benchmark's normal range) specifically
+to check whether the regression below grows or plateaus with size.
+`cfe_bench_scalar_advection_cuda` and `_3d_cuda` on the V100 (job
+`47314879`, node `v006`), both before and after the `DeviceField` fix.
+
+Performance change:
+**Not a net improvement as hoped going in.** The architecturally-correct
+fix regressed the CPU serial backend *further* than round 1's workaround
+(serial, 10M cells: 15.135ms original -> 19.79ms round-1 workaround ->
+~33ms this round, a ~118% regression from original). Root-caused with
+direct evidence (not inferred) via `-Rpass-missed=loop-vectorize`: routing
+the per-cell storage index through `index_map(r)` instead of the raw loop
+counter defeats the compiler's auto-vectorization of the combine loop,
+confirmed by diffing optimization-remark output before/after. Tried and
+rejected as insufficient: a `Dim`-specialized fast path avoiding integer
+division for 1D/2D (`if constexpr`, matching this project's existing
+dimension-dispatch convention), and `CFE_FORCEINLINE` on the index map
+(`AGENTS.md` #9's documented host/device pattern) -- neither recovered
+the lost vectorization. Confirmed via an extended 50M/100M-cell sweep
+that the regression is a **flat ~1.68x, not a growing one** -- both
+versions scale linearly with cell count individually; only the constant
+factor between them differs, and that factor is stable from 10M through
+100M cells, consistent in magnitude with the measured vectorization-width
+loss (width 2, so up to ~2x). The threaded backend shows no regression at
+any size -- confirmed (not assumed) by checking that its inner loop
+(`backend/cpu/threaded.hpp`) already failed to auto-vectorize in the
+*original* pre-review code, for unrelated structural reasons
+(`Cannot vectorize early exit loop with writes to memory`). GPU
+benchmarks (1D and 3D) show zero change from this entire investigation,
+both before and after the `DeviceField` fix below.
+
+Scientific verification:
+Re-running `compute-sanitizer --tool initcheck` on the V100 after this
+change (rather than assuming round 1's "0 errors" result still held)
+surfaced a second, genuine, newly-introduced bug: 1600 uninitialized-
+memory-read errors, entirely isolated to the 3D CUDA test (the 1D test
+was clean). Root cause: `fill_ghost_cells`'s per-axis fill (e.g.
+`fill_x`) must read across the *entire* padded extent of the other two
+axes, not just their real range, to correctly fill corners/edges later
+fill_y/fill_z calls depend on -- on a 2D/3D grid, cells real in X but
+ghost in Y or Z are legitimate read sources for `fill_x`, but the new
+interior-cells-only combine step never writes them, and `DeviceField`'s
+raw `cudaMalloc` never defined them either. Fixed by zero-initializing
+`DeviceField` at construction, matching `cfe::Field`'s host-side
+`std::vector` semantics (a fix considered and explicitly declined in an
+earlier round as redundant -- that reasoning no longer held once the
+combine step stopped touching every cell). Re-verified: 0 errors, 57/57
+tests, no benchmark change.
+
+Architecture decisions:
+- `ssp_rk2_step`'s "grid-agnostic" contract is now expressed as "generic
+  over an index-mapping concept" rather than "touches every cell of
+  whatever FieldView it's given" -- arguably a *more* correct notion of
+  genericity (a future unstructured-grid solver could supply its own
+  index map), not a compromise of the original design goal.
+- Declined (for this session): recovering the lost auto-vectorization.
+  Recorded as explicit, prioritized future work (compiler vectorization
+  pragmas; a compile-time fast path for the common contiguous-offset
+  case; explicit SIMD as a last resort) rather than left as a silent gap
+  -- see `docs/performance/0004-...md` Observation 4.
+
+Known limitations:
+- The CPU serial-backend regression (flat ~1.68x) is disclosed, root-
+  caused, and bounded, but not recovered.
+- Item 4 from the 2026-09-30 follow-up review (standalone-tutorial-build
+  README accuracy) is still not done.
+
+Next recommended task:
+Item 4 (standalone tutorial build vs. documented behavior -- see the
+2026-09-30 entry above for the two options already sketched). After
+that, this PR should be fully caught up on every outstanding review
+item.
