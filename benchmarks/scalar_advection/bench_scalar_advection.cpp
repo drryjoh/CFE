@@ -77,7 +77,8 @@ void run_case(const char* backend_name, std::size_t nx)
   const double dt = 0.4 * grid.dx / kSpeed;
   auto one_step = [&]() {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), Backend>(
-        state.view(), stage1.view(), scratch.view(), dt, residual);
+        state.view(), stage1.view(), scratch.view(), dt, residual, solver.active_cell_count(),
+        solver.active_cell_index_map());
   };
 
   one_step();  // warm-up: first-touch faulting, thread-pool spin-up.

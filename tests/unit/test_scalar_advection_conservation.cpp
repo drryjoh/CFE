@@ -61,7 +61,8 @@ CFE_TEST(test_scalar_advection_conserves_total_quantity_over_periodic_domain)
 
   const double dt = 0.4 * grid.dx / 1.3;
   for (int step = 0; step < 200; ++step) {
-    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual,
+                               solver.active_cell_count(), solver.active_cell_index_map());
   }
 
   const double final_total = total_quantity(state, grid);

@@ -25,7 +25,8 @@ double integrate_exponential_decay(double dt, int n_steps)
   };
 
   for (int step = 0; step < n_steps; ++step) {
-    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual,
+                               state.n_cells());
   }
   return state(0, 0);
 }

@@ -76,7 +76,8 @@ void run_case(std::size_t n_per_axis)
   const double dt = 0.25 * grid.dx / (kUx + kUy + kUz);
   auto one_step = [&]() {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), cfe::CudaParallelFor>(
-        state.view(), stage1.view(), scratch.view(), dt, residual);
+        state.view(), stage1.view(), scratch.view(), dt, residual, solver.active_cell_count(),
+        solver.active_cell_index_map());
     cfe::backend::cuda::synchronize();
   };
 

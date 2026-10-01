@@ -99,65 +99,49 @@ CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT state, const CartesianGri
   return -(flux_right - flux_left) / spacing;
 }
 
-// Writes 0 into `out`'s ghost-cell residual entries on one axis (both
-// sides), touching only the actual ghost layer -- not the whole padded
-// volume. Mirrors PeriodicBoundary::fill_x/y/z's own index enumeration
-// (grid/boundary/boundary_condition.hpp) minus the "read from a source
-// cell" part, since here every ghost cell just gets the same constant.
-// Deliberately NOT a single pass over `grid.n_cells_total()`: measured
-// on real hardware, that naive approach re-writes every *real* cell
-// twice (once as 0, then again with its actual flux value), roughly
-// doubling `out`'s write bandwidth at the large grid sizes this project
-// benchmarks at -- a real, measured regression (caught in code review;
-// see agent_history.md and docs/performance/0004-...), not a
-// theoretical concern traded away for simplicity.
-template <class Scalar, class FieldViewT, class Backend>
-void zero_ghost_residual_x(FieldViewT out, const CartesianGrid<Scalar>& grid)
+// Maps a dense "active cell number" r in [0, nx*ny*nz) to the padded
+// flat storage index real cells actually live at. This is the mechanism
+// that lets `ssp_rk2_step` (solver/time_integration/ssp_rk2.hpp) update
+// only real cells, never ghost cells: ghost layers interleave with real
+// cells on every active axis for a 2D/3D grid, so "the first N storage
+// indices" is not the same set as "the N real cells" except by
+// coincidence in 1D -- this performs the same local_i/j/k decomposition
+// `FvmSolver::residual()`'s own kernel below already does, factored out
+// so `ssp_rk2_step` can reuse it without knowing what a `CartesianGrid`
+// is (it only ever sees this as an opaque callable).
+//
+// Templated on `Dim` (matching `Field::dim`, resolved via `if constexpr`,
+// not a runtime branch -- the same pattern `FvmSolver::y_active`/
+// `z_active` already use) specifically to avoid paying for integer
+// division/modulo by axes that do not exist: a naive always-3D
+// decomposition (`r % nx`, `(r/nx) % ny`, `r/(nx*ny)`) divides and mods
+// by runtime values on *every* call regardless of dimensionality, which
+// measured as a severe regression on the 1D benchmark case specifically
+// (where the correct answer is just `ngx + r`, a single addition) --
+// caught in code review; see agent_history.md.
+template <class Scalar, std::size_t Dim>
+struct CartesianRealCellIndexMap
 {
-  if (grid.ngx == 0) return;
-  const std::size_t py = grid.padded_ny();
-  const std::size_t pz = grid.padded_nz();
-  Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-    const std::size_t g = idx % grid.ngx;
-    const std::size_t rem = idx / grid.ngx;
-    const std::size_t j = rem % py;
-    const std::size_t k = rem / py;
-    out(grid.flat_index(g, j, k), 0) = Scalar(0);
-    out(grid.flat_index(grid.ngx + grid.nx + g, j, k), 0) = Scalar(0);
-  });
-}
+  CartesianGrid<Scalar> grid;
 
-template <class Scalar, class FieldViewT, class Backend>
-void zero_ghost_residual_y(FieldViewT out, const CartesianGrid<Scalar>& grid)
-{
-  if (grid.ngy == 0) return;
-  const std::size_t px = grid.padded_nx();
-  const std::size_t pz = grid.padded_nz();
-  Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-    const std::size_t g = idx % grid.ngy;
-    const std::size_t rem = idx / grid.ngy;
-    const std::size_t i = rem % px;
-    const std::size_t k = rem / px;
-    out(grid.flat_index(i, g, k), 0) = Scalar(0);
-    out(grid.flat_index(i, grid.ngy + grid.ny + g, k), 0) = Scalar(0);
-  });
-}
-
-template <class Scalar, class FieldViewT, class Backend>
-void zero_ghost_residual_z(FieldViewT out, const CartesianGrid<Scalar>& grid)
-{
-  if (grid.ngz == 0) return;
-  const std::size_t px = grid.padded_nx();
-  const std::size_t py = grid.padded_ny();
-  Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-    const std::size_t g = idx % grid.ngz;
-    const std::size_t rem = idx / grid.ngz;
-    const std::size_t i = rem % px;
-    const std::size_t j = rem / px;
-    out(grid.flat_index(i, j, g), 0) = Scalar(0);
-    out(grid.flat_index(i, j, grid.ngz + grid.nz + g), 0) = Scalar(0);
-  });
-}
+  CFE_HOST_DEVICE
+  CFE_FORCEINLINE
+  std::size_t operator()(std::size_t r) const
+  {
+    if constexpr (Dim == 1) {
+      return grid.flat_index(grid.ngx + r, grid.ngy, grid.ngz);
+    } else if constexpr (Dim == 2) {
+      const std::size_t local_i = r % grid.nx;
+      const std::size_t local_j = r / grid.nx;
+      return grid.flat_index(grid.ngx + local_i, grid.ngy + local_j, grid.ngz);
+    } else {
+      const std::size_t local_i = r % grid.nx;
+      const std::size_t local_j = (r / grid.nx) % grid.ny;
+      const std::size_t local_k = r / (grid.nx * grid.ny);
+      return grid.flat_index(grid.ngx + local_i, grid.ngy + local_j, grid.ngz + local_k);
+    }
+  }
+};
 
 }  // namespace detail
 
@@ -227,32 +211,17 @@ struct FvmSolver
     const Reconstruction reconstruction = this->reconstruction;
     const NumericalFlux numerical_flux = this->numerical_flux;
 
-    // `out` must be fully defined for every *padded* cell, ghost cells
-    // included, not just real ones: `ssp_rk2_step`'s combine kernels
-    // iterate every cell in `state`'s full storage with no knowledge of
-    // which indices are real vs. ghost (see ssp_rk2.hpp -- it is
-    // deliberately grid-agnostic). Ghost-cell residual values are
-    // physically meaningless (ghost cells are never integrated in time;
-    // the next fill_ghost_cells call overwrites them from the interior
-    // regardless), but they must be *some* defined value, not whatever
-    // the caller's scratch storage happened to contain: on CUDA,
-    // freshly cudaMalloc'd storage is uninitialized, and writing only
-    // real cells here would leave ghost-cell residual entries
-    // permanently unwritten for the process's entire lifetime -- a
-    // genuine undefined-behavior read, flagged by `compute-sanitizer
-    // --tool initcheck` (caught in code review; see agent_history.md).
-    // Zeroing exactly the ghost cells (not the whole padded volume --
-    // see zero_ghost_residual_x/y/z's own doc comment for why that
-    // matters) keeps this to the same thin-shell cost as one of the
-    // fill_ghost_cells calls above.
-    detail::zero_ghost_residual_x<Scalar, FieldView<Scalar, 1, Layout>, Backend>(out, grid);
-    if constexpr (y_active) {
-      detail::zero_ghost_residual_y<Scalar, FieldView<Scalar, 1, Layout>, Backend>(out, grid);
-    }
-    if constexpr (z_active) {
-      detail::zero_ghost_residual_z<Scalar, FieldView<Scalar, 1, Layout>, Backend>(out, grid);
-    }
-
+    // `out` is only ever written for real cells here -- never ghost
+    // cells, and intentionally so: `ssp_rk2_step`'s combine kernels only
+    // ever visit real cells too (via `active_cell_index_map()` below),
+    // so a ghost-cell entry of `out` is never read by anything. An
+    // earlier version of this function wrote a defined placeholder into
+    // every ghost cell of `out` so a then-grid-agnostic `ssp_rk2_step`
+    // (which used to visit every padded cell indiscriminately) would
+    // never read undefined memory -- that was a real, measured
+    // performance cost for a value nothing needed (caught in code
+    // review; see agent_history.md). Fixed at the actual source instead:
+    // `ssp_rk2_step` no longer visits ghost cells at all.
     Backend::run(grid.nx * grid.ny * grid.nz, [=] CFE_HOST_DEVICE(std::size_t linear) mutable {
       const std::size_t local_i = linear % grid.nx;
       const std::size_t local_j = (linear / grid.nx) % grid.ny;
@@ -276,6 +245,18 @@ struct FvmSolver
 
       out(grid.flat_index(i, j, k), 0) = total_flux_difference;
     });
+  }
+
+  // How many real cells `ssp_rk2_step` should integrate, and the
+  // storage-index mapping it should use to reach them -- pass both as
+  // `ssp_rk2_step`'s trailing arguments so its combine kernels visit
+  // only real cells, never ghost cells. See detail::CartesianRealCellIndexMap's
+  // own doc comment above for why a plain cell count alone isn't enough
+  // on a 2D/3D grid.
+  std::size_t active_cell_count() const { return grid.nx * grid.ny * grid.nz; }
+  detail::CartesianRealCellIndexMap<Scalar, Field::dim> active_cell_index_map() const
+  {
+    return detail::CartesianRealCellIndexMap<Scalar, Field::dim>{grid};
   }
 };
 

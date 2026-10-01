@@ -76,7 +76,8 @@ double run_and_measure_l2_error(std::size_t n)
     solver.residual(in, out);
   };
   for (int step = 0; step < n_steps; ++step) {
-    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual,
+                               solver.active_cell_count(), solver.active_cell_index_map());
   }
 
   double sum_sq_error = 0.0;

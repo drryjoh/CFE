@@ -1,15 +1,18 @@
-// Regression test for a code-review finding (see agent_history.md's
-// 2026-09-30 entry): FvmSolver::residual() used to write only real-cell
-// entries of `out`, while ssp_rk2_step's combine kernels read/write
-// every padded cell with no knowledge of which indices are real vs.
-// ghost. On CUDA that was a genuine uninitialized-memory read
-// (cudaMalloc doesn't zero-initialize); on CPU it was silently masked by
-// std::vector's zero-initialization. This test makes the masking
-// impossible: it deliberately poisons the residual scratch buffer with
-// NaN *before* stepping, so if FvmSolver::residual() ever again leaves a
-// ghost-cell residual entry unwritten, that poison survives into the
-// combine kernel's output and this test catches it -- on any backend,
-// not just CUDA.
+// Regression test for a code-review finding (see agent_history.md):
+// FvmSolver::residual() has only ever written real-cell entries of
+// `out`. The bug this originally caught was that ssp_rk2_step's combine
+// kernels used to read/write *every* padded cell regardless, with no
+// notion of real vs. ghost -- so a ghost-cell residual entry nothing
+// ever defined still got read, which on CUDA (cudaMalloc doesn't
+// zero-initialize) was a genuine uninitialized-memory read, silently
+// masked on CPU by std::vector's zero-initialization. Fixed at the root
+// (ssp_rk2_step now only ever visits real cells via an index map, see
+// ssp_rk2.hpp), which makes this scenario structurally impossible rather
+// than merely harmless -- this test deliberately poisons the residual
+// scratch buffer's *entire* padded range (ghosts included) with NaN
+// before stepping, so if ssp_rk2_step or FvmSolver::residual() ever
+// again touches a ghost-cell residual entry, that poison would surface
+// in the output and this test would catch it, on any backend.
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -50,7 +53,8 @@ CFE_TEST(test_fvm_solver_residual_never_leaves_nan_poison_in_output_after_ssp_rk
     solver.residual(in, out);
   };
 
-  cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), 0.01, residual);
+  cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), 0.01, residual,
+                             solver.active_cell_count(), solver.active_cell_index_map());
 
   for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
     const double value = state.data()[grid.flat_index(i, 0, 0)];

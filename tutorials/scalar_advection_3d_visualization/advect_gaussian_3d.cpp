@@ -109,7 +109,8 @@ int main()
 
   write_frame();
   for (int step = 1; step <= kTotalSteps; ++step) {
-    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), kDt, residual);
+    cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), kDt, residual,
+                               solver.active_cell_count(), solver.active_cell_index_map());
     t += kDt;
     if (step % kOutputEvery == 0) write_frame();
   }

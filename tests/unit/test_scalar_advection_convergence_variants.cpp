@@ -59,7 +59,8 @@ double run_and_measure_l2_error(std::size_t nx, Scalar speed, Scalar final_time,
     solver.residual(in, out);
   };
   for (int step = 0; step < n_steps; ++step) {
-    cfe::ssp_rk2_step<Scalar>(state.view(), stage1.view(), residual_scratch.view(), dt, residual);
+    cfe::ssp_rk2_step<Scalar>(state.view(), stage1.view(), residual_scratch.view(), dt, residual,
+                              solver.active_cell_count(), solver.active_cell_index_map());
   }
 
   double sum_sq_error = 0.0;

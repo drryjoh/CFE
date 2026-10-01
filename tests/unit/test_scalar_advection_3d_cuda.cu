@@ -79,7 +79,8 @@ CFE_TEST(test_scalar_advection_3d_cuda_matches_cpu_reference)
       solver_cpu{grid, field, cfe::PeriodicBoundary{}};
   cfe::SolverResidual<decltype(solver_cpu)> residual_cpu{&solver_cpu};
   for (int step = 0; step < kSteps; ++step) {
-    cfe::ssp_rk2_step<double>(state_cpu.view(), stage1_cpu.view(), scratch_cpu.view(), kDt, residual_cpu);
+    cfe::ssp_rk2_step<double>(state_cpu.view(), stage1_cpu.view(), scratch_cpu.view(), kDt, residual_cpu,
+                               solver_cpu.active_cell_count(), solver_cpu.active_cell_index_map());
   }
 
   // --- CUDA ---
@@ -95,7 +96,8 @@ CFE_TEST(test_scalar_advection_3d_cuda_matches_cpu_reference)
   cfe::SolverResidual<decltype(solver_gpu)> residual_gpu{&solver_gpu};
   for (int step = 0; step < kSteps; ++step) {
     cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual_gpu), cfe::CudaParallelFor>(
-        state_gpu.view(), stage1_gpu.view(), scratch_gpu.view(), kDt, residual_gpu);
+        state_gpu.view(), stage1_gpu.view(), scratch_gpu.view(), kDt, residual_gpu,
+        solver_gpu.active_cell_count(), solver_gpu.active_cell_index_map());
   }
   cfe::backend::cuda::synchronize();
 

@@ -55,7 +55,8 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
     solver_1d.residual(in, out);
   };
   for (int step = 0; step < kSteps; ++step) {
-    cfe::ssp_rk2_step<double>(state_1d.view(), stage1_1d.view(), scratch_1d.view(), kDt, residual_1d);
+    cfe::ssp_rk2_step<double>(state_1d.view(), stage1_1d.view(), scratch_1d.view(), kDt, residual_1d,
+                               solver_1d.active_cell_count(), solver_1d.active_cell_index_map());
   }
 
   // --- 2D solve: same X profile repeated across every row, zero Y velocity ---
@@ -87,7 +88,8 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
     solver_2d.residual(in, out);
   };
   for (int step = 0; step < kSteps; ++step) {
-    cfe::ssp_rk2_step<double>(state_2d.view(), stage1_2d.view(), scratch_2d.view(), kDt, residual_2d);
+    cfe::ssp_rk2_step<double>(state_2d.view(), stage1_2d.view(), scratch_2d.view(), kDt, residual_2d,
+                               solver_2d.active_cell_count(), solver_2d.active_cell_index_map());
   }
 
   // Every row of the 2D solve should match the 1D reference exactly (both
