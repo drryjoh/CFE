@@ -35,13 +35,24 @@ cmake --build build --target cfe_advect_gaussian_3d -j
 ./build/tutorials/scalar_advection_3d_visualization/cfe_advect_gaussian_3d
 ```
 
-Or standalone, from this directory alone (nothing else gets built):
+Or standalone, from this directory alone:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build --target cfe_advect_gaussian_3d -j
 ./build/cfe-root-build/tutorials/scalar_advection_3d_visualization/cfe_advect_gaussian_3d
 ```
+
+The `--target` is required even in the standalone case: pulling in the
+repo root as a nested subdirectory (to obtain `cfe_core`) also makes the
+*whole* project's targets available to build — every test, every
+benchmark, every other tutorial — since their `CFE_BUILD_TESTS`/
+`CFE_BUILD_BENCHMARKS`/`CFE_BUILD_TUTORIALS` options default `ON`
+regardless of which directory you configured from. `cmake --build build
+-j` with no `--target` builds CMake's default `all` target, which is all
+of that, not just this one tutorial. `cmake -S . -B build` itself also
+configures (but does not build) that whole tree either way — only the
+`--target`-qualified *build* step is scoped to just this executable.
 
 Takes well under a second on a laptop (64^3 = 262,144 cells, CPU serial
 backend by default).

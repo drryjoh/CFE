@@ -19,6 +19,7 @@ add_executable(cfe_unit_tests
   unit/test_scalar_advection_2d_sanity.cpp
   unit/test_scalar_advection_2d_convergence.cpp
   unit/test_fvm_solver_ghost_residual.cpp
+  unit/test_ssp_rk2_index_map.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)

@@ -8,6 +8,14 @@
 # (it pulls in this repo's root CMakeLists.txt as a nested subdirectory
 # purely to obtain cfe_core); new tutorials should copy that same block.
 #
+# Pulling in the root this way also makes the *whole* project's targets
+# available in the standalone case, not just this one tutorial -- tests,
+# benchmarks, and every other tutorial, since their CFE_BUILD_TESTS/
+# CFE_BUILD_BENCHMARKS/CFE_BUILD_TUTORIALS options default ON regardless
+# of which directory was configured from. A standalone `cmake --build`
+# must therefore pass `--target <this-tutorial's-executable>` to actually
+# build only this one (each tutorial's own README documents this).
+#
 # A tiny, dependency-free hands-on example (task spec item 14: "one
 # tutorial demonstrating the benchmark"). See benchmarks/memory/ for the
 # real 48-combination timing sweep this is deliberately not a replacement
