@@ -21,8 +21,9 @@ namespace fvm {
 // a central-difference slope estimate from its own left/right neighbors.
 //   State_face = State_self + (State_right_neighbor - State_left_neighbor) / 4
 template <class Scalar>
-CFE_HOST_DEVICE Scalar interface_value_right(Scalar state_left_neighbor, Scalar state_self,
-                                              Scalar state_right_neighbor)
+CFE_HOST_DEVICE
+Scalar interface_value_right(Scalar state_left_neighbor, Scalar state_self,
+                             Scalar state_right_neighbor)
 {
   return state_self + (state_right_neighbor - state_left_neighbor) * Scalar(0.25);
 }
@@ -31,8 +32,9 @@ CFE_HOST_DEVICE Scalar interface_value_right(Scalar state_left_neighbor, Scalar 
 // interface_value_right, same 3-point stencil:
 //   State_face = State_self - (State_right_neighbor - State_left_neighbor) / 4
 template <class Scalar>
-CFE_HOST_DEVICE Scalar interface_value_left(Scalar state_left_neighbor, Scalar state_self,
-                                             Scalar state_right_neighbor)
+CFE_HOST_DEVICE
+Scalar interface_value_left(Scalar state_left_neighbor, Scalar state_self,
+                             Scalar state_right_neighbor)
 {
   return state_self - (state_right_neighbor - state_left_neighbor) * Scalar(0.25);
 }
@@ -46,15 +48,15 @@ CFE_HOST_DEVICE Scalar interface_value_left(Scalar state_left_neighbor, Scalar s
 struct CentralDifferenceReconstruction
 {
   template <class Scalar>
-  CFE_HOST_DEVICE Scalar right(Scalar state_left_neighbor, Scalar state_self,
-                                Scalar state_right_neighbor) const
+  CFE_HOST_DEVICE
+  Scalar right(Scalar state_left_neighbor, Scalar state_self, Scalar state_right_neighbor) const
   {
     return interface_value_right(state_left_neighbor, state_self, state_right_neighbor);
   }
 
   template <class Scalar>
-  CFE_HOST_DEVICE Scalar left(Scalar state_left_neighbor, Scalar state_self,
-                               Scalar state_right_neighbor) const
+  CFE_HOST_DEVICE
+  Scalar left(Scalar state_left_neighbor, Scalar state_self, Scalar state_right_neighbor) const
   {
     return interface_value_left(state_left_neighbor, state_self, state_right_neighbor);
   }

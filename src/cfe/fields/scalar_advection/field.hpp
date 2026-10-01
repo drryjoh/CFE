@@ -50,7 +50,8 @@ struct ScalarAdvectionField
   Vector<Scalar, Dim> velocity;
 
   // The physical flux Calculator for one axis: F_axis(state) = velocity[axis] * state.
-  CFE_HOST_DEVICE Scalar physical_flux(Scalar state, Axis axis) const
+  CFE_HOST_DEVICE
+  Scalar physical_flux(Scalar state, Axis axis) const
   {
     return velocity[static_cast<std::size_t>(axis)] * state;
   }
@@ -60,7 +61,8 @@ struct ScalarAdvectionField
   // future field with a state-dependent characteristic speed (e.g.
   // Burgers, where it's state itself) can use them; this field's wave
   // speed is simply that axis's velocity component.
-  CFE_HOST_DEVICE Scalar wave_speed(Scalar /*state_left*/, Scalar /*state_right*/, Axis axis) const
+  CFE_HOST_DEVICE
+  Scalar wave_speed(Scalar /*state_left*/, Scalar /*state_right*/, Axis axis) const
   {
     return velocity[static_cast<std::size_t>(axis)];
   }

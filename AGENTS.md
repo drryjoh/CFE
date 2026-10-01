@@ -142,11 +142,18 @@ Preferred style:
 ```cpp
 CFE_HOST_DEVICE
 CFE_FORCEINLINE
-auto square(const scalar& a)
+scalar square(const scalar& a)
 {
     return a * a;
 }
 ```
+
+`auto` is for local variables whose type is already obvious from the
+initializer (e.g. `auto grid = this->grid;`, `auto residual = [&](...){...};`),
+not for function/method return types: a function's signature is its
+contract, and a reader (including a student new to the codebase) should
+be able to see what a Calculator or numerics function returns without
+reading its body.
 
 and:
 

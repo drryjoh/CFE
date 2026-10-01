@@ -27,7 +27,8 @@
 namespace cfe {
 
 template <class Scalar, class Field>
-CFE_HOST_DEVICE Scalar upwind_flux(Scalar left_value, Scalar right_value, Axis axis, const Field& field)
+CFE_HOST_DEVICE
+Scalar upwind_flux(Scalar left_value, Scalar right_value, Axis axis, const Field& field)
 {
   const Scalar wave_speed = field.wave_speed(left_value, right_value, axis);
   return wave_speed >= Scalar(0) ? field.physical_flux(left_value, axis)
@@ -42,8 +43,8 @@ CFE_HOST_DEVICE Scalar upwind_flux(Scalar left_value, Scalar right_value, Axis a
 struct UpwindFlux
 {
   template <class Scalar, class Field>
-  CFE_HOST_DEVICE Scalar operator()(Scalar left_value, Scalar right_value, Axis axis,
-                                    const Field& field) const
+  CFE_HOST_DEVICE
+  Scalar operator()(Scalar left_value, Scalar right_value, Axis axis, const Field& field) const
   {
     return upwind_flux(left_value, right_value, axis, field);
   }

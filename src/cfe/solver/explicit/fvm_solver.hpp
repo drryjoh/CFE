@@ -55,10 +55,10 @@ namespace detail {
 // written out by hand.
 template <Axis A, class Scalar, class FieldViewT, class Reconstruction, class NumericalFlux,
           class Field>
-CFE_HOST_DEVICE Scalar axis_flux_difference(FieldViewT state, const CartesianGrid<Scalar>& grid,
-                                            std::size_t i, std::size_t j, std::size_t k,
-                                            const Reconstruction& reconstruction,
-                                            const NumericalFlux& numerical_flux, const Field& field)
+CFE_HOST_DEVICE
+Scalar axis_flux_difference(FieldViewT state, const CartesianGrid<Scalar>& grid, std::size_t i,
+                            std::size_t j, std::size_t k, const Reconstruction& reconstruction,
+                            const NumericalFlux& numerical_flux, const Field& field)
 {
   Scalar state_m2, state_m1, state_c, state_p1, state_p2, spacing;
   if constexpr (A == Axis::X) {
