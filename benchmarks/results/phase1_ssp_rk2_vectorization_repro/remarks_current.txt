@@ -1,0 +1,341 @@
+/tmp/repro/current/bench_scalar_advection.cpp:63:3: remark: the cost-model indicates that interleaving is not beneficial [-Rpass-analysis=loop-vectorize]
+   63 |   for (std::size_t i = 0; i < grid.nx; ++i) {
+      |   ^
+/tmp/repro/current/bench_scalar_advection.cpp:63:3: remark: vectorized loop (vectorization width: 2, interleaved count: 1) [-Rpass=loop-vectorize]
+/tmp/repro/current/bench_scalar_advection.cpp:63:3: remark: the cost-model indicates that interleaving is not beneficial [-Rpass-analysis=loop-vectorize]
+/tmp/repro/current/bench_scalar_advection.cpp:63:3: remark: vectorized loop (vectorization width: 2, interleaved count: 1) [-Rpass=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:19:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/serial.hpp:14:3: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+   14 |   for (Index i = 0; i < n; ++i) {
+      |   ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/serial.hpp:14:3: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:21:
+/private/tmp/CFE-phase1-doc/src/cfe/field/field.hpp:41:12: remark: loop not vectorized: cannot identify array bounds [-Rpass-analysis=loop-vectorize]
+   41 |     return data_[Layout::index(cell, component, n_cells_, NComponents)];
+      |            ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:19:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/serial.hpp:14:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+   14 |   for (Index i = 0; i < n; ++i) {
+      |   ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:21:
+/private/tmp/CFE-phase1-doc/src/cfe/field/field.hpp:41:12: remark: loop not vectorized: cannot identify array bounds [-Rpass-analysis=loop-vectorize]
+   41 |     return data_[Layout::index(cell, component, n_cells_, NComponents)];
+      |            ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:19:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/serial.hpp:14:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+   14 |   for (Index i = 0; i < n; ++i) {
+      |   ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:32:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   49 |   for (; __first != __last; ++__first)
+      |   ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:35:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/uninitialized_algorithms.h:625:5: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+  625 |     while (__iter != __last) {
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:29: remark: loop not vectorized: Loop contains an unsupported terminator [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |                             ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: Cannot vectorize early exit loop with writes to memory [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |   ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:14:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono:1073:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/formatter.h:30:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/ostream.h:42:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:327:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/istream:1411:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/ostream:201:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/format:251:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:276:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/deque:2656:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/functional:601:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/vector:314:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+  762 |     while (__new_last != __soon_to_be_end)
+      |     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:34:5: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+   34 |     for (Index i = 0; i < count; ++i) f(i);
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:32:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   49 |   for (; __first != __last; ++__first)
+      |   ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:35:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/uninitialized_algorithms.h:625:5: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+  625 |     while (__iter != __last) {
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:29: remark: loop not vectorized: Loop contains an unsupported terminator [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |                             ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: Cannot vectorize early exit loop with writes to memory [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |   ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:14:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono:1073:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/formatter.h:30:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/ostream.h:42:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:327:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/istream:1411:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/ostream:201:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/format:251:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:276:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/deque:2656:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/functional:601:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/vector:314:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+  762 |     while (__new_last != __soon_to_be_end)
+      |     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:34:5: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+   34 |     for (Index i = 0; i < count; ++i) f(i);
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:32:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   49 |   for (; __first != __last; ++__first)
+      |   ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:35:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/uninitialized_algorithms.h:625:5: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+  625 |     while (__iter != __last) {
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:29: remark: loop not vectorized: Loop contains an unsupported terminator [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |                             ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: Cannot vectorize early exit loop with writes to memory [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |   ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:14:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono:1073:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/formatter.h:30:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/ostream.h:42:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:327:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/istream:1411:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/ostream:201:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/format:251:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:276:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/deque:2656:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/functional:601:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/vector:314:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+  762 |     while (__new_last != __soon_to_be_end)
+      |     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:21:
+/private/tmp/CFE-phase1-doc/src/cfe/field/field.hpp:41:12: remark: loop not vectorized: cannot identify array bounds [-Rpass-analysis=loop-vectorize]
+   41 |     return data_[Layout::index(cell, component, n_cells_, NComponents)];
+      |            ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:34:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+   34 |     for (Index i = 0; i < count; ++i) f(i);
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:32:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   49 |   for (; __first != __last; ++__first)
+      |   ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/destroy.h:49:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:2063:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/memory:950:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/inout_ptr.h:16:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/shared_ptr.h:35:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/uninitialized_algorithms.h:625:5: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+  625 |     while (__iter != __last) {
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:29: remark: loop not vectorized: Loop contains an unsupported terminator [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |                             ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: Cannot vectorize early exit loop with writes to memory [-Rpass-analysis=loop-vectorize]
+   50 |   for (auto& w : workers) w.join();
+      |   ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:50:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:14:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono:1073:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/formatter.h:30:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/ostream.h:42:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:327:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/istream:1411:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/ostream:201:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/format:251:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:276:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/deque:2656:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/functional:601:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/vector:314:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+  762 |     while (__new_last != __soon_to_be_end)
+      |     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:21:
+/private/tmp/CFE-phase1-doc/src/cfe/field/field.hpp:41:12: remark: loop not vectorized: cannot identify array bounds [-Rpass-analysis=loop-vectorize]
+   41 |     return data_[Layout::index(cell, component, n_cells_, NComponents)];
+      |            ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:34:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+   34 |     for (Index i = 0; i < count; ++i) f(i);
+      |     ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:13:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/algorithm:1846:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy.h:12:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/copy_move_common.h:18:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__string/constexpr_c_functions.h:15:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__memory/construct_at.h:61:11: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+   61 |   __loc->~_Tp();
+      |           ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:14:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono:1073:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/formatter.h:30:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/ostream.h:42:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:327:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/istream:1411:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/ostream:201:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/format:251:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:276:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/deque:2656:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/functional:601:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/vector:314:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]
+  762 |     while (__new_last != __soon_to_be_end)
+      |     ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__vector/vector.h:762:5: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:14:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono:1073:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/formatter.h:30:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/ostream.h:42:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream:327:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/istream:1411:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/ostream:201:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/format:251:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/queue:276:
+In file included from /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/deque:224:
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__split_buffer:313:3: remark: loop not vectorized: value that could not be identified as reduction is used outside the loop [-Rpass-analysis=loop-vectorize]
+  313 |   while (__new_last != __end_)
+      |   ^
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__split_buffer:313:3: remark: loop not vectorized: Cannot vectorize uncountable loop [-Rpass-analysis=loop-vectorize]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__split_buffer:313:3: remark: loop not vectorized: could not determine number of loop iterations [-Rpass-analysis=loop-vectorize]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__split_buffer:313:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:21:
+/private/tmp/CFE-phase1-doc/src/cfe/field/field.hpp:41:12: remark: loop not vectorized: cannot identify array bounds [-Rpass-analysis=loop-vectorize]
+   41 |     return data_[Layout::index(cell, component, n_cells_, NComponents)];
+      |            ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:47:7: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+   47 |       for (Index i = begin; i < end; ++i) f(i);
+      |       ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:21:
+/private/tmp/CFE-phase1-doc/src/cfe/field/field.hpp:41:12: remark: loop not vectorized: cannot identify array bounds [-Rpass-analysis=loop-vectorize]
+   41 |     return data_[Layout::index(cell, component, n_cells_, NComponents)];
+      |            ^
+In file included from /tmp/repro/current/bench_scalar_advection.cpp:20:
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:47:7: remark: loop not vectorized [-Rpass-missed=loop-vectorize]
+   47 |       for (Index i = begin; i < end; ++i) f(i);
+      |       ^
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:47:7: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]
+/private/tmp/CFE-phase1-doc/src/cfe/backend/cpu/threaded.hpp:47:7: remark: vectorized loop (vectorization width: 2, interleaved count: 4) [-Rpass=loop-vectorize]

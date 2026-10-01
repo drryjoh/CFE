@@ -68,53 +68,53 @@ numbers previously here, which no longer reflect the current code).
    orders of magnitude beyond what is practical to sweep repeatedly on a
    laptop CPU.
 4. **A measured, disclosed, root-caused regression on the serial backend
-   only, confirmed to plateau rather than grow.** History: the original
-   baseline (before any of this measured 15.135 ms/step at 10M cells,
-   serial). A first fix (round 1 of code review: zero-fill every
-   ghost-cell residual entry in `FvmSolver::residual()`, working around
-   `ssp_rk2_step` touching every padded cell indiscriminately) regressed
-   this to 19.79 ms/step (~31%). The actual root-cause fix (round 2:
-   `ssp_rk2_step` now only ever visits real cells, via
+   only, confirmed to plateau rather than grow, and fully reproduced
+   under controlled conditions.** Full methodology, exact commits,
+   compile commands, raw logs, and vectorization remarks are committed in
+   [`0005-phase1-ssp-rk2-regression-reproducibility.md`](0005-phase1-ssp-rk2-regression-reproducibility.md)
+   — summary here, see that document for anything this summary
+   compresses away.
+
+   **Corrected finding** (superseding an earlier, less careful version of
+   this observation that compared numbers recorded in three different
+   work sessions, under three different and uncontrolled system-load
+   conditions): a controlled, same-session, same-compile-flags comparison
+   of the original pre-review code, round 1's ghost-zero-fill fix, and
+   round 2's interior-cells-only fix shows that **round 1's fix was not a
+   measurable regression at all** (original and round-1-intermediate
+   differ by <1% at every size from 1M to 100M cells, well within this
+   benchmark's own run-to-run noise). The one real, reproducible
+   regression is round 2 (`ssp_rk2_step` made interior-cells-only via
    `FvmSolver::active_cell_index_map()` — see ADR/agent_history for the
-   full design) regressed it *further*, to ~33 ms/step (~118% over the
-   original) — the opposite of what was expected, since this removed
-   work rather than adding it.
+   design) vs. *either* earlier version, at a consistent **~1.68x**, flat
+   from 1M cells through 100M cells (not a growing penalty, and not two
+   separate ~31%-then-~118% steps as previously reported).
+
    **Root cause, confirmed directly via `-Rpass-missed=loop-vectorize`
    (not inferred):** routing the per-cell storage index through
    `index_map(r)` instead of using the loop counter directly defeats the
-   compiler's auto-vectorization of the combine loop — before this
-   change, `src/cfe/backend/cpu/serial.hpp`'s loop vectorized at width 2
-   with 4x interleaving for this kernel; after, roughly half of its
-   instantiations fail to vectorize at all, confirmed by comparing
-   optimization-remark output between the two versions of the code, not
-   by a vectorization-remark check once removed from the two. A 1D-
-   specific fast path (avoiding integer division via `if constexpr` on
-   `Field::dim`) and force-inlining the index map (`CFE_FORCEINLINE`,
-   `AGENTS.md` #9's documented pattern) were both tried and neither
-   recovered the lost vectorization.
-   **Confirmed to be a flat, bounded penalty, not a growing one**: an
-   extended sweep to 50M and 100M cells (beyond this file's normal 4-size
-   sweep) shows the regression ratio holds at **~1.68x, stable from 10M
-   through 100M cells** — both versions individually scale perfectly
-   linearly with cell count (as expected for a bandwidth-bound kernel);
-   only the constant factor between them differs, and that factor does
-   not keep growing. This number is also consistent with the
-   vectorization-width-2 finding above (losing a 2x SIMD benefit could
-   cost up to ~2x; 1.68x is in that neighborhood once the
-   non-vectorizable fraction of the loop's own cost is accounted for) —
-   the mechanism and the magnitude corroborate each other.
-   **The threaded backend shows no regression at any size tested**,
-   confirmed to be because its inner loop (`backend/cpu/threaded.hpp`)
-   never auto-vectorized in the first place, for unrelated structural
-   reasons (`Cannot vectorize early exit loop with writes to memory`) —
-   verified by checking the *original* pre-review code's own remarks, not
-   assumed. Since threaded already wins at every scale this project
-   benchmarks, and GPU is the actual "at scale" evidence (`0003-...`,
-   confirmed unaffected by this same change), this was accepted as a
-   known, bounded, disclosed cost rather than chased further — recovering
-   the lost vectorization (compiler hints, or a compile-time fast path
-   for the common contiguous-offset case) is explicit future work, not a
-   dropped thread.
+   compiler's auto-vectorization of the combine loop for a meaningful
+   fraction of its instantiations — confirmed by comparing optimization-
+   remark output across all three versions (`0005-...`'s committed
+   `remarks_*.txt`), not by a check once removed from the actual compiled
+   code. A 1D-specific fast path (avoiding integer division via
+   `if constexpr` on `Field::dim`) and force-inlining the index map
+   (`CFE_FORCEINLINE`, `AGENTS.md` #9's documented pattern) were both
+   tried and neither recovered the lost vectorization.
+
+   **The threaded backend shows no regression at any size tested**
+   (statistically indistinguishable across all three versions, confirmed
+   in the same controlled comparison), consistent with its inner loop
+   (`backend/cpu/threaded.hpp`) never auto-vectorizing in the first
+   place, for unrelated structural reasons (`Cannot vectorize early exit
+   loop with writes to memory`) — verified by checking the *original*
+   pre-review code's own remarks, not assumed. Since threaded already
+   wins at every scale this project benchmarks, and GPU is the actual "at
+   scale" evidence (`0003-...`, confirmed unaffected by this same
+   change), this was accepted as a known, bounded, disclosed cost rather
+   than chased further — recovering the lost vectorization (compiler
+   hints, or a compile-time fast path for the common contiguous-offset
+   case) is explicit future work, not a dropped thread.
 
 ## What this resolves from the task spec
 

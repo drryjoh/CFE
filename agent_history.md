@@ -1083,3 +1083,140 @@ Item 4 (standalone tutorial build vs. documented behavior -- see the
 2026-09-30 entry above for the two options already sketched). After
 that, this PR should be fully caught up on every outstanding review
 item.
+
+---
+
+## 2026-10-01 — PR #2 cleanup round: reproducibility, docs, index-map tests, tutorial build fix
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Close out the last four outstanding items from PR #2's review, explicitly
+scoped as "minor cleanup" with the serial CPU regression accepted as a
+documented limitation (not something to recover in this change): (1) make
+the ~1.68x serial-backend regression's performance record reproducible,
+(2) correct `docs/type-reference.md`'s `ssp_rk2_step` signature and
+document `IdentityIndexMap`/`active_cell_count()`/`active_cell_index_map()`,
+(3) commit index-map regression tests (rectangular grids, ghost-untouched
+guarantee, AoS/SoA, multi-component), (4) fix the standalone tutorial
+build instructions.
+
+Files changed:
+- `docs/type-reference.md` -- corrected `ssp_rk2_step` signature
+  (`n_active`, `index_map` were missing), added `IdentityIndexMap` row,
+  extended `FvmSolver`'s row with `active_cell_count()`/
+  `active_cell_index_map()` and their role in interior-cells-only updates.
+- `tutorials/scalar_advection_3d_visualization/README.md`,
+  `tutorials/hello_parallel_for/README.md` -- standalone build command
+  corrected to `cmake --build build --target cfe_<name> -j`, with a new
+  paragraph explaining why `--target` is required (the standalone path
+  pulls the repo root in as a nested subdirectory purely to get
+  `cfe_core`, but that also re-enables `CFE_BUILD_TESTS`/`BENCHMARKS`/
+  `TUTORIALS` at their default-`ON` setting, so an unscoped
+  `cmake --build build` builds the whole project, not just the one
+  tutorial). Verified empirically: diffed `find build -type f -perm
+  +111` before/after a scoped build.
+- `tutorials/CMakeLists.txt` -- its existing convention comment extended
+  with the same explanation, so a new tutorial's author sees the reason
+  up front rather than rediscovering it.
+- `tests/unit/test_ssp_rk2_index_map.cpp` (new), `tests/CMakeLists.txt`
+  -- see Tests added.
+- `docs/performance/0005-phase1-ssp-rk2-regression-reproducibility.md`
+  (new) -- full reproducibility record: exact commits compared, compiler/
+  flags, reproduction commands, raw results table, vectorization-remark
+  counts, and an explicit "what this corrects" section.
+- `docs/performance/0004-phase1-scalar-advection-cpu-results.md` --
+  Observation 4 rewritten to match the corrected finding (see Performance
+  change below) and to point at `0005-...md` for full methodology.
+- `benchmarks/results/phase1_ssp_rk2_vectorization_repro/` (new) --
+  `run_{original,intermediate,current}.log` (raw 5-rep benchmark stdout),
+  `remarks_{original,intermediate,current}.txt` (full
+  `-Rpass{,-missed,-analysis}=loop-vectorize` compiler output),
+  `bench_scalar_advection_extended_sweep.cpp` (the benchmark source used,
+  swept out to 50M/100M cells).
+
+Tests added:
+`tests/unit/test_ssp_rk2_index_map.cpp` (5 tests, wired into
+`tests/CMakeLists.txt`): `CartesianRealCellIndexMap` is a bijection onto
+exactly the real cells on genuinely rectangular (nx != ny != nz) 2D and 3D
+grids -- deliberately non-cubic, since a cube can't catch an i/j-axis
+mixup in the index decomposition; `ssp_rk2_step`'s combine kernels leave
+every ghost entry of both `state` and `residual_scratch` exactly
+byte-for-byte untouched (sentinel values, zero tolerance, not just
+"isn't NaN"), using a residual callable with no ghost-fill of its own so
+the check isolates the combine step specifically; the whole mechanism
+works for a 3-component field under both `AoSLayout` and `SoALayout`
+(previously untested -- `FvmSolver`/`ScalarAdvectionField` hardcode
+N=1). Real-cell values are checked against the closed-form solution of
+Heun's method applied to `dy/dt=-y`, not just "moved in the right
+direction." 56/56 total (CPU), clean under ASan/UBSan.
+
+Benchmarks run:
+A from-scratch, same-session, same-compile-flags, same-commit
+reproduction of `cfe_bench_scalar_advection` (serial + threaded) at
+10K/100K/1M/10M/50M/100M cells, for three code versions in one sitting:
+`original` (`e5df5f9`, pre-review), `intermediate` (`e880a9e`, round 1's
+ghost-zero-fill fix), `current` (`HEAD`, round 2's interior-cells-only
+fix). Compiled with the project's exact Release flags (confirmed by
+reading `build/tests/CMakeFiles/cfe_unit_tests.dir/flags.make`), 5
+repetitions each, median of repetitions 2-5 (repetition 1 is a
+consistent cold-start outlier across all three versions). Full raw logs
+and remarks committed under `benchmarks/results/
+phase1_ssp_rk2_vectorization_repro/`.
+
+Performance change:
+**Corrects, rather than confirms, the previously-recorded numbers.** The
+2026-09-30/2026-10-01 entries above recorded a "15.135ms -> 19.79ms
+(+31%) -> ~33ms (+118%)" two-step regression story, built from numbers
+taken across three separate work sessions under uncontrolled,
+non-comparable system load. Under this session's controlled, single-
+sitting, same-compile-flags, same-commit comparison, `original` and
+`intermediate` are statistically indistinguishable (<1% apart at every
+size from 1M to 100M cells, well inside this benchmark's own run-to-run
+noise) -- round 1's ghost-zero-fill fix was **not** a measurable
+regression; the previously-recorded 19.79ms figure was very likely
+elevated by session-specific noise, not the code change. The one real,
+reproducible regression is `current` vs. *either* earlier version, at a
+consistent **~1.68x**, flat from 1M cells through 100M cells (not two
+separate ratios, and not a growing one). This does not change any
+correctness conclusion, the decision to accept the regression as a
+documented limitation, or its root cause (per the 2026-10-01 entry
+above) -- it only corrects the magnitude and attributes the entire
+regression to round 2's change specifically, reported to the user as
+such rather than silently reconciled with the old narrative. Threaded
+backend: statistically indistinguishable across all three versions at
+every size, confirmed directly in this same controlled comparison (not
+re-asserted from the earlier, less careful measurement).
+
+Scientific verification:
+Compared `git diff e5df5f9 e880a9e -- src/cfe/solver/time_integration/
+ssp_rk2.hpp` (empty -- confirms `intermediate`'s `ssp_rk2_step` is
+byte-for-byte `original`'s, isolating round 1's change to the residual
+zero-fill alone) before drawing any conclusion about which change caused
+what. An earlier, ad-hoc standalone reproduction attempt (not committed)
+was found to be unfaithful -- it dropped the real benchmark's anonymous-
+namespace scoping and dual Serial/Threaded template-instantiation
+structure -- and was discarded rather than reported; the committed
+numbers come only from compiling and running the actual
+`bench_scalar_advection.cpp` source (header-swapped per version via
+`-I overlay -I src`), confirmed identical to the project's own compile
+flags.
+
+Architecture decisions:
+None -- this round touched no production code, only tests, benchmarks,
+and documentation, per the user's explicit "keep this change limited to
+these items" scope.
+
+Known limitations:
+- The CPU serial-backend regression (flat ~1.68x, now reproducibly
+  measured) remains disclosed, root-caused, and bounded, but not
+  recovered -- accepted as a documented limitation for this PR per
+  explicit instruction.
+
+Next recommended task:
+PR #2 is now caught up on every outstanding review item across three
+rounds. Recommended next: open the follow-up task for recovering the
+lost auto-vectorization (compiler hints, or a compile-time fast path for
+the common contiguous-offset case), tracked as explicit future work in
+`docs/performance/0004-...md` Observation 4 and `0005-...md`.
