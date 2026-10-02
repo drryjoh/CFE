@@ -530,3 +530,693 @@ Merge PR #1, then proceed to `tasks/0002-phase1-cartesian-grid-scalar-transport.
 (already scoped on `cfe/development/phase_0002`). When ADR 0003
 (case-specific compilation) is eventually implemented, it should select
 `Field`'s `Layout` parameter per-backend per ADR 0002's decision above.
+
+---
+
+## 2026-09-10 — Phase 1 core implementation: Cartesian grid and scalar transport (CPU)
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Add the smallest Cartesian grid and explicit scalar-transport capability
+needed to exercise Phase 0's execution/storage foundation on an actual
+PDE, with formal 2nd-order convergence evidence, while keeping the
+interface-flux abstraction DG-hybridizable (AGENTS.md #19) and the grid/
+ghost-cell layer AMR-ready (PI direction, 2026-09-10: no AMR yet, but do
+not foreclose fixed block-based refinement).
+
+Files changed (new unless noted):
+- `src/cfe/core/types.hpp` -- `Axis`/`Side` enums, moved here (not
+  `cartesian_grid.hpp`) so numerics code doesn't depend on the grid
+  module.
+- `src/cfe/grid/structured/cartesian_grid.hpp` -- `CartesianGrid<Scalar>`:
+  1D/2D/3D uniform grid, `(i,j,k)` <-> flat-cell-index conversion
+  including ghost layers, block-scoped `dx/dy/dz`/origin (not a global
+  constant, per the AMR-readiness constraint). Templated on `Scalar`
+  (initially hardcoded `double`; caught and fixed mid-session).
+- `src/cfe/grid/boundary/boundary_condition.hpp` -- `PeriodicBoundary`,
+  `StaticBoundary<Scalar,N>`; duck-typed `fill_x/y/z`, deliberately not a
+  polymorphic base class (AGENTS.md #12).
+- `src/cfe/grid/ghost/ghost_fill.hpp` -- `fill_ghost_cells(field, grid,
+  axis, boundary)`, the single call-site dispatch and the actual
+  swappable "neighbor provider" seam the AMR-readiness constraint asked
+  for.
+- `src/cfe/numerics/fvm/interface_value.hpp` -- `fvm::interface_value_right/left`
+  free functions plus `fvm::CentralDifferenceReconstruction`, a stateless
+  functor wrapper used as `FvmSolver`'s default `Reconstruction` template
+  parameter (not called by hardcoded name -- see Architecture decisions).
+- `src/cfe/numerics/numerical_flux/upwind.hpp` -- `upwind_flux`/`UpwindFlux`:
+  takes two one-sided face values, an `Axis`, and a `Field`, calling only
+  `field.physical_flux(...)`/`field.wave_speed(...)` -- fully
+  physics-agnostic, reworked twice this session to remove an initial
+  hardcoded single-scalar-speed assumption.
+- `src/cfe/fields/scalar_advection/field.hpp` -- `ScalarAdvectionField<Scalar,Dim>`:
+  owns the physics (`Vector<Scalar,Dim>` velocity, `physical_flux`/
+  `wave_speed` Calculators per ARCHITECTURE.md #2's Field/Calculator
+  split). Replaced an earlier, deleted `LinearAdvectionFlux`
+  (single-scalar-speed) design after review caught that the solver was
+  not actually grid/dimension-agnostic yet.
+- `src/cfe/solver/time_integration/ssp_rk2.hpp` -- `ssp_rk2_step`,
+  generic over any `residual(q_in, out)` callable; no knowledge of grids
+  or boundary conditions.
+- `src/cfe/solver/explicit/fvm_solver.hpp` -- `FvmSolver<Scalar, Layout,
+  Field, BoundaryX, BoundaryY=BoundaryX, BoundaryZ=BoundaryX,
+  Reconstruction=CentralDifferenceReconstruction, NumericalFlux=UpwindFlux>`:
+  the orchestrator. `detail::axis_flux_difference<Axis A>` factors out
+  X/Y/Z duplication via `if constexpr` (changed from runtime `if
+  (y_active)` after review asked for compile-time dimension branching).
+  Dimension-agnostic via `if constexpr (Field::dim >= 2/3)`.
+- `docs/type-reference.md` -- new (added at the reviewer's request,
+  formalized as AGENTS.md #27: every new public type must be added here
+  in the same change).
+- Tests: `test_grid_indexing.cpp`, `test_boundary_conditions.cpp`,
+  `test_interface_flux.cpp`, `test_ssp_rk2.cpp`,
+  `test_scalar_advection_convergence.cpp`,
+  `test_scalar_advection_conservation.cpp`,
+  `test_scalar_advection_2d_sanity.cpp`.
+
+Tests added:
+All of the above. 43/43 tests pass (23 from Phase 0 + 20 new), CPU
+serial and threaded backends agree.
+
+Benchmarks run:
+None this session (CPU benchmark sweep and CUDA port deferred to the
+2026-09-29 entry below).
+
+Performance change:
+None measured this session.
+
+Scientific verification:
+`test_scalar_advection_second_order_convergence` (the Phase 1 acceptance
+bar, ROADMAP.md): L2 error at `nx = 20, 40, 80, 160` drops by a ratio in
+`(3.5, 4.5)` at every consecutive pair -- 2nd-order convergence confirmed
+by measurement, not assumption. `test_scalar_advection_conserves_total_quantity_over_periodic_domain`:
+total transported quantity conserved to `1e-9` after 200 SSP-RK2 steps on
+a periodic domain -- a structural property of conservative flux
+differencing, verified rather than assumed. `test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velocity_is_zero`:
+2D solve with zero Y-velocity matches the 1D solve row-for-row to
+`1e-12` -- confirms the Y-axis code path (otherwise only exercised by
+grid/boundary unit tests) behaves correctly inside an actual solve.
+
+Architecture decisions:
+- Reviewer feedback drove three real design changes during this session,
+  each recorded because the reasoning matters for whoever reads this
+  later: (1) `Reconstruction`/`NumericalFlux` must be template
+  parameters, not hardcoded calls, so future schemes (MUSCL, WENO,
+  Rusanov, HLLC) can be swapped without touching `residual()`; (2)
+  `Solver` must call into `Field` for physics (velocity, flux formula),
+  not embed a flux formula itself -- `Field` owns its Calculators, per
+  ARCHITECTURE.md #2; (3) the solver's residual loop must be
+  dimension-agnostic (`if constexpr (Field::dim >= 2/3)`), with velocity
+  itself a `Vector<Scalar,Dim>` sized to the problem's actual
+  dimensionality, so 1D/2D/3D transport is the same types at a different
+  `Dim`, not different types.
+- Naming: reviewer flagged abbreviated codebase-specific shorthand
+  (`recon`, `num_flux`) as unreadable; renamed throughout to full words
+  (`reconstruction`, `numerical_flux`). Genuine domain notation (`q`,
+  `dx`, `im1`) was explicitly kept as-is -- the objection was to
+  abbreviating *concepts*, not established mathematical notation.
+- See ADR 0004 (updated) and ADR 0007 (new) in the 2026-09-29 entry below
+  for the formal ADR writeups of the interface-flux design and the
+  SSP-RK2-over-RK3 choice made this session.
+
+Known limitations:
+- CPU-only at this point -- CUDA port not yet attempted (see below).
+- No benchmark numbers yet for the scalar-advection kernel itself.
+- ADRs, presentation, and this agent_history entry itself were written
+  retroactively on 2026-09-29 alongside the CUDA work, not in the same
+  session as the code above -- a process gap worth naming: AGENTS.md #4/#5
+  ask for these to be written as the work happens, and they were not, for
+  work spanning 2026-09-10 through 2026-09-29.
+
+Next recommended task:
+Port to CUDA (PSC Bridges-2 V100, per `docs/bridges2-setup.md`), then
+write the CPU benchmark sweep, ADR updates, and presentation -- see the
+2026-09-29 entry below for how all of that went.
+
+---
+
+## 2026-09-29 — CUDA port, at-scale benchmarks (1D + 3D), visualization, and Phase 1 closeout
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Get the scalar-transport solver from the prior entry running correctly
+on CUDA (PSC Bridges-2 V100) and demonstrated "at scale," then close out
+the remaining Phase 1 deliverables the task spec requires: CPU benchmark
+sweep, ADR updates, presentation, this entry.
+
+Files changed:
+- `src/cfe/backend/parallel_for.hpp` -- `CpuParallelFor` tag
+  (`Backend::run(n, f)` wrapping `cfe::parallel_for`).
+- `src/cfe/backend/cuda/cuda_backend.cuh` -- `CudaParallelFor` tag
+  (CUDA-only), deliberately does not `synchronize()` per launch (default
+  CUDA stream is in-order; only a host-side read needs to synchronize).
+- `src/cfe/grid/boundary/boundary_condition.hpp`,
+  `src/cfe/grid/ghost/ghost_fill.hpp`,
+  `src/cfe/solver/time_integration/ssp_rk2.hpp`,
+  `src/cfe/solver/explicit/fvm_solver.hpp` -- threaded a `Backend`
+  template parameter (default `CpuParallelFor`) through every kernel
+  launch, so the same code compiles for CPU or CUDA. `Backend` placed
+  *first* in `fill_x/y/z`'s template parameter list specifically because
+  `PeriodicBoundary` and `StaticBoundary<Scalar,N>` have different
+  numbers of remaining deducible parameters.
+- `src/cfe/solver/explicit/fvm_solver.hpp` -- added `SolverResidual<Solver>`,
+  a named (namespace-scope) functor wrapping `Solver::residual`. Required
+  because nvcc forbids a *locally-defined* lambda as a template argument
+  to a function whose body contains an extended `__device__` lambda
+  (`ssp_rk2_step`), in any instantiation compiled within a `.cu` file --
+  this affected even the CPU-backend instantiation.
+- `tests/unit/test_scalar_advection_cuda.cu` -- new; 1D CPU-vs-GPU
+  correctness (256 cells, 50 SSP-RK2 steps, `1e-9` tolerance).
+- `tests/unit/test_scalar_advection_3d_cuda.cu` -- new; 3D CPU-vs-GPU
+  correctness (32^3, direction-dependent velocity `(1.0,0.6,0.3)`, all
+  three `axis_flux_difference` branches active, 30 steps, `1e-9`
+  tolerance) -- added after noticing the 1D case alone does not prove
+  the Y/Z flux branches work on real hardware.
+- `benchmarks/scalar_advection/bench_scalar_advection.cpp` -- new; CPU
+  sweep (serial/threaded, `nx = 10^4..10^7`).
+- `benchmarks/scalar_advection/bench_scalar_advection_cuda.cu` -- new; 1D
+  CUDA sweep (`nx = 10^6..10^8`).
+- `benchmarks/scalar_advection/bench_scalar_advection_3d_cuda.cu` -- new;
+  3D CUDA sweep (`nx=ny=nz = 64..512`).
+- `src/cfe/io/vtk_writer.hpp` -- new; minimal legacy-VTK
+  (`STRUCTURED_POINTS`, ASCII, cell-centered scalar) writer, per
+  ARCHITECTURE.md #19 ("API over an established format, not a custom
+  one").
+- `tutorials/scalar_advection_3d_visualization/` -- new; CPU-only
+  driver advecting a Gaussian bump on a periodic 64^3 grid, writing a
+  41-frame VTK time series + `.pvd` manifest for ParaView.
+- `docs/performance/0003-phase1-scalar-advection-cuda-results.md` -- new;
+  1D and 3D CUDA results.
+- `docs/performance/0004-phase1-scalar-advection-cpu-results.md` -- new;
+  CPU sweep results.
+- `docs/adr/0004-grid-connectivity.md` -- extended from an unevidenced
+  "Proposed" placeholder to "Accepted for the Cartesian/FVM scope," with
+  evidence from the actual `CartesianGrid`/ghost-cell/boundary-condition
+  implementation.
+- `docs/adr/0007-interface-flux-and-time-integration.md` -- new; records
+  the two-stage `Reconstruction`+`NumericalFlux` design and the
+  SSP-RK2-over-RK3 choice, with the measured convergence-order evidence.
+- `presentations/0002-phase1-cartesian-grid-scalar-transport.md` -- new.
+- This entry and the one above it.
+
+Tests added:
+`test_scalar_advection_cuda.cu`, `test_scalar_advection_3d_cuda.cu`. All
+49/49 tests pass on the V100 (PSC Bridges-2, node `v016`/`v020`, jobs
+`47265530`/`47267793`/`47269636`) -- 43 CPU + 2 pre-existing Phase 0 CUDA
++ 2 new Phase 1 CUDA + 2 pre-existing Phase 0 CUDA (dtype/layout
+variants). CPU-only rebuild throughout stayed at 43/43 with no behavior
+change, confirmed before and after every commit.
+
+Benchmarks run:
+- CPU (`cfe_bench_scalar_advection`, Apple M5): `nx = 10^4..10^7`,
+  serial and threaded. See
+  `docs/performance/0004-phase1-scalar-advection-cpu-results.md`.
+- CUDA 1D (`cfe_bench_scalar_advection_cuda`, V100): `nx = 10^6..10^8`.
+- CUDA 3D (`cfe_bench_scalar_advection_3d_cuda`, V100): `nx=ny=nz = 64..512`.
+  Full results and raw CSVs in
+  `docs/performance/0003-phase1-scalar-advection-cuda-results.md`.
+
+Performance change:
+First scalar-advection baseline on every backend. Headline numbers: CPU
+threaded reaches ~8.2e8 cell-updates/s at 10M cells (1.25x serial); GPU
+1D reaches ~8.8e9 cell-updates/s, plateauing by 10M cells, sustaining
+100M cells in 11.3ms/step; GPU 3D reaches ~4.4-5.7e9 cell-updates/s
+(lower than 1D as expected, since 3D does ~3x the per-cell flux/
+ghost-fill work), sustaining 512^3 (~134M cells) in 30.6ms/step.
+
+Scientific verification:
+CUDA correctness verified against the CPU reference to `1e-9`, both 1D
+(256 cells, 50 steps) and 3D (32^3, 30 steps, direction-dependent
+velocity exercising all three flux axes). The visualization tutorial's
+output was independently verified, not just eyeballed: the advected
+Gaussian bump's peak-cell position across all 41 output frames matches
+the closed-form advected position (`(x0 + v*t) mod domain_length`)
+exactly, including two axes visibly wrapping the periodic boundary.
+
+Architecture decisions:
+- ADR 0004 (grid connectivity): moved from unevidenced "Proposed" to
+  "Accepted for the Cartesian/FVM scope" -- see the ADR for the full
+  evidence (flat-index-only-in-grid, ghost-in-Field, block-scoped
+  spacing, swappable boundary conditions).
+- ADR 0007 (new): interface-flux two-stage design (Reconstruction +
+  NumericalFlux, both template parameters) and SSP-RK2-over-RK3, with
+  the measured convergence-order table as evidence.
+
+Known limitations:
+- The 400^3/512^3 CUDA 3D benchmark cases show a throughput dip relative
+  to the 256^3 peak, not root-caused (no Nsight Compute profiling run
+  against this kernel, unlike Phase 0's memory-layout study).
+- The visualization tutorial and CPU/CUDA benchmarks are all 1D or
+  single-block 3D; multi-block/AMR-relevant scaling remains explicitly
+  out of scope for Phase 1 per the PI direction.
+- ADR 0003 (case-specific compilation) still does not exist, so
+  `Backend`/`Layout` must be selected explicitly by every call site
+  rather than derived automatically -- unchanged from Phase 0's known
+  limitation.
+
+Next recommended task:
+Open the PR for `cfe/development/phase_0002` -> `main` (mirroring Phase
+0's PR #1 workflow; final merge decision left to the PI). After merge,
+proceed to Phase 2 (per ROADMAP.md) -- the first nonlinear equation, and
+the point at which the `Reconstruction`/`NumericalFlux` genericity and
+the DG-hybridizable interface-flux shape (ADR 0007) get their first real
+test beyond linear scalar advection.
+
+---
+
+## 2026-09-30 — PR #2 code review response
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Respond to a local code review of PR #2 (`docs/pr-2-review.md`-style
+findings, not posted to GitHub): two "request changes" findings and six
+advisory recommendations. For each, independently verify the claim
+before acting on it, then implement a fix or give evidence for declining.
+
+Files changed:
+- `src/cfe/solver/explicit/fvm_solver.hpp` -- `residual()` now writes a
+  defined value (0) to every *ghost* cell of `out`, not just real cells,
+  via new `detail::zero_ghost_residual_x/y/z` helpers (mirroring
+  `PeriodicBoundary::fill_x/y/z`'s own index enumeration, minus the
+  "read a source" part). Added host-side assertions for positive
+  extent/spacing and documented inactive-axis shape (`ny==1, ngy==0`
+  when `Field::dim<2`, etc.). Corrected the header comment's claim that
+  "a future Burgers or Euler field plugs in here unchanged" -- Euler
+  needs this type generalized over `NComponents` first, since it
+  hardcodes `FieldView<Scalar,1,Layout>` and component `0` throughout.
+  Trimmed a duplicative "why dimension-agnostic" paragraph, pointing to
+  ADR 0004/type-reference.md instead of re-deriving it inline.
+- `src/cfe/grid/boundary/boundary_condition.hpp` -- `PeriodicBoundary::
+  fill_x/y/z` now assert `nx>=ngx` (`ny>=ngy`, `nz>=ngz`): on a grid
+  narrower than its own ghost depth, the "opposite real boundary" index
+  arithmetic underflows into the ghost region itself, making one ghost
+  cell's "source" another ghost cell written by the same parallel fill
+  -- a genuine cross-thread race on some execution orders, not merely
+  "looks wrong."
+- `src/cfe/fields/scalar_advection/field.hpp`,
+  `src/cfe/numerics/numerical_flux/upwind.hpp`,
+  `docs/adr/0007-interface-flux-and-time-integration.md`,
+  `docs/type-reference.md` -- corrected the same "Burgers or Euler plugs
+  in unchanged" overclaim everywhere it appeared. Burgers (still
+  single-component) genuinely needs zero interface changes; Euler does
+  not, and `UpwindFlux`'s plain sign-of-wave-speed switch is not itself
+  an entropy-correct Burgers solver or a valid Euler Riemann solver
+  either way -- a different `NumericalFlux` type would be needed, not
+  just a different `Field`.
+- `docs/adr/0007-...md` -- corrected an overclaim conflating asymptotic
+  convergence *order* with absolute error at a fixed resolution (SSP-RK2
+  vs. SSP-RK3): the order argument is correct and was verified, but does
+  not by itself prove SSP-RK3 couldn't reduce absolute error at any one
+  resolution. Corrected MUSCL's order (ordinarily 2nd, same as the
+  scheme already used here) out of an incorrect ">2nd order" grouping
+  with WENO.
+- `tests/unit/test_framework.hpp` -- `CFE_CHECK_NEAR` now explicitly
+  rejects non-finite values before the tolerance comparison:
+  `std::fabs(NaN - x) > tol` is always false, so a NaN on either side
+  previously passed silently -- a real gap in this project's primary
+  CPU/GPU cross-backend acceptance gate.
+- `tests/unit/test_scalar_advection_convergence_variants.cpp` (new) --
+  2nd-order convergence at negative advection speed (double) and at
+  float precision, both against the analytic solution (not just
+  cross-backend agreement).
+- `tests/unit/test_scalar_advection_2d_convergence.cpp` (new) -- genuine
+  multi-axis analytic-solution convergence check: nonzero velocity on
+  *both* X and Y (existing 2D test deliberately zeroed Y-velocity,
+  degenerating every row into an independent 1D problem), checked
+  against the exact product-of-sines traveling-wave solution, not just
+  CPU/GPU agreement.
+- `docs/performance/0004-...md`, `benchmarks/results/phase1_scalar_advection_cpu_apple_m5.csv`
+  -- re-measured after the fixes above; see Performance change below.
+
+Tests added:
+`test_scalar_advection_second_order_convergence_negative_velocity`,
+`test_scalar_advection_second_order_convergence_float_precision`,
+`test_scalar_advection_2d_second_order_convergence_with_nonzero_xy_velocity`.
+46/46 tests pass (43 existing + 3 new), on both serial and threaded
+backends, clean under AddressSanitizer + UndefinedBehaviorSanitizer.
+
+Benchmarks run:
+Re-ran `cfe_bench_scalar_advection` (Apple M5) after the ghost-residual
+fix; see Performance change and `docs/performance/0004-...md` Observation
+4 for the full investigation.
+
+Performance change:
+A first, naive fix (zero-fill `out`'s *entire* padded range before the
+real-cell kernel) regressed serial 10M-cell performance from 15.135ms to
+21.21ms/step (~40%) -- root-caused to rewriting every real cell's
+residual twice (once as 0, once with its actual value), confirmed by a
+controlled same-session A/B against the pre-fix code. Replaced with a
+ghost-cells-only fix (`zero_ghost_residual_x/y/z`, touching only the
+thin ghost shell via the same index enumeration `PeriodicBoundary`
+already uses), which reduced but did not eliminate the regression: serial
+10M cells now measures ~19.79ms/step (~30% slower than the original
+15.135ms baseline), while the threaded backend shows no measurable
+regression at any tested size. Investigated directly (same-session A/B
+isolation, an `__attribute__((noinline))` experiment that made things
+markedly worse, ruling out an inlining-pollution theory) and traced to a
+serial-backend-specific compiler code-generation sensitivity around the
+extra small kernel launch, not a genuine per-cell cost (the data touched
+is a handful of ghost cells, far too little to explain 30% on its own).
+Not fully root-caused further -- see `docs/performance/0004-...md`
+Observation 4 for the full reasoning on why this was an acceptable place
+to stop (correctness priority, threaded backend unaffected, GPU is the
+actual "at scale" evidence).
+
+Scientific verification:
+Both P2 findings were independently reproduced before being trusted:
+a standalone repro poisoning `residual_scratch` with NaN before a
+constant-periodic-field step confirmed NaN leaking into the output
+state's ghost cells (matching the review's predicted symptom exactly);
+a standalone repro using a custom reverse-iteration-order `Backend` tag
+on an `nx=1, ngx=2` grid reproduced the exact `0 7 | 7 | 7 0` wrong-ghost
+pattern the review predicted by hand-derivation. Both repros were re-run
+after each fix: the NaN repro now shows no NaN anywhere in the output;
+the small-grid repro now fails its new assertion instead of silently
+producing wrong values. Full suite re-verified clean under ASan+UBSan on
+both serial and threaded backends after all fixes.
+
+Architecture decisions:
+- Declined one recommendation, with reasoning recorded rather than
+  silently ignored: shortening every header comment to "contracts,
+  stencil requirements, and surprising constraints," moving all
+  architectural narrative to ADRs. Applied narrowly to the single
+  worst-offending duplication (`fvm_solver.hpp`'s dimension-agnostic
+  paragraph, now a pointer to ADR 0004/type-reference.md instead of a
+  re-derivation), but declined as a blanket sweep: this project's
+  comments-with-rationale style has been an explicit, repeated
+  preference throughout Phase 0 and Phase 1 (not merely an oversight),
+  and has concretely paid for itself this session -- several of the PI's
+  own questions this session ("what is q", "should I be concerned about
+  ijk", "is this efficient, can we use compile time") were answerable
+  quickly precisely because the relevant reasoning already lived next
+  to the code, not only in an ADR several files away.
+- PeriodicBoundary's `nx < ngx` restriction is enforced via `assert`
+  (compiled out under `NDEBUG`/Release, matching the existing `ngx>=2`
+  precedent in the same function), not a runtime-checked exception:
+  no current grid configuration in this codebase needs `nx < ngx`, and
+  the reviewer's own recommendation explicitly allowed "rejecting them
+  is also a valid initial contract."
+
+Known limitations:
+- The ~30% serial-backend-only performance regression at large
+  `n_cells` (see Performance change above) is measured and disclosed,
+  not resolved to its true root cause.
+- CUDA correctness and benchmarks were re-verified on real hardware
+  after these fixes (see the follow-up note below/next entry if a
+  separate session recorded it) -- the reviewer's own validation could
+  not cover CUDA (no hardware available to them).
+- Euler support remains entirely out of scope, as it was before this
+  review; the comment corrections above only make that explicit where
+  it was previously (incorrectly) implied otherwise.
+
+Next recommended task:
+Re-verify this entry's CUDA claims on PSC Bridges-2 if not already done
+in the same session, then proceed with opening/updating PR #2 for
+review of these fixes.
+
+---
+
+## 2026-10-01 — Fix ssp_rk2_step at its root: interior-cells-only (PR #2 follow-up review, continued)
+
+Agent:
+Claude (Claude Code)
+
+Model:
+claude-sonnet-5
+
+Objective:
+Finish the 2026-09-30 follow-up review's two remaining items (serial
+performance root cause, standalone-tutorial-build docs). Item 3 changed
+scope mid-session: the user, independently reasoning through the ghost-
+cell architecture, correctly identified that `ssp_rk2_step` touching
+ghost cells at all (requiring round 1's zero-fill workaround) was itself
+the actual bug -- not something to optimize around. This entry covers
+implementing that root-cause fix and everything it surfaced; item 4
+(tutorial build docs) remains for a later session.
+
+Files changed:
+- `src/cfe/solver/time_integration/ssp_rk2.hpp` -- new `IdentityIndexMap`
+  (default, for no-grid callers); `ssp_rk2_step` gains `n_active` and
+  `IndexMap index_map = IndexMap{}` trailing parameters. Combine kernels
+  now iterate `[0, n_active)` through `index_map(r)`, never touching any
+  index outside that set -- ghost cells are structurally never read or
+  written, matching standard FVM practice (fill ghosts -> compute
+  residual on interior cells -> integrate interior cells only) rather
+  than the previous "touch everything, including ghosts" design that
+  made round 1's zero-fill workaround necessary in the first place.
+- `src/cfe/solver/explicit/fvm_solver.hpp` -- removed
+  `zero_ghost_residual_x/y/z` entirely (nothing reads `out`'s ghost cells
+  anymore, so nothing needs to define them). Added
+  `detail::CartesianRealCellIndexMap<Scalar, Dim>` (the index-map
+  implementation, specialized per `Dim` via `if constexpr` -- see
+  Performance change) and `FvmSolver::active_cell_count()`/
+  `active_cell_index_map()` accessors.
+- Every `ssp_rk2_step` call site updated (two trailing arguments):
+  `test_ssp_rk2.cpp` (uses `state.n_cells()` + default `IdentityIndexMap`,
+  no grid at all), the five CPU convergence/conservation/sanity tests,
+  both CUDA tests, all three benchmarks, the visualization tutorial.
+- `tests/unit/test_fvm_solver_ghost_residual.cpp` -- header comment
+  updated to describe the new mechanism (structural impossibility, not a
+  defined placeholder) while keeping the same NaN-poisoning regression
+  test, now poisoning the *entire* padded `residual_scratch` range.
+- `src/cfe/backend/cuda/device_field.cuh` -- `DeviceField` now
+  zero-initializes via `cudaMemset` right after `cudaMalloc` (see
+  Scientific verification).
+- `docs/performance/0003-...md`, `0004-...md`,
+  `benchmarks/results/phase1_scalar_advection_cpu_apple_m5.csv` --
+  updated with this round's final, re-verified numbers.
+
+Tests added:
+None new (the existing 51 CPU + 6 CUDA tests cover this change; no new
+test was needed beyond updating existing call sites). 51/51 CPU, 57/57
+total with CUDA.
+
+Benchmarks run:
+`cfe_bench_scalar_advection` (Apple M5, serial + threaded, repeated
+many times for stability — this session's numbers were unusually noisy
+at first, requiring several repeated full sweeps to separate signal from
+thermal/background-load noise), plus an ad-hoc extended sweep to 50M/
+100M cells (beyond the committed benchmark's normal range) specifically
+to check whether the regression below grows or plateaus with size.
+`cfe_bench_scalar_advection_cuda` and `_3d_cuda` on the V100 (job
+`47314879`, node `v006`), both before and after the `DeviceField` fix.
+
+Performance change:
+**Not a net improvement as hoped going in.** The architecturally-correct
+fix regressed the CPU serial backend *further* than round 1's workaround
+(serial, 10M cells: 15.135ms original -> 19.79ms round-1 workaround ->
+~33ms this round, a ~118% regression from original). Root-caused with
+direct evidence (not inferred) via `-Rpass-missed=loop-vectorize`: routing
+the per-cell storage index through `index_map(r)` instead of the raw loop
+counter defeats the compiler's auto-vectorization of the combine loop,
+confirmed by diffing optimization-remark output before/after. Tried and
+rejected as insufficient: a `Dim`-specialized fast path avoiding integer
+division for 1D/2D (`if constexpr`, matching this project's existing
+dimension-dispatch convention), and `CFE_FORCEINLINE` on the index map
+(`AGENTS.md` #9's documented host/device pattern) -- neither recovered
+the lost vectorization. Confirmed via an extended 50M/100M-cell sweep
+that the regression is a **flat ~1.68x, not a growing one** -- both
+versions scale linearly with cell count individually; only the constant
+factor between them differs, and that factor is stable from 10M through
+100M cells, consistent in magnitude with the measured vectorization-width
+loss (width 2, so up to ~2x). The threaded backend shows no regression at
+any size -- confirmed (not assumed) by checking that its inner loop
+(`backend/cpu/threaded.hpp`) already failed to auto-vectorize in the
+*original* pre-review code, for unrelated structural reasons
+(`Cannot vectorize early exit loop with writes to memory`). GPU
+benchmarks (1D and 3D) show zero change from this entire investigation,
+both before and after the `DeviceField` fix below.
+
+Scientific verification:
+Re-running `compute-sanitizer --tool initcheck` on the V100 after this
+change (rather than assuming round 1's "0 errors" result still held)
+surfaced a second, genuine, newly-introduced bug: 1600 uninitialized-
+memory-read errors, entirely isolated to the 3D CUDA test (the 1D test
+was clean). Root cause: `fill_ghost_cells`'s per-axis fill (e.g.
+`fill_x`) must read across the *entire* padded extent of the other two
+axes, not just their real range, to correctly fill corners/edges later
+fill_y/fill_z calls depend on -- on a 2D/3D grid, cells real in X but
+ghost in Y or Z are legitimate read sources for `fill_x`, but the new
+interior-cells-only combine step never writes them, and `DeviceField`'s
+raw `cudaMalloc` never defined them either. Fixed by zero-initializing
+`DeviceField` at construction, matching `cfe::Field`'s host-side
+`std::vector` semantics (a fix considered and explicitly declined in an
+earlier round as redundant -- that reasoning no longer held once the
+combine step stopped touching every cell). Re-verified: 0 errors, 57/57
+tests, no benchmark change.
+
+Architecture decisions:
+- `ssp_rk2_step`'s "grid-agnostic" contract is now expressed as "generic
+  over an index-mapping concept" rather than "touches every cell of
+  whatever FieldView it's given" -- arguably a *more* correct notion of
+  genericity (a future unstructured-grid solver could supply its own
+  index map), not a compromise of the original design goal.
+- Declined (for this session): recovering the lost auto-vectorization.
+  Recorded as explicit, prioritized future work (compiler vectorization
+  pragmas; a compile-time fast path for the common contiguous-offset
+  case; explicit SIMD as a last resort) rather than left as a silent gap
+  -- see `docs/performance/0004-...md` Observation 4.
+
+Known limitations:
+- The CPU serial-backend regression (flat ~1.68x) is disclosed, root-
+  caused, and bounded, but not recovered.
+- Item 4 from the 2026-09-30 follow-up review (standalone-tutorial-build
+  README accuracy) is still not done.
+
+Next recommended task:
+Item 4 (standalone tutorial build vs. documented behavior -- see the
+2026-09-30 entry above for the two options already sketched). After
+that, this PR should be fully caught up on every outstanding review
+item.
+
+---
+
+## 2026-10-01 — PR #2 cleanup round: reproducibility, docs, index-map tests, tutorial build fix
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Close out the last four outstanding items from PR #2's review, explicitly
+scoped as "minor cleanup" with the serial CPU regression accepted as a
+documented limitation (not something to recover in this change): (1) make
+the ~1.68x serial-backend regression's performance record reproducible,
+(2) correct `docs/type-reference.md`'s `ssp_rk2_step` signature and
+document `IdentityIndexMap`/`active_cell_count()`/`active_cell_index_map()`,
+(3) commit index-map regression tests (rectangular grids, ghost-untouched
+guarantee, AoS/SoA, multi-component), (4) fix the standalone tutorial
+build instructions.
+
+Files changed:
+- `docs/type-reference.md` -- corrected `ssp_rk2_step` signature
+  (`n_active`, `index_map` were missing), added `IdentityIndexMap` row,
+  extended `FvmSolver`'s row with `active_cell_count()`/
+  `active_cell_index_map()` and their role in interior-cells-only updates.
+- `tutorials/scalar_advection_3d_visualization/README.md`,
+  `tutorials/hello_parallel_for/README.md` -- standalone build command
+  corrected to `cmake --build build --target cfe_<name> -j`, with a new
+  paragraph explaining why `--target` is required (the standalone path
+  pulls the repo root in as a nested subdirectory purely to get
+  `cfe_core`, but that also re-enables `CFE_BUILD_TESTS`/`BENCHMARKS`/
+  `TUTORIALS` at their default-`ON` setting, so an unscoped
+  `cmake --build build` builds the whole project, not just the one
+  tutorial). Verified empirically: diffed `find build -type f -perm
+  +111` before/after a scoped build.
+- `tutorials/CMakeLists.txt` -- its existing convention comment extended
+  with the same explanation, so a new tutorial's author sees the reason
+  up front rather than rediscovering it.
+- `tests/unit/test_ssp_rk2_index_map.cpp` (new), `tests/CMakeLists.txt`
+  -- see Tests added.
+- `docs/performance/0005-phase1-ssp-rk2-regression-reproducibility.md`
+  (new) -- full reproducibility record: exact commits compared, compiler/
+  flags, reproduction commands, raw results table, vectorization-remark
+  counts, and an explicit "what this corrects" section.
+- `docs/performance/0004-phase1-scalar-advection-cpu-results.md` --
+  Observation 4 rewritten to match the corrected finding (see Performance
+  change below) and to point at `0005-...md` for full methodology.
+- `benchmarks/results/phase1_ssp_rk2_vectorization_repro/` (new) --
+  `run_{original,intermediate,current}.log` (raw 5-rep benchmark stdout),
+  `remarks_{original,intermediate,current}.txt` (full
+  `-Rpass{,-missed,-analysis}=loop-vectorize` compiler output),
+  `bench_scalar_advection_extended_sweep.cpp` (the benchmark source used,
+  swept out to 50M/100M cells).
+
+Tests added:
+`tests/unit/test_ssp_rk2_index_map.cpp` (5 tests, wired into
+`tests/CMakeLists.txt`): `CartesianRealCellIndexMap` is a bijection onto
+exactly the real cells on genuinely rectangular (nx != ny != nz) 2D and 3D
+grids -- deliberately non-cubic, since a cube can't catch an i/j-axis
+mixup in the index decomposition; `ssp_rk2_step`'s combine kernels leave
+every ghost entry of both `state` and `residual_scratch` exactly
+byte-for-byte untouched (sentinel values, zero tolerance, not just
+"isn't NaN"), using a residual callable with no ghost-fill of its own so
+the check isolates the combine step specifically; the whole mechanism
+works for a 3-component field under both `AoSLayout` and `SoALayout`
+(previously untested -- `FvmSolver`/`ScalarAdvectionField` hardcode
+N=1). Real-cell values are checked against the closed-form solution of
+Heun's method applied to `dy/dt=-y`, not just "moved in the right
+direction." 56/56 total (CPU), clean under ASan/UBSan.
+
+Benchmarks run:
+A from-scratch, same-session, same-compile-flags, same-commit
+reproduction of `cfe_bench_scalar_advection` (serial + threaded) at
+10K/100K/1M/10M/50M/100M cells, for three code versions in one sitting:
+`original` (`e5df5f9`, pre-review), `intermediate` (`e880a9e`, round 1's
+ghost-zero-fill fix), `current` (`HEAD`, round 2's interior-cells-only
+fix). Compiled with the project's exact Release flags (confirmed by
+reading `build/tests/CMakeFiles/cfe_unit_tests.dir/flags.make`), 5
+repetitions each, median of repetitions 2-5 (repetition 1 is a
+consistent cold-start outlier across all three versions). Full raw logs
+and remarks committed under `benchmarks/results/
+phase1_ssp_rk2_vectorization_repro/`.
+
+Performance change:
+**Corrects, rather than confirms, the previously-recorded numbers.** The
+2026-09-30/2026-10-01 entries above recorded a "15.135ms -> 19.79ms
+(+31%) -> ~33ms (+118%)" two-step regression story, built from numbers
+taken across three separate work sessions under uncontrolled,
+non-comparable system load. Under this session's controlled, single-
+sitting, same-compile-flags, same-commit comparison, `original` and
+`intermediate` are statistically indistinguishable (<1% apart at every
+size from 1M to 100M cells, well inside this benchmark's own run-to-run
+noise) -- round 1's ghost-zero-fill fix was **not** a measurable
+regression; the previously-recorded 19.79ms figure was very likely
+elevated by session-specific noise, not the code change. The one real,
+reproducible regression is `current` vs. *either* earlier version, at a
+consistent **~1.68x**, flat from 1M cells through 100M cells (not two
+separate ratios, and not a growing one). This does not change any
+correctness conclusion, the decision to accept the regression as a
+documented limitation, or its root cause (per the 2026-10-01 entry
+above) -- it only corrects the magnitude and attributes the entire
+regression to round 2's change specifically, reported to the user as
+such rather than silently reconciled with the old narrative. Threaded
+backend: statistically indistinguishable across all three versions at
+every size, confirmed directly in this same controlled comparison (not
+re-asserted from the earlier, less careful measurement).
+
+Scientific verification:
+Compared `git diff e5df5f9 e880a9e -- src/cfe/solver/time_integration/
+ssp_rk2.hpp` (empty -- confirms `intermediate`'s `ssp_rk2_step` is
+byte-for-byte `original`'s, isolating round 1's change to the residual
+zero-fill alone) before drawing any conclusion about which change caused
+what. An earlier, ad-hoc standalone reproduction attempt (not committed)
+was found to be unfaithful -- it dropped the real benchmark's anonymous-
+namespace scoping and dual Serial/Threaded template-instantiation
+structure -- and was discarded rather than reported; the committed
+numbers come only from compiling and running the actual
+`bench_scalar_advection.cpp` source (header-swapped per version via
+`-I overlay -I src`), confirmed identical to the project's own compile
+flags.
+
+Architecture decisions:
+None -- this round touched no production code, only tests, benchmarks,
+and documentation, per the user's explicit "keep this change limited to
+these items" scope.
+
+Known limitations:
+- The CPU serial-backend regression (flat ~1.68x, now reproducibly
+  measured) remains disclosed, root-caused, and bounded, but not
+  recovered -- accepted as a documented limitation for this PR per
+  explicit instruction.
+
+Next recommended task:
+PR #2 is now caught up on every outstanding review item across three
+rounds. Recommended next: open the follow-up task for recovering the
+lost auto-vectorization (compiler hints, or a compile-time fast path for
+the common contiguous-offset case), tracked as explicit future work in
+`docs/performance/0004-...md` Observation 4 and `0005-...md`.

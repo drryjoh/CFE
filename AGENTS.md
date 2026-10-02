@@ -66,7 +66,9 @@ A feature is complete only when:
 - no unexplained regression exists;
 - documentation is updated;
 - a tutorial exists when applicable;
-- `agent_history.md` is updated.
+- `agent_history.md` is updated;
+- `docs/type-reference.md` reflects every new or changed public type
+  (section 27).
 
 "Code generated successfully" is not a definition of done.
 
@@ -140,11 +142,18 @@ Preferred style:
 ```cpp
 CFE_HOST_DEVICE
 CFE_FORCEINLINE
-auto square(const scalar& a)
+scalar square(const scalar& a)
 {
     return a * a;
 }
 ```
+
+`auto` is for local variables whose type is already obvious from the
+initializer (e.g. `auto grid = this->grid;`, `auto residual = [&](...){...};`),
+not for function/method return types: a function's signature is its
+contract, and a reader (including a student new to the codebase) should
+be able to see what a Calculator or numerics function returns without
+reading its body.
 
 and:
 
@@ -201,9 +210,9 @@ Physics states should have compile-time-known structure whenever practical.
 Physics code should use semantic accessors:
 
 ```cpp
-auto rho = density(q);
-auto mom = momentum(q);
-auto E   = total_energy(q);
+auto rho = density(state);
+auto mom = momentum(state);
+auto E   = total_energy(state);
 ```
 
 rather than scattering raw positional indices throughout the code.
@@ -317,6 +326,17 @@ Required early boundary capabilities include:
 - extrapolation/outflow;
 - reflective/slip;
 - no-slip where appropriate.
+
+"Extrapolation/outflow" includes characteristic-based (partial-specification)
+inflow/outflow conditions -- e.g. a subsonic inlet where the user specifies
+temperature but pressure is extrapolated from the interior, the split
+decided by which way each characteristic points at that face. Unlike
+periodic/Dirichlet ghost-cell filling, this requires an equation of state
+and wave-speed information (physics), plus a read of the adjacent interior
+cell's state (not just a stored constant) -- see ARCHITECTURE.md #11 for
+the resulting interface shape. Only meaningful once a field has an equation
+of state (compressible Euler, ROADMAP.md Phase 3); Burgers (Phase 2) has no
+such structure.
 
 Moving-frame/grid-recycling behavior is a separate capability and must not be conflated with ordinary static boundary conditions.
 
@@ -510,3 +530,21 @@ the follow-up is large enough to deserve its own PR and its own
 presentation file -- use judgment; the goal is a presentation file a
 student could read start-to-finish and understand the state of that
 specific piece of work.
+
+## 27. Type reference maintenance
+
+Every new public type (a class, struct, alias, or free function meant to
+be called from outside its own file) must be added to
+`docs/type-reference.md` in the same change that introduces it -- not as
+a follow-up. If a change alters an existing type's public shape (renamed
+member, changed signature, removed method), update its entry there too.
+
+This is a reference, not a tutorial: one row (name, file, one- or
+two-sentence description of what it is and its key members), organized
+under the module it belongs to. Design rationale belongs in an ADR, not
+here -- link to one if it exists.
+
+`docs/type-reference.md` is expected to drift out of date the moment this
+rule is skipped, and a stale type reference is worse than none (it actively
+misleads). Treat keeping it current as part of the definition of done
+(section 5), on the same footing as updating `agent_history.md`.

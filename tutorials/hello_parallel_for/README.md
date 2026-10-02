@@ -21,11 +21,32 @@ after, and how long the kernel took. That's the entire program; see
 
 ## Build and run
 
+From the repo root (builds everything else too):
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target cfe_hello_parallel_for -j
 ./build/tutorials/hello_parallel_for/cfe_hello_parallel_for
 ```
+
+Or standalone, from this directory alone:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target cfe_hello_parallel_for -j
+./build/cfe-root-build/tutorials/hello_parallel_for/cfe_hello_parallel_for
+```
+
+The `--target` is required even in the standalone case: pulling in the
+repo root as a nested subdirectory (to obtain `cfe_core`) also makes the
+*whole* project's targets available to build — every test, every
+benchmark, every other tutorial — since their `CFE_BUILD_TESTS`/
+`CFE_BUILD_BENCHMARKS`/`CFE_BUILD_TUTORIALS` options default `ON`
+regardless of which directory you configured from. `cmake --build build
+-j` with no `--target` builds CMake's default `all` target, which is all
+of that, not just this one tutorial. `cmake -S . -B build` itself also
+configures (but does not build) that whole tree either way — only the
+`--target`-qualified *build* step is scoped to just this executable.
 
 ## What you'll see
 

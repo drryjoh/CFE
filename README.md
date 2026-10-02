@@ -54,6 +54,7 @@ Major architectural decisions must be recorded as Architecture Decision Records.
 - `agent_history.md` — chronological AI-assisted development history
 - `REFERENCES.md` — algorithms and literature used by the code
 - `docs/adr/` — architectural decisions
+- `docs/type-reference.md` — quick-reference map of core types under `src/cfe/`
 - `docs/bridges2-setup.md` — how to run the CUDA backend on PSC Bridges-2
 - `tasks/` — scoped prompts for implementation agents
 

@@ -26,10 +26,22 @@ class DeviceField
  public:
   using View = FieldView<Scalar, NComponents, Layout>;
 
+  // Zero-initialized on construction, matching cfe::Field's host-side
+  // std::vector (which always zero-inits) -- cudaMalloc alone does not.
+  // This matters beyond tidiness: a solver's scratch buffers (e.g.
+  // ssp_rk2_step's stage1) are only ever written at cells the solver
+  // actually integrates, but grid/boundary/ghost_fill.hpp's per-axis
+  // ghost-fill still needs to *read* every cell on the other two axes'
+  // full padded extent (to correctly fill corners/edges) -- cells that
+  // are real on one axis but ghost on another are never written by
+  // anything, so without this they are a genuine uninitialized-memory
+  // read, not just an untidy allocation. Caught directly by
+  // `compute-sanitizer --tool initcheck`; see agent_history.md.
   explicit DeviceField(std::size_t n_cells) : n_cells_(n_cells), data_(nullptr)
   {
     const std::size_t bytes = n_cells_ * NComponents * sizeof(Scalar);
     CFE_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&data_), bytes));
+    CFE_CUDA_CHECK(cudaMemset(data_, 0, bytes));
   }
 
   // Not CFE_CUDA_CHECK'd: throwing out of a destructor is undefined

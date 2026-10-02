@@ -273,9 +273,9 @@ using global_index = ...;
 Physics-facing code should use semantic accessors:
 
 ```cpp
-auto rho = density(q);
-auto mom = momentum(q);
-auto E   = total_energy(q);
+auto rho = density(state);
+auto mom = momentum(state);
+auto E   = total_energy(state);
 ```
 
 The storage representation must remain performance-oriented and may use SoA, AoS, AoSoA, or another contiguous organization.
@@ -438,6 +438,22 @@ Required early types:
 - no-slip when relevant.
 
 Boundary metadata belongs to the grid/domain description while physics-specific interpretation belongs to fields/numerics.
+
+Concretely, this means not every `BoundaryCondition` implementation can stay
+physics-agnostic the way Phase 1's `PeriodicBoundary`/`StaticBoundary` are
+(they only ever copy or write raw component values, never interpret them).
+A characteristic-based (partial-specification) inflow/outflow condition --
+e.g. specifying temperature at a subsonic inlet while extrapolating pressure
+from the interior, the split between the two decided by which way each
+characteristic points -- needs an equation of state and wave-speed
+information to do that split, and needs to read the adjacent interior
+cell's state, not just a stored constant or the opposite boundary. Such a
+type takes a `Field` parameter and calls into it (the same shape
+`NumericalFlux` already uses `Field`'s Calculators, see numerics/numerical_flux/),
+while still conforming to the same swappable `fill_x/fill_y/fill_z`
+ghost-cell-filling interface every other `BoundaryCondition` does -- the
+grid-traversal/backend-dispatch infrastructure does not need to change,
+only this one BC type becomes Field-aware. See ROADMAP.md Phase 3.
 
 ## 12. Moving frame / grid recycling
 

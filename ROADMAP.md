@@ -85,6 +85,11 @@ Deliver:
 - numerical flux infrastructure;
 - Rusanov;
 - HLLC and/or AUSM-family implementation;
+- characteristic-based (partial-specification) inflow/outflow boundary
+  conditions (e.g. specified temperature + interior-extrapolated pressure
+  at a subsonic inlet) -- the first `BoundaryCondition` type that must be
+  Field-aware rather than physics-agnostic, per AGENTS.md #17 and
+  ARCHITECTURE.md #11;
 - Sod shock tube;
 - Shu-Osher problem;
 - DG `p=1` and `p=2` prototype where feasible.

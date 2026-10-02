@@ -4,10 +4,22 @@
 
 add_executable(cfe_unit_tests
   unit/test_main.cpp
+  unit/test_test_framework.cpp
   unit/test_fixed_array.cpp
   unit/test_math_operations.cpp
   unit/test_field_storage.cpp
   unit/test_backend_execution.cpp
+  unit/test_grid_indexing.cpp
+  unit/test_boundary_conditions.cpp
+  unit/test_ssp_rk2.cpp
+  unit/test_interface_flux.cpp
+  unit/test_scalar_advection_convergence.cpp
+  unit/test_scalar_advection_convergence_variants.cpp
+  unit/test_scalar_advection_conservation.cpp
+  unit/test_scalar_advection_2d_sanity.cpp
+  unit/test_scalar_advection_2d_convergence.cpp
+  unit/test_fvm_solver_ghost_residual.cpp
+  unit/test_ssp_rk2_index_map.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
@@ -16,7 +28,11 @@ target_include_directories(cfe_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/un
 # CUDA correctness test: only added when a CUDA compiler/backend is
 # available. See test_backend_execution_cuda.cu for why it is unverified.
 if(CFE_ENABLE_CUDA)
-  target_sources(cfe_unit_tests PRIVATE unit/test_backend_execution_cuda.cu)
+  target_sources(cfe_unit_tests PRIVATE
+    unit/test_backend_execution_cuda.cu
+    unit/test_scalar_advection_cuda.cu
+    unit/test_scalar_advection_3d_cuda.cu
+  )
   set_target_properties(cfe_unit_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()
 
