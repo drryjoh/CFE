@@ -20,6 +20,10 @@ add_executable(cfe_unit_tests
   unit/test_scalar_advection_2d_convergence.cpp
   unit/test_fvm_solver_ghost_residual.cpp
   unit/test_ssp_rk2_index_map.cpp
+  unit/test_burgers_flux.cpp
+  unit/test_muscl_reconstruction.cpp
+  unit/test_burgers_shock_formation.cpp
+  unit/test_burgers_convergence.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)

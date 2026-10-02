@@ -1220,3 +1220,145 @@ rounds. Recommended next: open the follow-up task for recovering the
 lost auto-vectorization (compiler hints, or a compile-time fast path for
 the common contiguous-offset case), tracked as explicit future work in
 `docs/performance/0004-...md` Observation 4 and `0005-...md`.
+
+---
+
+## 2026-10-02 — Phase 2 (first slice): Burgers equation and shock-capturing numerics
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Phase 1 (PR #2) merged to `main` (squash commit `78b96e4`). Per task
+0003, add the inviscid Burgers equation and a shock-capturing (TVD)
+reconstruction/numerical-flux pair, closing two canonical problems
+`VERIFICATION.md` names but nothing yet implemented: "Burgers smooth
+convergence" and "Burgers shock formation." Deliberately a narrower
+slice of `ROADMAP.md`'s full Phase 2 -- MPI, DG prototype, state
+sizes through 100, the memory-layout study, and a Burgers CUDA
+port/benchmark/visualization tutorial are all explicitly deferred to
+separate follow-up tasks (see `tasks/0003-...md`'s own exclusion list).
+
+Files changed:
+- `src/cfe/fields/burgers/field.hpp` (new) -- `BurgersField<Scalar,
+  Dim>`: `physical_flux(state, axis) = state^2/2`,
+  `wave_speed(left, right, axis) = max(|left|,|right|)`. Same
+  `(state, axis)`-in Calculator shape `ScalarAdvectionField` already
+  established -- `fvm_solver.hpp` needed zero changes.
+- `src/cfe/numerics/numerical_flux/rusanov.hpp` (new) -- `rusanov_flux`/
+  `RusanovFlux`: local Lax-Friedrichs, entropy-satisfying for Burgers'
+  convex flux (closing the gap `upwind.hpp`'s own header comment
+  documents for `UpwindFlux`). Same
+  `NumericalFlux::operator()(left, right, axis, field)` shape.
+- `src/cfe/numerics/fvm/muscl_minmod.hpp` (new) -- `minmod`,
+  `muscl_minmod_slope/value_right/value_left`, and the
+  `MusclMinmodReconstruction` functor: TVD, minmod-limited MUSCL. Same
+  `Reconstruction::right(...)/left(...)` 3-point-stencil shape
+  `CentralDifferenceReconstruction` already uses; that type keeps
+  serving linear advection unchanged, this is a second, additive pair.
+- `tests/unit/test_burgers_flux.cpp`, `test_muscl_reconstruction.cpp`
+  (new) -- hand-computed reference values for every new free
+  function/functor (shock/rarefaction/degenerate-equal-state cases for
+  Rusanov; monotone/local-extremum/genuinely-linear cases for minmod).
+- `tests/unit/test_burgers_shock_formation.cpp` (new) -- "Burgers shock
+  formation": a Riemann-type step (`StaticBoundary` fixing both ends),
+  checked against the exact Rankine-Hugoniot solution, overshoot/
+  undershoot, TVD, and flux-balance conservation (see Scientific
+  verification below) -- templated on `Scalar`, exercised at both
+  double and float precision.
+- `tests/unit/test_burgers_convergence.cpp` (new) -- "Burgers smooth
+  convergence": smooth periodic IC run strictly before the analytic
+  breaking time, checked against a Newton-solved method-of-
+  characteristics exact reference.
+- `tests/CMakeLists.txt` -- the 5 new test files wired in.
+- `docs/adr/0008-burgers-shock-capturing-scheme.md` (new) -- records
+  minmod+Rusanov as the scheme choice, with the Evidence section below
+  reproduced there.
+- `tasks/0003-phase2-burgers-shock-capturing.md` (new) -- formal task
+  spec scoping this as a first slice of Phase 2.
+
+Tests added:
+22 new tests (78/78 total, up from 56/56 at Phase 1's close): Burgers
+Calculator hand-values (2), Rusanov hand-values incl. the degenerate
+equal-state case (4), minmod/MUSCL hand-values incl. the local-extremum
+clip and the genuinely-linear no-clip case (8), shock-formation (6,
+incl. a float-precision variant), smooth convergence (2, incl. a
+breaking-time sanity check on the test's own setup). CPU-only this
+task, per task 0003's explicit scope (no CUDA changes).
+
+Benchmarks run:
+None -- explicitly deferred to a follow-up task (task 0003's own
+"Benchmarks: Not required this task").
+
+Performance change:
+N/A (no production hot path touched beyond new, additive leaf types
+substituted as template arguments; `fvm_solver.hpp`/`ssp_rk2.hpp`/
+`ghost_fill.hpp`/`cartesian_grid.hpp` were not modified).
+
+Scientific verification:
+Both `VERIFICATION.md`-named canonical problems verified with real,
+reported numbers, not "ran and looked reasonable" (full tables in ADR
+0008's Evidence section):
+- **Shock formation** (Riemann step, `u_left=2`, `u_right=1`, exact
+  shock speed `s=1.5`, run to `t=2.0`): mean absolute error against the
+  exact solution halves almost exactly with each doubling of resolution
+  (4.21e-3 at nx=200 -> 5.26e-4 at nx=1600) -- the expected O(1/nx)
+  behavior for a captured shock, not a formal 2nd-order claim (any
+  limited scheme smears a discontinuity over O(1) cells regardless of
+  resolution). Measured overshoot/undershoot was exactly `0.0` at every
+  resolution tested. Total variation was exactly `1.0` (`=u_left-
+  u_right`) before and after, at every resolution -- zero measured
+  oscillation anywhere. Flux-balance conservation
+  (`integral_final-integral_initial` vs. `(F(u_left)-F(u_right))*T`)
+  matched to `1e-6`, both sides equal to `3.000000` at the printed
+  precision.
+- **Smooth convergence** (`u0=1.0+0.5*sin(2*pi*x)`, run to half the
+  analytic breaking time, against a Newton-solved method-of-
+  characteristics exact reference): the error ratio stabilizes tightly
+  at **~3.21-3.23** across 5 refinement levels (40->640 cells) -- not
+  the clean ~4.0 the linear-advection test shows, root-caused (not
+  assumed) to minmod clipping the slope to exactly zero at the IC's two
+  smooth extrema, a documented, accepted property of TVD limiters
+  (Sweby, 1984; see `numerics/fvm/muscl_minmod.hpp`'s own header
+  comment). The convergence test's acceptance band was loosened from
+  `[3.5, 4.5]` to `[3.0, 4.5]` specifically to reflect this, with the
+  mechanism stated in the test file rather than the threshold silently
+  narrowed to make a tight-but-unexplained number pass.
+- Note on the non-periodic shock test's "conservation" claim: the
+  Riemann-step domain is not periodic (mass genuinely flows in/out at
+  the two StaticBoundary ends), so "domain integral constant in time"
+  (the periodic convergence test's own conservation check) does not
+  apply here -- what was actually verified is the flux-form scheme's
+  exact flux-balance guarantee instead (see test file's own comment for
+  why this is the correct, not weaker, substitute).
+
+Architecture decisions:
+`docs/adr/0008-burgers-shock-capturing-scheme.md` (new): minmod-limited
+MUSCL + Rusanov selected as Burgers' first shock-capturing pair --
+simplest provably-TVD/entropy-correct combination, matching every prior
+phase's "smallest capability needed" approach. Named alternatives for
+later phases: superbee/van Leer/MC limiters and WENO (AGENTS.md #18);
+HLLC/AUSM/exact Godunov (Phase 3's Euler work already names HLLC/AUSM).
+Confirms, rather than merely asserts, Phase 1's own stated genericity
+claim for `FvmSolver`/`Reconstruction`/`NumericalFlux`: a genuinely
+nonlinear, shock-forming equation required zero changes to any of
+`fvm_solver.hpp`, `ssp_rk2.hpp`, `ghost_fill.hpp`, or
+`cartesian_grid.hpp`.
+
+Known limitations:
+- CUDA port, benchmark sweep, and visualization tutorial for Burgers are
+  not done -- explicitly deferred, per task 0003's own scope.
+- The rest of `ROADMAP.md` Phase 2 (MPI decomposition + communication
+  benchmark, DG storage/communication prototype, state sizes through
+  100, the memory-layout study) is not started.
+- Only minmod is implemented; sharper limiters (superbee/van Leer/MC)
+  and more accurate fluxes (exact Godunov/HLLC/AUSM) are named future
+  work in ADR 0008, not implemented.
+
+Next recommended task:
+Either (a) port Burgers to CUDA + benchmark + visualization tutorial,
+mirroring Phase 1's own CPU-then-GPU sequencing, or (b) continue Phase 2
+breadth-first into the MPI decomposition prototype -- both are
+reasonable next slices; recommend checking with the PI on which matters
+more before committing effort, since task 0003 deliberately left this
+open rather than presuming the order.
