@@ -1677,3 +1677,54 @@ Next recommended task:
 Continue Phase 2 breadth-first (MPI decomposition prototype), or check
 with the PI on priority -- same open question as every entry since
 PR #3 began.
+
+---
+
+## 2026-10-02 — 1D tutorial: shock-capturing zoom-in plot
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+User follow-up on the two new tutorials above: add a plot zooming in on
+Case A's captured front at the final time, centered on the shock
+location, `x in [-0.05, 0.05]`, to directly show what the limiter
+actually buys (narrower smearing), not just a smaller L1 number.
+
+Files changed:
+- `tutorials/burgers_1d_shock_and_steepening/burgers_1d.cpp` -- the
+  finest-grid field-CSV write, previously second-order-only, now
+  happens for `FirstOrderReconstruction` too (so the zoom plot can put
+  both schemes side by side at matching resolution).
+- `plot_results.py` -- new `plot_case_a_shock_zoom()`: re-centers each
+  reconstruction's field data on ITS OWN numerically-detected shock
+  position (`summary.csv`'s `shock_position_numerical` -- the
+  C++-computed value, not recomputed in Python) before windowing, since
+  first-order and second-order land at very slightly different
+  positions and a single shared shift would not put both fronts at
+  `x=0`.
+- `README.md` -- embeds the new figure, explains the re-centering choice
+  and what the two panels show.
+- `data/case_shock_nx0400_first_order_t*.csv` (new, 4 files) --
+  first-order field data at the finest grid, all four output times.
+
+Tests added:
+None (plotting/visualization change only; no production code touched).
+
+Scientific verification:
+Ran the C++ binary and the plotting script again, inspected the
+resulting figure directly: first-order smears the captured shock over
+roughly 4-5 cells, limited second-order (minmod) over roughly 2-3 --
+visibly, not just numerically, confirming the limiter's benefit at the
+discontinuity itself, consistent with (and a direct visual explanation
+of) the existing convergence plot's "both converge at the same O(dx)
+rate, but second-order's prefactor is about half" finding.
+
+Architecture decisions:
+None -- tutorial-only change.
+
+Known limitations:
+None new.
+
+Next recommended task:
+Unchanged from the prior entry.

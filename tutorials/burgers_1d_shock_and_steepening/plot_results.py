@@ -14,7 +14,7 @@ once (so data/ is populated):
     python3 plot_results.py
 
 Writes figures/case_a_profiles.png, figures/case_a_convergence.png,
-figures/case_b_profiles.png.
+figures/case_a_shock_zoom.png, figures/case_b_profiles.png.
 """
 import pathlib
 
@@ -86,6 +86,53 @@ def plot_case_a_convergence():
     plt.close(fig)
 
 
+def plot_case_a_shock_zoom():
+    """Zooms in on the captured front at the final time (t=1.0, the
+    most-developed state), re-centering each reconstruction on ITS OWN
+    numerically-detected shock location (summary.csv's
+    shock_position_numerical -- the same value burgers_1d.cpp reports,
+    not recomputed here) so x=0 is "the shock" for that scheme and the
+    fixed +/-0.05 window is directly comparable between schemes despite
+    their slightly different actual shock positions. This is the plot
+    that actually shows what "shock capturing" costs: how many cells
+    wide the smeared transition is, not just that the overall L1 error
+    is small.
+    """
+    summary = pd.read_csv(DATA / "summary.csv")
+    t = 1.00
+    half_window = 0.05
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+    for ax, (name, label) in zip(
+        axes,
+        [("first_order", "first-order (unlimited)"), ("second_order_limited", "limited second-order (minmod)")],
+    ):
+        path = DATA / f"case_shock_nx0400_{name}_t{t:.2f}.csv"
+        df = pd.read_csv(path)
+        shock_x = summary[
+            (summary["case"] == "shock") & (summary["grid"] == 400) & (summary["reconstruction"] == name)
+            & (summary["time"] == t)
+        ]["shock_position_numerical"].iloc[0]
+
+        shifted_x = df["x"] - shock_x
+        mask = (shifted_x >= -half_window) & (shifted_x <= half_window)
+
+        ax.plot(shifted_x[mask], df["u_exact"][mask], color="black", linewidth=1.2, label="exact (step at x=0)")
+        ax.step(shifted_x[mask], df["u_numerical"][mask], where="mid", color="tab:red", linewidth=1.2,
+                marker="o", markersize=4, label="numerical (per-cell value)")
+        ax.axvline(0.0, color="gray", linestyle=":", linewidth=1.0)
+        ax.set_xlim(-half_window, half_window)
+        ax.set_title(f"{label}\n(nx=400, t={t:.2f}, shock at x={shock_x:.4f})")
+        ax.set_xlabel("x - shock_position_numerical")
+        ax.grid(alpha=0.3)
+    axes[0].set_ylabel("u")
+    axes[0].legend(fontsize=8, loc="upper right")
+    fig.suptitle("Case A: zoom on the captured front -- how many cells wide is the smeared shock?")
+    fig.tight_layout()
+    fig.savefig(FIGURES / "case_a_shock_zoom.png", dpi=150)
+    plt.close(fig)
+
+
 def plot_case_b_profiles():
     times = [0.00, 0.15, 0.30, 0.40, 0.60]
     break_time = 1.0 / (2.0 * np.pi * 0.5)
@@ -115,6 +162,7 @@ def main():
     FIGURES.mkdir(exist_ok=True)
     plot_case_a_profiles()
     plot_case_a_convergence()
+    plot_case_a_shock_zoom()
     plot_case_b_profiles()
     print(f"Wrote figures to {FIGURES}")
 

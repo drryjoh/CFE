@@ -228,8 +228,12 @@ void run_case_shock(std::ofstream& summary, const fs::path& data_dir)
 {
   std::printf("=== Case A: moving shock ===\n");
   for (std::size_t nx : kShockGrids) {
-    const bool write_representative = (nx == kShockGrids.back());  // finest grid only
-    run_shock_case<cfe::fvm::FirstOrderReconstruction>(nx, "first_order", false, summary, data_dir);
+    // Finest grid only -- written for BOTH reconstructions (not just
+    // second-order) specifically so plot_results.py's shock-capturing
+    // zoom-in can compare them directly at matching resolution.
+    const bool write_representative = (nx == kShockGrids.back());
+    run_shock_case<cfe::fvm::FirstOrderReconstruction>(nx, "first_order", write_representative, summary,
+                                                        data_dir);
     run_shock_case<cfe::fvm::MusclMinmodReconstruction>(nx, "second_order_limited", write_representative,
                                                          summary, data_dir);
   }

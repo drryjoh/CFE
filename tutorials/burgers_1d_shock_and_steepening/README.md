@@ -43,6 +43,22 @@ not a sign the limiter isn't working (see
 `tests/unit/test_burgers_shock_formation.cpp`'s own header comment for
 the same point made about the production test).
 
+The plot below is *why*: it zooms in on the final time's (`t=1.0`,
+`nx=400`) captured front, re-centered on each scheme's own
+numerically-detected shock location (`summary.csv`'s own
+`shock_position_numerical`) so both panels' `x=0` means "the shock,
+here" despite the two schemes landing at very slightly different
+positions -- the `+/-0.05` window is only 40 cells wide at this
+resolution, so individual cell values are visible as discrete points,
+not just a smooth-looking line.
+
+![Case A shock zoom](figures/case_a_shock_zoom.png)
+
+First-order smears the transition over roughly 4-5 cells; the limited
+second-order (minmod) scheme captures it in roughly 2-3 -- visibly
+sharper, even though (per the convergence plot above) both still
+converge at the same O(dx) *rate* right at the discontinuity itself.
+
 ## Case B: sinusoidal steepening
 
 Initial condition `u0(x) = 1 + 0.5*sin(2*pi*x)`, periodic boundaries.
@@ -117,10 +133,11 @@ Dependencies: `numpy`, `pandas`, `matplotlib`.
 ## What is committed vs. regenerated
 
 `data/` holds `summary.csv` in full (every grid/case/reconstruction/time
--- small, just numbers) plus field CSVs for ONE representative
-combination per case: Case A's finest grid (400 cells) with the limited
-second-order reconstruction, at all four output times; Case B's single
-grid (400 cells, no resolution sweep is requested for this case), also
+-- small, just numbers) plus field CSVs for ONE representative grid per
+case: Case A's finest grid (400 cells), at all four output times, for
+**both** reconstructions (needed for the shock-capturing zoom-in plot to
+compare them side by side); Case B's single grid (400 cells, no
+resolution sweep is requested for this case), limited second-order only,
 at all five output times. This is enough for `plot_results.py` to
 reproduce every figure in this README out of the box, without re-running
 the C++ binary -- but running it (as shown above) regenerates the exact
