@@ -199,6 +199,24 @@ extrema; LeVeque Sec. 9.3, Sweby 1984), and stable across refinements
 scheme's genuine, resolution-independent signature for this IC, not
 under-resolution noise.
 
+**GPU port and at-scale verification** (2026-10-02 follow-up, per
+review feedback that every PR needs 3D GPU correctness + an at-scale
+benchmark, not a deferred follow-up): `BurgersField`/`RusanovFlux`/
+`MusclMinmodReconstruction` port to CUDA unchanged (all already
+`CFE_HOST_DEVICE`) -- `test_burgers_cuda.cu` (1D) and
+`test_burgers_3d_cuda.cu` (3D) both match the CPU reference to `1e-9`
+cell-by-cell on a real V100, `compute-sanitizer --tool initcheck` finds
+0 errors, and `test_burgers_3d_sanity.cpp` independently confirms the 3D
+residual loop matches the 1D reference column-for-column on CPU first.
+Benchmarked at the same scale Phase 1 established for scalar advection
+(10^8 cells 1D, 512^3 cells 3D): ~7.7e9 cell-updates/s (1D, 10^8 cells)
+and ~4.05e9 cell-updates/s (3D, 512^3 cells) on the V100 -- a modest,
+expected reduction from scalar advection's own numbers at the same
+scale, attributed to Burgers' extra per-cell work (a `minmod` branch per
+face per axis, a nonlinear flux evaluation, the Rusanov dissipation
+term), not a regression. Full methodology and tables in
+`docs/performance/0006-phase2-burgers-cuda-results.md`.
+
 ## Decision
 
 Adopt minmod-limited MUSCL (`fvm::MusclMinmodReconstruction`) and

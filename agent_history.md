@@ -1362,3 +1362,103 @@ breadth-first into the MPI decomposition prototype -- both are
 reasonable next slices; recommend checking with the PI on which matters
 more before committing effort, since task 0003 deliberately left this
 open rather than presuming the order.
+
+---
+
+## 2026-10-02 — Burgers 3D CPU sanity, CUDA port, and at-scale GPU benchmark (PR #3 follow-up)
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Mid-review of PR #3, the user asked whether a 3D Burgers test existed
+that could run on GPU and check scale -- it did not (the task 0003
+entry above explicitly deferred CUDA/3D/benchmark work). The user then
+stated a standing policy: every PR adding a Field/scheme needs this
+coverage in the same PR, not deferred (recorded in auto-memory as
+`cfe_feedback_pr_gpu_scale_test`). This entry folds that work into PR
+#3 rather than opening a separate follow-up task.
+
+Files changed:
+- `tests/unit/test_burgers_3d_sanity.cpp` (new) -- CPU-only: a Riemann
+  shock varying only in X, uniform/periodic in Y/Z, must match the 1D
+  reference column-for-column (same philosophy as
+  `test_scalar_advection_2d_sanity.cpp`, extended one dimension
+  further). Established 3D residual-loop correctness on CPU *before*
+  porting to GPU, matching this project's own staged-verification
+  discipline.
+- `tests/unit/test_burgers_cuda.cu`, `test_burgers_3d_cuda.cu` (new) --
+  CPU-vs-GPU correctness, 1D and 3D, mirroring
+  `test_scalar_advection_cuda.cu`/`test_scalar_advection_3d_cuda.cu`
+  exactly. Both use the actual shock-formation Riemann setup (not a
+  smooth proxy), so this simultaneously verifies the GPU port AND
+  exercises `StaticBoundary` on CUDA for the first time in this
+  codebase (every prior CUDA test used only `PeriodicBoundary`).
+- `benchmarks/burgers/bench_burgers.cpp`, `bench_burgers_cuda.cu`,
+  `bench_burgers_3d_cuda.cu`, `CMakeLists.txt` (new) -- mirror
+  `benchmarks/scalar_advection/`'s three-file structure and resolution
+  sweeps exactly (CPU 10^4-10^7; GPU 1D 10^6-10^8; GPU 3D up to 512^3).
+- `benchmarks/CMakeLists.txt`, `tests/CMakeLists.txt` -- new
+  files/subdirectory wired in.
+- `docs/performance/0006-phase2-burgers-cuda-results.md` (new) -- full
+  results tables, environment, methodology.
+- `docs/adr/0008-...md` -- GPU-port/at-scale evidence appended to the
+  existing Evidence section.
+
+Tests added:
+3 new CPU tests (3D sanity) + 2 new CUDA tests (1D, 3D) = 92 total
+listed, 87/87 actually executed on this machine (CPU here has no CUDA
+compiler; all 87 -- the 5 CUDA-gated tests included -- ran and passed
+on the V100 allocation, see Scientific verification below).
+
+Benchmarks run:
+`cfe_bench_burgers` (Apple M5, serial+threaded, CPU baseline) and
+`cfe_bench_burgers_cuda`/`cfe_bench_burgers_3d_cuda` (V100, PSC
+Bridges-2, job `47335443`, node `v009`, via the `gpuinteract` QOS
+fast-lane -- see [[bridges2_gpu_access]]).
+
+Performance change:
+N/A (new capability, not a change to existing code -- no prior Burgers
+GPU/benchmark numbers existed to compare against).
+
+Scientific verification:
+Built and ran on real V100 hardware (not assumed/deferred): 87/87 unit
+tests passed, including `test_burgers_cuda_matches_cpu_reference` (1D,
+400 cells, 400 steps) and `test_burgers_3d_cuda_matches_cpu_reference`
+(3D, 96^3 cells, 200 steps), both matching the CPU reference to `1e-9`
+cell-by-cell. `compute-sanitizer --tool initcheck` run over the entire
+suite immediately after: **0 errors** -- checked directly rather than
+assumed clean by analogy to the earlier scalar-advection/DeviceField
+fix, given this project's own history of finding a genuine bug exactly
+this way twice already this PR cycle's predecessor (PR #2).
+Benchmarked at the same scale Phase 1 established for scalar advection:
+1D up to 10^8 cells (~7.69e9 cell-updates/s, 13.0ms/step); 3D up to
+512^3/~1.34e8 cells (~4.05e9 cell-updates/s, 33.1ms/step). Both are a
+modest (~10-15%), expected reduction from scalar advection's own
+numbers at the same scale (0003-...md), attributed directly to
+Burgers' extra per-cell work (a `minmod` branch per face per axis, a
+nonlinear flux evaluation, the Rusanov dissipation term) -- not treated
+as an unexplained regression requiring investigation.
+
+Architecture decisions:
+None new -- confirms `docs/adr/0008-...md`'s existing decision (minmod +
+Rusanov) now extends to GPU and 3D without any additional design choice
+needed, since every new type was already `CFE_HOST_DEVICE`.
+
+Known limitations:
+- The Burgers CPU serial-backend throughput is below scalar advection's
+  own (even pre-regression) baseline at the same cell count, consistent
+  with the extra per-cell work but not separately root-caused via
+  vectorization remarks the way 0004/0005 did for scalar advection --
+  not investigated further here since GPU is this codebase's actual "at
+  scale" target.
+- A Burgers visualization tutorial (mirroring
+  `tutorials/scalar_advection_3d_visualization/`) is still not done.
+- The rest of `ROADMAP.md` Phase 2 (MPI, DG prototype, state sizes
+  through 100, memory-layout study) is still not started.
+
+Next recommended task:
+Burgers visualization tutorial (quick, mirrors an existing pattern), or
+move on to the MPI decomposition prototype -- same open question as the
+prior entry, now with CUDA/3D/benchmark work no longer blocking either
+choice.

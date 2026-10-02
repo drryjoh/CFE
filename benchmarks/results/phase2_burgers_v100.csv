@@ -1,0 +1,5 @@
+backend,n_cells,repetitions,median_ms,cell_updates_per_s
+cuda,1000000,10,0.163992,6.098e+09
+cuda,10000000,10,1.377914,7.257e+09
+cuda,50000000,10,6.778265,7.377e+09
+cuda,100000000,10,12.996994,7.694e+09
