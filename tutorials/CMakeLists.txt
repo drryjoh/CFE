@@ -26,3 +26,9 @@ add_subdirectory(hello_parallel_for)
 # Phase 1's CUDA correctness/benchmark work, which produces no output to
 # actually look at). CPU-only.
 add_subdirectory(scalar_advection_3d_visualization)
+
+# 3D Burgers VTK time-series demo (2026-10-02 follow-up to task 0003's
+# CUDA correctness/benchmark work, same reasoning as the scalar-advection
+# tutorial above, but showing deformation/shock formation instead of
+# unchanged translation). CPU-only.
+add_subdirectory(burgers_3d_visualization)

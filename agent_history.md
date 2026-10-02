@@ -1462,3 +1462,77 @@ Burgers visualization tutorial (quick, mirrors an existing pattern), or
 move on to the MPI decomposition prototype -- same open question as the
 prior entry, now with CUDA/3D/benchmark work no longer blocking either
 choice.
+
+---
+
+## 2026-10-02 — Burgers 3D visualization tutorial (PR #3 follow-up)
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+The user asked whether a Burgers tutorial existed (a Gaussian bump
+deforming to a shock, or a sine wave) -- it did not; this was the "known
+limitation" flagged at the end of the prior entry. Closes it: a 3D
+Gaussian-bump visualization tutorial, mirroring
+`tutorials/scalar_advection_3d_visualization/` exactly in structure, but
+demonstrating genuinely different physics.
+
+Files changed:
+- `tutorials/burgers_3d_visualization/advect_burgers_gaussian_3d.cpp`,
+  `CMakeLists.txt`, `README.md` (new) -- same `FvmSolver` + `BurgersField`
+  + `MusclMinmodReconstruction` + `RusanovFlux` + SSP-RK2 stack as the
+  rest of this task, run on a `64^3` periodic grid, a positive-background
+  Gaussian bump (`1.0 + 0.5*exp(-r^2/(2*sigma^2))`, same `A+B` pattern
+  `test_burgers_convergence.cpp` uses, chosen so the state never changes
+  sign), 500 steps, 51 VTK frames + a `.pvd` manifest.
+- `tutorials/CMakeLists.txt` -- new subdirectory wired in.
+
+Tests added:
+None -- a visualization tutorial, not a correctness claim (the
+underlying solver stack is already verified by
+`test_burgers_3d_cuda.cu`/`test_burgers_shock_formation.cpp`; this file
+just confirms, at run time, that the printed state range per frame never
+exceeds the initial `[1.0, ~1.497]` bounds -- a live, visible
+demonstration of the same TVD guarantee those tests verify numerically).
+
+Benchmarks run:
+None (not a performance artifact).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Ran locally (CPU, Apple M5): state range printed per frame stayed
+bounded in `[1.0000, 1.4968]` (initial) shrinking to `[1.0000, 1.3846]`
+by the final frame (`t=0.52`) -- confirms, by direct observation rather
+than assumption, that (a) the TVD guarantee holds with a real,
+non-trivial 3D multi-axis initial condition, not just the 1D Riemann
+step `test_burgers_shock_formation.cpp` checks numerically, and (b) the
+bump is genuinely deforming (the peak decaying monotonically as the
+leading faces steepen and mass spreads via the trailing rarefaction),
+not just sitting still or translating unchanged the way the linear
+scalar-advection tutorial's bump does.
+
+Found and fixed one bug during this work, isolated to the tutorial
+itself (not the solver): the per-frame diagnostic min/max computation
+seeded its running min from storage index `0`, which is a ghost cell
+(never written before the first ghost-fill call, left at whatever
+`Field`'s zero-initialization gives it) -- not a real cell. This wrongly
+printed `state range [0.0000, 1.4968]` for frame 0 (implying the state
+once hit zero, which never happened). Fixed by seeding from the first
+real cell (`grid.flat_index(grid.ngx, grid.ngy, grid.ngz)`) instead.
+Re-verified: frame 0 now correctly prints `[1.0000, 1.4968]`.
+
+Architecture decisions:
+None -- pure application of already-existing, already-verified types.
+
+Known limitations:
+- The rest of `ROADMAP.md` Phase 2 (MPI, DG prototype, state sizes
+  through 100, memory-layout study) is still not started.
+
+Next recommended task:
+PR #3 is now caught up on every item raised during its own review
+(CPU correctness, 3D, CUDA, at-scale benchmark, visualization). Move on
+to the MPI decomposition prototype, or check with the PI on Phase 2's
+remaining priority order.
