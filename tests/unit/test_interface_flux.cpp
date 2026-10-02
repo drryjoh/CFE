@@ -3,6 +3,7 @@
 // calculation matches a hand-computed reference for a simple case").
 #include "cfe/core/types.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
+#include "cfe/numerics/fvm/first_order_reconstruction.hpp"
 #include "cfe/numerics/fvm/interface_value.hpp"
 #include "cfe/numerics/numerical_flux/upwind.hpp"
 #include "test_framework.hpp"
@@ -46,4 +47,17 @@ CFE_TEST(test_upwind_flux_is_zero_when_advection_speed_is_zero)
 {
   const cfe::ScalarAdvectionField<double, 1> field{cfe::Vector<double, 1>(0.0)};
   CFE_CHECK_NEAR(cfe::upwind_flux(2.75, 1.25, cfe::Axis::X, field), 0.0, 1e-12);
+}
+
+CFE_TEST(test_first_order_reconstruction_ignores_neighbors_and_returns_cell_value_at_both_faces)
+{
+  // Piecewise-constant: unlike CentralDifferenceReconstruction, neither
+  // face value should depend on the neighbor values at all -- a
+  // dramatically different left/right neighbor pair must not change the
+  // result.
+  const cfe::fvm::FirstOrderReconstruction reconstruction{};
+  CFE_CHECK_NEAR(reconstruction.right(1.0, 2.0, 4.0), 2.0, 1e-12);
+  CFE_CHECK_NEAR(reconstruction.left(1.0, 2.0, 4.0), 2.0, 1e-12);
+  CFE_CHECK_NEAR(reconstruction.right(-100.0, 2.0, 100.0), 2.0, 1e-12);
+  CFE_CHECK_NEAR(reconstruction.left(-100.0, 2.0, 100.0), 2.0, 1e-12);
 }

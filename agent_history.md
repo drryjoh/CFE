@@ -1536,3 +1536,144 @@ PR #3 is now caught up on every item raised during its own review
 (CPU correctness, 3D, CUDA, at-scale benchmark, visualization). Move on
 to the MPI decomposition prototype, or check with the PI on Phase 2's
 remaining priority order.
+
+---
+
+## 2026-10-02 — Two quantitative Burgers verification/plotting tutorials (1D and 2D)
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+A detailed, explicit user request for two rigorous, reproducible,
+plotted Burgers tutorials -- exact cut-cell references (including cells
+the moving discontinuity straddles), grid-convergence sweeps, a
+first-order-vs-limited-second-order reconstruction comparison, and
+committed data/figures a reader can inspect without re-running anything.
+Builds entirely on PR #3's existing production machinery
+(`BurgersField`/`RusanovFlux`/`MusclMinmodReconstruction` plugged into
+the unchanged `FvmSolver`/`ssp_rk2_step`); net new production code is
+two small, additive types.
+
+Files changed:
+- `src/cfe/numerics/fvm/first_order_reconstruction.hpp` (new) --
+  `FirstOrderReconstruction`: piecewise-constant, same two-method shape
+  as every other `Reconstruction` type -- what "first-order vs limited
+  second-order" actually swaps between.
+- `src/cfe/grid/boundary/boundary_condition.hpp` -- added
+  `InflowOutflowBoundary`: fixed Dirichlet at the low end, zero-order
+  extrapolation at the high end. First real implementation of AGENTS.md
+  #17's named "extrapolation/outflow" BC category (explicitly the
+  simple zero-order kind, not Phase 3's characteristic-based one).
+- `tests/unit/test_boundary_conditions.cpp`,
+  `tests/unit/test_interface_flux.cpp` -- one new hand-computed test
+  each for the two new types above.
+- `tutorials/burgers_1d_shock_and_steepening/` (new) -- one executable,
+  two selectable cases (`--case=shock`/`--case=steepening`, default
+  both): Case A (moving shock, `InflowOutflowBoundary`, 3 grids x 2
+  reconstructions x 4 output times, exact fractional-coverage cell
+  averages including shock-straddled cells); Case B (sinusoidal
+  steepening, periodic, exact method-of-characteristics reference
+  before the analytic breaking time, numerical-only after it). Both
+  cases use the existing, unmodified `cfe::ssp_rk2_step` directly --
+  neither boundary's ghost VALUES depend on wall-clock time here, so
+  ghosts refreshing every residual call (the stack's existing default
+  behavior) already satisfies "update ghost states before every
+  residual evaluation, using the correct RK stage time."
+- `tutorials/burgers_2d_diagonal_shock/` (new) -- a diagonal moving
+  shock (`u=1` where `x+y<0.5+t`), 3 grids x 2 reconstructions x 3
+  output times, exact cut-cell area fractions for a square clipped by a
+  slope-(-1) line (`cut_cell_fraction`, used identically for both the
+  t=0 IC and every later reference). This IS the case where ghost
+  values genuinely depend on t -- `ssp_rk2_step` was deliberately left
+  unmodified (zero blast radius on that shared, already-reviewed
+  helper), and this tutorial instead hand-rolls Heun's method
+  explicitly (`step_once`), setting a tutorial-local
+  `DiagonalShockExactBoundary`'s `time` member to the correct stage
+  time (t_n, then t_n+dt) between the two stages.
+- Both tutorial directories: `plot_results.py` (numpy/pandas/matplotlib),
+  `README.md`, `data/` (summary.csv in full + one representative raw
+  field/profile set per tutorial), `figures/` (committed PNGs).
+- `tutorials/CMakeLists.txt` -- both new subdirectories wired in.
+- `.gitignore` -- added `.venv/` (both new READMEs suggest a local venv
+  for the Python dependencies).
+
+Tests added:
+2 new CPU unit tests (`test_inflow_outflow_boundary_fixes_low_end_and_
+extrapolates_high_end`, `test_first_order_reconstruction_ignores_
+neighbors_and_returns_cell_value_at_both_faces`) -- 81/81 total.
+
+Benchmarks run:
+None -- these are correctness/verification tutorials, not performance
+artifacts; CPU-only by the same established convention every other
+tutorial in this repo already uses (performance/scale lives in
+benchmarks/tests, not tutorials).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Both C++ binaries and both Python plotting scripts were actually run
+(not assumed) before calling this done, producing the committed
+data/figures directly:
+- **Case A (1D moving shock):** L1 error vs. exact cell average drops
+  essentially linearly with grid refinement for both reconstructions
+  (confirmed O(dx) at the captured shock, the expected, not a flawed,
+  behavior per docs/adr/0008-...md); limited second-order consistently
+  roughly half the first-order error at matching resolution; shock
+  position converges to the exact Rankine-Hugoniot position as
+  resolution increases (e.g. nx=400, t=1.0: exact=0.7500,
+  numerical=0.7503); **zero measured overshoot/undershoot at every
+  grid/reconstruction/time combination** (both schemes, not just the
+  TVD-limited one -- first-order is unconditionally monotone by
+  construction).
+- **Case B (1D sinusoidal steepening):** domain mean held at exactly
+  `1.000000` at all 5 output times, including the 2 past the analytic
+  breaking time -- conservation confirmed directly, not assumed, even
+  post-shock. A genuine bug was found and fixed during this work: the
+  pre-shock exact reference (plain Newton's method on the implicit
+  characteristics equation) produced a visibly wrong, jagged artifact at
+  `t=0.30` (very close to the breaking time `t_s=0.318`), caught by
+  inspecting the generated plot, not by a numeric check alone -- Newton
+  can overshoot badly where the equation's derivative gets small, which
+  happens near the breaking time by construction. Fixed by switching to
+  a bracketed bisection solve (the same equation is provably monotonic
+  below the breaking time, so bisection is unconditionally robust
+  there) -- re-verified: the regenerated plot is clean at every output
+  time, including t=0.30.
+- **2D diagonal shock:** the hand-rolled, per-stage-time-dependent
+  SSP-RK2 driver produces a shock that stays measurably straight and
+  tracks `x+y=0.5+t` closely at every grid/time (e.g. n=400, t=0.5: the
+  diagonal (x=y) crossing's exact position is 0.5000, numerical 0.4999),
+  L1 error drops under refinement for both reconstructions, and **zero
+  measured overshoot/undershoot** at every grid/reconstruction/time --
+  indirectly but concretely confirming the per-stage time-threading is
+  correct: a bug in which stage saw which ghost time would most likely
+  show up as spurious oscillation or a measurably wrong shock speed,
+  neither of which appeared.
+
+Architecture decisions:
+- `InflowOutflowBoundary` added to core (`src/cfe/grid/boundary/`) as a
+  genuinely reusable type, not tutorial-local -- unlike
+  `DiagonalShockExactBoundary` (2D tutorial), which hardcodes one
+  problem's exact-solution formula and stays tutorial-local by design
+  (same physics/generic-numerics separation already established for
+  Reconstruction/NumericalFlux types).
+- Deliberately did NOT add a time parameter to `cfe::ssp_rk2_step` to
+  support the 2D tutorial's time-dependent ghost fills -- that shared,
+  already-reviewed helper is used unmodified by every other solver in
+  this codebase; the 2D tutorial hand-rolls its own two-stage loop
+  instead, confined entirely to tutorial-local code.
+
+Known limitations:
+- No CUDA port for either tutorial -- consistent with every other
+  tutorial in this repo being CPU-only (performance/scale is a
+  benchmark/test concern here, not a tutorial one).
+- The 2D tutorial's post-shock story has no analogue to worry about
+  (the diagonal shock has no breaking-time complication the 1D Case B
+  does), so this limitation list is shorter than that entry's.
+
+Next recommended task:
+Continue Phase 2 breadth-first (MPI decomposition prototype), or check
+with the PI on priority -- same open question as every entry since
+PR #3 began.
