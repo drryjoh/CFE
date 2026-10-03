@@ -26,3 +26,18 @@ add_subdirectory(hello_parallel_for)
 # Phase 1's CUDA correctness/benchmark work, which produces no output to
 # actually look at). CPU-only.
 add_subdirectory(scalar_advection_3d_visualization)
+
+# 3D Burgers VTK time-series demo (2026-10-02 follow-up to task 0003's
+# CUDA correctness/benchmark work, same reasoning as the scalar-advection
+# tutorial above, but showing deformation/shock formation instead of
+# unchanged translation). CPU-only.
+add_subdirectory(burgers_3d_visualization)
+
+# Quantitative 1D/2D Burgers verification tutorials (grid-convergence
+# sweeps against exact cut-cell references, first-order vs limited
+# second-order reconstruction comparison, plotted via a committed Python
+# script) -- a different kind of tutorial than the two above (those are
+# single-run visual demos; these are reproducible numerical-evidence
+# harnesses). CPU-only.
+add_subdirectory(burgers_1d_shock_and_steepening)
+add_subdirectory(burgers_2d_diagonal_shock)
