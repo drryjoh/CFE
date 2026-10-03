@@ -14,11 +14,18 @@
 // (t_n for the first residual evaluation, t_n+dt for the second) before
 // each of the two `solver.residual(...)` calls.
 //
-// Initial condition and every exact reference cell average use the SAME
+// Initial condition, every exact reference cell average, AND every
+// ghost cell `DiagonalShockExactBoundary` fills all use the SAME
 // `cut_cell_fraction` helper: the closed-form area of a square cell cut
 // by the diagonal line x+y=c, evaluated at c=0.5 for t=0 and c=0.5+t for
-// every later reference -- so cells the shock straddles get their true
-// fractional coverage, not a cell-center 0/1 guess.
+// every later reference/ghost fill -- so a cell the shock straddles
+// (ghost cells included) gets its true fractional coverage, not a
+// cell-center 0/1 guess. The ghost-cell case was a real bug caught in
+// review (PR #3, commit 1d3654f): ghost cells previously used a
+// cell-center point sample, inconsistent with the cell-average
+// formulation everywhere else in this file, and measurably wrong for
+// the handful of ghost cells the shock actually passes through at any
+// given time (fixed below; see `cut_cell_fraction`'s own doc comment).
 //
 // Output: data/summary.csv (every grid/reconstruction/time row) plus,
 // for one representative combination (the smallest grid, 100^2 --
@@ -57,6 +64,39 @@ const std::vector<std::size_t> kGrids = {100, 200, 400};
 const std::vector<double> kOutputTimes = {0.0, 0.25, 0.5};
 constexpr std::size_t kRepresentativeGrid = 100;  // smallest -- see file header comment
 
+// Exact area fraction of a [x_lo,x_lo+h]x[y_lo,y_lo+h] cell lying in
+// {x+y < c} -- the standard closed form for a square clipped by a
+// slope-(-1) line (assumes a square cell: dx==dy==h, true everywhere
+// this tutorial uses it). Used for the t=0 initial condition (c=0.5),
+// every later exact reference cell average (c=0.5+t), AND -- below --
+// every ghost cell `DiagonalShockExactBoundary` fills: a ghost cell the
+// shock line currently cuts through must get the same true fractional
+// coverage a real cell would, not a cell-center 0/1 sample (caught in
+// review: a point sample at the ghost cell's center is inconsistent
+// with the cell-average formulation everywhere else in this file, and
+// measurably wrong for exactly the ghost cells the shock passes
+// through). Defined before `DiagonalShockExactBoundary` specifically so
+// that type can call it.
+double cut_cell_fraction(double x_lo, double y_lo, double h, double c)
+{
+  const double c_local = c - x_lo - y_lo;
+  if (c_local <= 0.0) return 0.0;
+  if (c_local >= 2.0 * h) return 1.0;
+  if (c_local <= h) return (c_local * c_local) / (2.0 * h * h);
+  const double d = 2.0 * h - c_local;
+  return 1.0 - (d * d) / (2.0 * h * h);
+}
+
+// The lower edge of the cell at padded axis index `i_pad` (ghost or
+// real alike): `grid.x_center`/`y_center`'s own formula minus half a
+// cell, but computed directly in `double` rather than by subtracting
+// `std::size_t`s (which underflows for any ghost index below the
+// origin, e.g. i_pad=0 with ngx=2).
+double cell_lower_edge(std::size_t i_pad, std::size_t n_ghost, double h)
+{
+  return (static_cast<double>(i_pad) - static_cast<double>(n_ghost)) * h;
+}
+
 // ---------------------------------------------------------------------
 // Problem-specific boundary condition: deliberately tutorial-LOCAL, not
 // added to src/cfe/grid/boundary/ -- it hardcodes this one problem's
@@ -82,15 +122,17 @@ struct DiagonalShockExactBoundary
   void fill_x(cfe::FieldView<Scalar, N, Layout> field, const cfe::CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
-    const double t = time;
+    const double c = kShockOrigin + time;
+    const double h = grid.dx;
     for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
-      const double y = grid.y_center(j);
+      const double y_lo = cell_lower_edge(j, grid.ngy, grid.dy);
       for (std::size_t g = 0; g < grid.ngx; ++g) {
         const std::size_t i_low = grid.ngx - 1 - g;
         const std::size_t i_high = grid.ngx + grid.nx + g;
-        field(grid.flat_index(i_low, j, 0), 0) = (grid.x_center(i_low) + y < kShockOrigin + t) ? 1.0 : 0.0;
-        field(grid.flat_index(i_high, j, 0), 0) =
-            (grid.x_center(i_high) + y < kShockOrigin + t) ? 1.0 : 0.0;
+        field(grid.flat_index(i_low, j, 0), 0) = cut_cell_fraction(cell_lower_edge(i_low, grid.ngx, h),
+                                                                    y_lo, h, c);
+        field(grid.flat_index(i_high, j, 0), 0) = cut_cell_fraction(cell_lower_edge(i_high, grid.ngx, h),
+                                                                     y_lo, h, c);
       }
     }
   }
@@ -99,15 +141,17 @@ struct DiagonalShockExactBoundary
   void fill_y(cfe::FieldView<Scalar, N, Layout> field, const cfe::CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
-    const double t = time;
+    const double c = kShockOrigin + time;
+    const double h = grid.dy;
     for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
-      const double x = grid.x_center(i);
+      const double x_lo = cell_lower_edge(i, grid.ngx, grid.dx);
       for (std::size_t g = 0; g < grid.ngy; ++g) {
         const std::size_t j_low = grid.ngy - 1 - g;
         const std::size_t j_high = grid.ngy + grid.ny + g;
-        field(grid.flat_index(i, j_low, 0), 0) = (x + grid.y_center(j_low) < kShockOrigin + t) ? 1.0 : 0.0;
+        field(grid.flat_index(i, j_low, 0), 0) = cut_cell_fraction(x_lo, cell_lower_edge(j_low, grid.ngy, h),
+                                                                    h, c);
         field(grid.flat_index(i, j_high, 0), 0) =
-            (x + grid.y_center(j_high) < kShockOrigin + t) ? 1.0 : 0.0;
+            cut_cell_fraction(x_lo, cell_lower_edge(j_high, grid.ngy, h), h, c);
       }
     }
   }
@@ -119,37 +163,23 @@ struct DiagonalShockExactBoundary
   void fill_z(cfe::FieldView<Scalar, N, Layout> field, const cfe::CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
-    const double t = time;
+    const double c = kShockOrigin + time;
+    const double h = grid.dx;
     for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
+      const double y_lo = cell_lower_edge(j, grid.ngy, grid.dy);
       for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
-        const double x = grid.x_center(i);
-        const double y = grid.y_center(j);
+        const double x_lo = cell_lower_edge(i, grid.ngx, grid.dx);
+        const double value = cut_cell_fraction(x_lo, y_lo, h, c);
         for (std::size_t g = 0; g < grid.ngz; ++g) {
           const std::size_t k_low = grid.ngz - 1 - g;
           const std::size_t k_high = grid.ngz + grid.nz + g;
-          field(grid.flat_index(i, j, k_low), 0) = (x + y < kShockOrigin + t) ? 1.0 : 0.0;
-          field(grid.flat_index(i, j, k_high), 0) = (x + y < kShockOrigin + t) ? 1.0 : 0.0;
+          field(grid.flat_index(i, j, k_low), 0) = value;
+          field(grid.flat_index(i, j, k_high), 0) = value;
         }
       }
     }
   }
 };
-
-// Exact area fraction of a [x_lo,x_lo+h]x[y_lo,y_lo+h] cell lying in
-// {x+y < c} -- the standard closed form for a square clipped by a
-// slope-(-1) line. Used for both the t=0 initial condition (c=0.5) and
-// every later exact reference cell average (c=0.5+t): literally the
-// same function call both times, per the task's "use the same
-// construction" instruction.
-double cut_cell_fraction(double x_lo, double y_lo, double h, double c)
-{
-  const double c_local = c - x_lo - y_lo;
-  if (c_local <= 0.0) return 0.0;
-  if (c_local >= 2.0 * h) return 1.0;
-  if (c_local <= h) return (c_local * c_local) / (2.0 * h * h);
-  const double d = 2.0 * h - c_local;
-  return 1.0 - (d * d) / (2.0 * h * h);
-}
 
 // ---------------------------------------------------------------------
 // Hand-rolled SSP-RK2 (Heun's method) -- see file header comment for why
