@@ -1728,3 +1728,104 @@ None new.
 
 Next recommended task:
 Unchanged from the prior entry.
+
+---
+
+## 2026-10-03 — PR #3 review response: Rusanov sign bug, 2D ghost-cell consistency, 3D blind spot, docs
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Independent review of PR #3 at commit `1d3654f` found two P2 numerical
+issues plus two additional gaps (3D test coverage, required
+documentation). All four verified directly before fixing (not taken on
+faith), fixed, and re-verified -- including on real V100 hardware.
+
+Files changed:
+- `src/cfe/numerics/numerical_flux/rusanov.hpp` -- `rusanov_flux` now
+  takes `|field.wave_speed(...)|`, not the raw return value.
+  `ScalarAdvectionField::wave_speed` is signed (designed for
+  `UpwindFlux`'s direction selection); pairing it with `RusanovFlux`
+  previously used that sign directly as the dissipation coefficient,
+  flipping it for negative velocities and silently selecting the wrong
+  upwind state (reproduced the review's exact case: v=-1, (uL,uR)=(1,2)
+  gave -1, not -2). No-op for `BurgersField` (already non-negative).
+- `tests/unit/test_burgers_flux.cpp` -- 2 new regression tests proving
+  `rusanov_flux` now exactly matches `upwind_flux` for linear advection
+  at both velocity signs.
+- `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp` --
+  `DiagonalShockExactBoundary` previously filled ghost cells with a
+  cell-center 0/1 point sample, inconsistent with the `cut_cell_fraction`
+  cell-average formulation used everywhere else in the file (IC,
+  reference). Fixed by reusing `cut_cell_fraction` for every ghost cell
+  too (moved its definition earlier in the file so the boundary struct
+  can call it; added a `cell_lower_edge` helper to compute each ghost
+  cell's footprint without unsigned underflow). Re-ran the full
+  grid/reconstruction/time sweep and regenerated all data/figures:
+  L1 error improved ~40% at matching resolution (n=400, second-order,
+  t=0.5: 9.72e-4 -> 5.80e-4), confirming this was a real, measurable
+  inconsistency.
+- `tests/unit/test_burgers_3d_sanity.cpp` -- new CPU-only test: a smooth
+  IC varying in all three directions at once (not just X), built
+  exactly symmetric under swapping Y and Z. Checks the evolved field
+  stays Y/Z-symmetric (a real axis-mixup/wrong-spacing bug would break
+  this outright, unlike the X-only tests, which have zero Y/Z gradient
+  to transport and so cannot distinguish correct from broken Y/Z code)
+  and that mass is conserved.
+- `tests/unit/test_burgers_3d_cuda.cu` -- new CUDA test: the same
+  genuinely-multi-axis IC, CPU vs. GPU, plus a conservation check on the
+  GPU result directly.
+- `docs/type-reference.md` -- added entries for every Phase 2 type that
+  was missing one: `BurgersField`, `InflowOutflowBoundary`,
+  `FirstOrderReconstruction`, `minmod`/`muscl_minmod_*`/
+  `MusclMinmodReconstruction`, `rusanov_flux`/`RusanovFlux`.
+- `presentations/0003-phase2-burgers-shock-capturing.md` (new) --
+  required per AGENTS.md #26, missing from the original PR.
+
+Tests added:
+3 new (2 Rusanov regression, 1 CPU Y/Z-symmetry) + 1 new CUDA test --
+93/93 total (up from 87/87), including on real V100 hardware.
+
+Benchmarks run:
+None (no benchmark-relevant code changed; the Rusanov fix only affects
+dissipation sign for Fields with a signed `wave_speed`, which no
+existing benchmark uses).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Rebuilt and re-ran the FULL suite on a real V100 (PSC Bridges-2, job
+`47382581`, node `v016`) after all fixes: 93/93 tests pass,
+`compute-sanitizer --tool initcheck` reports 0 errors. (A first
+allocation, job `47382376` on node `v020`, expired mid-verification when
+the local SSH ControlMaster socket wedged -- diagnosed via `ssh -O
+check` showing the master alive but every channel through it hanging,
+confirmed by a trivial fresh command also hanging; fixed with `ssh -O
+exit` to tear down the stale master, then a fresh connection worked
+immediately. A new allocation was requested and the full verification
+redone from scratch on it -- the first allocation's partial build was
+not trusted or reused.) The Rusanov fix was verified against the
+review's own reported numbers before considering it resolved (recomputed
+by hand: v=-1, (uL,uR)=(1,2) now gives exactly -2, matching
+`upwind_flux`). The 2D ghost-cell fix was verified by observing an
+actual, measured improvement in the regenerated data (not just "it still
+passes"), consistent with the review's own description of the bug's
+effect. The 3D symmetry test's tolerance (1e-10) was chosen with the
+specific floating-point-reordering mechanism in mind (summing
+X+Y+Z vs X+Z+Y is mathematically identical but not bit-identical) rather
+than picked arbitrarily, and reasoned through explicitly in the test's
+own comment before being treated as safe from false failures.
+
+Architecture decisions:
+None -- all four fixes are corrections to already-decided designs, not
+new design decisions.
+
+Known limitations:
+None new.
+
+Next recommended task:
+PR #3 should now be ready for a final review pass. If accepted: continue
+Phase 2 breadth-first (MPI decomposition prototype), or check with the
+PI on priority.
