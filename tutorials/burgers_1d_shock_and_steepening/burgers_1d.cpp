@@ -1,11 +1,11 @@
-// 1D inviscid Burgers tutorial: two selectable cases, both using the
+// 1D inviscid Burgers tutorial: three selectable cases, all using the
 // same FvmSolver + BurgersField + RusanovFlux + SSP-RK2 stack PR #3
 // verified, with ghost cells refreshed by solver.residual() before
 // every single residual evaluation (the default behavior that stack
-// already has -- neither case's boundary values depend on wall-clock
-// time, so the existing, unmodified cfe::ssp_rk2_step is used directly;
-// see the 2D tutorial for the case where per-RK-stage time threading is
-// actually needed).
+// already has -- none of these cases' boundary values depend on
+// wall-clock time, so the existing, unmodified cfe::ssp_rk2_step is
+// used directly; see the 2D tutorial for the case where per-RK-stage
+// time threading is actually needed).
 //
 //   Case A ("shock"): a moving step (u_left=1 > u_right=0) with fixed
 //   inflow at the left and zero-order extrapolation at the right
@@ -20,9 +20,21 @@
 //   analytic breaking time and labeled as numerical-only after it (no
 //   multivalued-characteristics reference is ever plotted).
 //
-// Run with no arguments to do both cases (what "run everything before
-// completing the work" needs in one invocation), or `--case=shock` /
-// `--case=steepening` to run just one.
+//   Case C ("rarefaction"): a TRANSONIC rarefaction fan (u_left=-1 <
+//   u_right=1, fixed far-field StaticBoundary on both ends) -- the
+//   opposite ordering from Case A, so the Lax entropy condition selects
+//   a smooth fan instead of a shock, and the fan's own center is exactly
+//   where the characteristic speed crosses zero. This is the direct,
+//   end-to-end check of the specific design claim
+//   numerics/numerical_flux/rusanov.hpp's own header comment makes:
+//   `RusanovFlux` (not `UpwindFlux`) is required for Burgers because
+//   `UpwindFlux` has no well-defined upwind side exactly at a sonic
+//   point like this one.
+//
+// Run with no arguments to do all three cases (what "run everything
+// before completing the work" needs in one invocation), or
+// `--case=shock` / `--case=steepening` / `--case=rarefaction` to run
+// just one.
 //
 // Output: data/summary.csv (one row per case/grid/reconstruction/time,
 // the single source of truth for every reported number) plus a handful
@@ -381,21 +393,151 @@ void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
   }
 }
 
+// ---------------------------------------------------------------------
+// Case C: transonic rarefaction
+// ---------------------------------------------------------------------
+
+constexpr double kRarefactionULeft = -1.0;
+constexpr double kRarefactionURight = 1.0;
+constexpr double kRarefactionOrigin = 5.0;
+constexpr double kRarefactionDomainLength = 10.0;
+constexpr std::size_t kRarefactionGrid = 400;
+const std::vector<double> kRarefactionOutputTimes = {0.0, 1.0, 2.0};  // fan spans [3,7] at t=2.0 --
+                                                                       // 3.0 of margin either side of [0,10]
+
+// Exact self-similar rarefaction-fan cell average (same construction as
+// tests/unit/test_burgers_rarefaction.cpp's own helper -- see that
+// file's header comment for the full derivation). u_left < u_right
+// selects a fan (Lax entropy condition), not a shock.
+double rarefaction_exact_cell_average(double x_lo, double x_hi, double x0, double t, double u_left,
+                                       double u_right)
+{
+  if (t == 0.0) {
+    if (x_hi <= x0) return u_left;
+    if (x_lo >= x0) return u_right;
+    const double frac_left = (x0 - x_lo) / (x_hi - x_lo);
+    return frac_left * u_left + (1.0 - frac_left) * u_right;
+  }
+  auto antideriv = [&](double s) {
+    if (s <= u_left * t) return u_left * s - 0.5 * u_left * u_left * t;
+    if (s >= u_right * t) return u_right * s - 0.5 * u_right * u_right * t;
+    return s * s / (2.0 * t);
+  };
+  return (antideriv(x_hi - x0) - antideriv(x_lo - x0)) / (x_hi - x_lo);
+}
+
+void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
+{
+  std::printf("=== Case C: transonic rarefaction ===\n");
+
+  cfe::CartesianGrid<double> grid;
+  grid.nx = kRarefactionGrid;
+  grid.ngx = 2;
+  grid.dx = kRarefactionDomainLength / static_cast<double>(kRarefactionGrid);
+
+  cfe::Field<double, 1> state(grid.n_cells_total());
+  cfe::Field<double, 1> stage1(grid.n_cells_total());
+  cfe::Field<double, 1> scratch(grid.n_cells_total());
+
+  for (std::size_t i = 0; i < grid.nx; ++i) {
+    const double x_lo = static_cast<double>(i) * grid.dx;
+    const double x_hi = x_lo + grid.dx;
+    state(grid.flat_index(grid.ngx + i, 0, 0), 0) = rarefaction_exact_cell_average(
+        x_lo, x_hi, kRarefactionOrigin, 0.0, kRarefactionULeft, kRarefactionURight);
+  }
+
+  cfe::BurgersField<double, 1> field{};
+  // Fixed far-field values on BOTH ends -- see test_burgers_rarefaction.cpp's
+  // own comment for why StaticBoundary (not InflowOutflowBoundary) is
+  // the faithful choice for a rarefaction, unlike Case A's moving shock.
+  cfe::StaticBoundary<double, 1> boundary{cfe::State<double, 1>(kRarefactionULeft),
+                                           cfe::State<double, 1>(kRarefactionURight)};
+  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 1>, cfe::StaticBoundary<double, 1>,
+                 cfe::StaticBoundary<double, 1>, cfe::StaticBoundary<double, 1>,
+                 cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>
+      solver{grid, field, boundary};
+  auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
+    solver.residual(in, out);
+  };
+
+  // dt sized from max(|u_left|,|u_right|) -- the KNOWN, fixed far-field
+  // magnitudes -- not from a signed state value: u_left is negative
+  // here, so Case A's own `cfl*dx/u_left` pattern (safe only because
+  // Case A's u_left happens to be positive) would give a negative dt.
+  const double max_speed = std::max(std::abs(kRarefactionULeft), std::abs(kRarefactionURight));
+
+  auto report = [&](double t) {
+    std::vector<double> x(grid.nx), u_num(grid.nx), u_exact(grid.nx);
+    double sum_abs_error = 0.0;
+    double max_val = state(grid.flat_index(grid.ngx, 0, 0), 0);
+    double min_val = max_val;
+    double domain_integral = 0.0;
+    for (std::size_t i = 0; i < grid.nx; ++i) {
+      const double x_lo = static_cast<double>(i) * grid.dx;
+      const double x_hi = x_lo + grid.dx;
+      const double value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
+      const double exact =
+          rarefaction_exact_cell_average(x_lo, x_hi, kRarefactionOrigin, t, kRarefactionULeft,
+                                          kRarefactionURight);
+      x[i] = grid.x_center(grid.ngx + i);
+      u_num[i] = value;
+      u_exact[i] = exact;
+      sum_abs_error += std::abs(value - exact) * grid.dx;
+      max_val = std::max(max_val, value);
+      min_val = std::min(min_val, value);
+      domain_integral += value * grid.dx;
+    }
+    const double overshoot = std::max(0.0, max_val - kRarefactionURight);
+    const double undershoot = std::max(0.0, kRarefactionULeft - min_val);
+
+    append_summary_row(summary, "rarefaction", grid.nx, "second_order_limited", t, sum_abs_error, kNan,
+                        kNan, overshoot, undershoot, domain_integral);
+    char name[160];
+    std::snprintf(name, sizeof(name), "case_rarefaction_t%.2f.csv", t);
+    write_field_csv(data_dir / name, x, u_num, u_exact);
+    std::printf("  [rarefaction] t=%.2f  L1=%.3e  overshoot=%.2e  undershoot=%.2e  domain_integral=%.6f\n",
+                t, sum_abs_error, overshoot, undershoot, domain_integral);
+  };
+
+  report(0.0);
+  double t = 0.0;
+  for (std::size_t seg = 1; seg < kRarefactionOutputTimes.size(); ++seg) {
+    const double t_target = kRarefactionOutputTimes[seg];
+    const double dt_target = kCfl * grid.dx / max_speed;
+    const int n_steps = static_cast<int>(std::ceil((t_target - t) / dt_target));
+    const double dt = (t_target - t) / static_cast<double>(n_steps);
+    for (int step = 0; step < n_steps; ++step) {
+      cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), dt, residual,
+                                 solver.active_cell_count(), solver.active_cell_index_map());
+    }
+    t = t_target;
+    report(t);
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
 {
   bool run_shock = true;
   bool run_steepening = true;
+  bool run_rarefaction = true;
   if (argc > 1) {
     const std::string arg = argv[1];
     if (arg == "--case=shock") {
       run_steepening = false;
+      run_rarefaction = false;
     } else if (arg == "--case=steepening") {
       run_shock = false;
+      run_rarefaction = false;
+    } else if (arg == "--case=rarefaction") {
+      run_shock = false;
+      run_steepening = false;
     } else {
-      std::printf("Unknown argument '%s' -- expected --case=shock or --case=steepening. Running both.\n",
-                  arg.c_str());
+      std::printf(
+          "Unknown argument '%s' -- expected --case=shock, --case=steepening, or "
+          "--case=rarefaction. Running all three.\n",
+          arg.c_str());
     }
   }
 
@@ -405,6 +547,7 @@ int main(int argc, char** argv)
 
   if (run_shock) run_case_shock(summary, data_dir);
   if (run_steepening) run_case_steepening(summary, data_dir);
+  if (run_rarefaction) run_case_rarefaction(summary, data_dir);
 
   summary.close();
   std::printf("\nWrote %s/summary.csv and field CSVs. Run plot_results.py to generate figures.\n",

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Plots for the 1D Burgers tutorial (case A: moving shock, case B:
-sinusoidal steepening). Reads data/summary.csv plus the representative
-per-time field CSVs (x, u_numerical, u_exact) burgers_1d writes for the
-finest grid (400 cells) and second-order (limited) reconstruction --
-see README.md for exactly which files are committed vs. regenerated.
+sinusoidal steepening, case C: transonic rarefaction). Reads
+data/summary.csv plus the representative per-time field CSVs (x,
+u_numerical, u_exact) burgers_1d writes for the finest grid (400 cells)
+and second-order (limited) reconstruction -- see README.md for exactly
+which files are committed vs. regenerated.
 
 Dependencies: numpy, pandas, matplotlib (`pip install numpy pandas
 matplotlib`).
@@ -14,7 +15,8 @@ once (so data/ is populated):
     python3 plot_results.py
 
 Writes figures/case_a_profiles.png, figures/case_a_convergence.png,
-figures/case_a_shock_zoom.png, figures/case_b_profiles.png.
+figures/case_a_shock_zoom.png, figures/case_b_profiles.png,
+figures/case_c_rarefaction_profiles.png.
 """
 import pathlib
 
@@ -158,12 +160,34 @@ def plot_case_b_profiles():
     plt.close(fig)
 
 
+def plot_case_c_rarefaction_profiles():
+    times = [0.00, 1.00, 2.00]
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
+    for ax, t in zip(axes, times):
+        path = DATA / f"case_rarefaction_t{t:.2f}.csv"
+        df = pd.read_csv(path)
+        ax.plot(df["x"], df["u_exact"], color="black", linewidth=1.5, label="exact (entropy solution)")
+        ax.plot(df["x"], df["u_numerical"], color="tab:red", linewidth=1.0, marker=".", markersize=2,
+                 label="numerical (limited 2nd order, nx=400)")
+        ax.axhline(0.0, color="gray", linestyle=":", linewidth=0.8)
+        ax.set_title(f"t = {t:.2f}")
+        ax.set_xlabel("x")
+        ax.grid(alpha=0.3)
+    axes[0].set_ylabel("u")
+    axes[0].legend(loc="upper left", fontsize=7)
+    fig.suptitle("Case C: transonic rarefaction (u_left=-1 < u_right=1) -- smooth fan, not a shock")
+    fig.tight_layout()
+    fig.savefig(FIGURES / "case_c_rarefaction_profiles.png", dpi=150)
+    plt.close(fig)
+
+
 def main():
     FIGURES.mkdir(exist_ok=True)
     plot_case_a_profiles()
     plot_case_a_convergence()
     plot_case_a_shock_zoom()
     plot_case_b_profiles()
+    plot_case_c_rarefaction_profiles()
     print(f"Wrote figures to {FIGURES}")
 
 

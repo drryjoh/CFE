@@ -28,3 +28,6 @@ steepening,400,second_order_limited,0.15,5.56834e-05,nan,nan,0,0,1
 steepening,400,second_order_limited,0.3,0.000412049,nan,nan,0,0,1
 steepening,400,second_order_limited,0.4,nan,nan,nan,0,0,1
 steepening,400,second_order_limited,0.6,nan,nan,nan,0,0,1
+rarefaction,400,second_order_limited,0,0,nan,nan,0,0,2.04697e-15
+rarefaction,400,second_order_limited,1,0.0181092,nan,nan,0,0,3.37924e-15
+rarefaction,400,second_order_limited,2,0.0181359,nan,nan,0,0,9.36751e-16

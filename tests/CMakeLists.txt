@@ -24,6 +24,7 @@ add_executable(cfe_unit_tests
   unit/test_muscl_reconstruction.cpp
   unit/test_burgers_shock_formation.cpp
   unit/test_burgers_convergence.cpp
+  unit/test_burgers_rarefaction.cpp
   unit/test_burgers_3d_sanity.cpp
 )
 

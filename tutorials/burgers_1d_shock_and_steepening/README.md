@@ -89,6 +89,41 @@ exactly `1.0` (conservation on a periodic domain), and the solution
 never leaves `[0.5, 1.5]` (the initial condition's own min/max -- the
 TVD guarantee holding even past shock formation).
 
+## Case C: transonic rarefaction
+
+Initial condition `u_left=-1` for `x<5`, `u_right=1` for `x>5`, fixed
+far-field values on both ends (`StaticBoundary`) -- the opposite
+ordering from Case A's shock, so the Lax entropy condition selects a
+smooth **rarefaction fan** instead: `u(x,t) = u_left` for
+`(x-5)/t < -1`, `= (x-5)/t` for `-1 <= (x-5)/t <= 1`, `= u_right` for
+`(x-5)/t > 1` (exact, self-similar). This case is specifically
+**transonic**: the fan's own center is exactly where the characteristic
+speed crosses zero, a genuine sonic point sitting inside the domain --
+the exact scenario `numerics/numerical_flux/upwind.hpp`'s own header
+comment names as the gap `UpwindFlux` cannot handle (no well-defined
+upwind side right at a sonic point) and `RusanovFlux` exists to close.
+This is the direct, end-to-end confirmation of that design choice, not
+just another Riemann problem.
+
+![Case C rarefaction profiles](figures/case_c_rarefaction_profiles.png)
+
+The fan grows smoothly and symmetrically (span `[5+u_left*t, 5+u_right*t]`
+= `[4,6]` at `t=1`, `[3,7]` at `t=2`), staying well clear of both
+boundaries for the whole run, and passes cleanly through `u=0` at its
+center with no spurious jump or glitch -- the actual transonic-
+correctness criterion, not just "the numbers are close." Checked
+directly (not just plotted): the solution never leaves `[-1,1]`, L1
+error against the exact cell-average solution drops under grid
+refinement, and the domain integral stays unchanged to within floating-
+point tolerance for the whole run -- a clean, exact-zero conservation
+check specific to this symmetric choice of far-field values (Burgers'
+flux is `u^2/2`, so `F(-1)=F(1)=0.5`, making the net boundary flux
+exactly zero despite this domain not being periodic). `dt` is sized from
+`max(|u_left|,|u_right|)`, not a signed state value -- `u_left` is
+negative here, so Case A's own `dt = cfl*dx/u_left` pattern (safe only
+because Case A's `u_left` happens to be positive) would give a negative
+timestep.
+
 ## Build and run
 
 From the repo root (builds everything else too):
@@ -111,9 +146,10 @@ cmake --build build --target cfe_burgers_1d -j
 `cmake --build build -j` with no `--target` builds the *whole* project
 (every test, benchmark, and tutorial), not just this one -- see
 `tutorials/CMakeLists.txt`'s own comment for why pulling in the repo
-root this way always does that. Run with `--case=shock` or
-`--case=steepening` to run just one case; no argument runs both (what
-this README's own regeneration commands below do).
+root this way always does that. Run with `--case=shock`,
+`--case=steepening`, or `--case=rarefaction` to run just one case; no
+argument runs all three (what this README's own regeneration commands
+below do).
 
 Writes `data/summary.csv` (every grid/case/reconstruction/time row --
 the single source of truth for every number reported above) plus the
@@ -138,7 +174,11 @@ case: Case A's finest grid (400 cells), at all four output times, for
 **both** reconstructions (needed for the shock-capturing zoom-in plot to
 compare them side by side); Case B's single grid (400 cells, no
 resolution sweep is requested for this case), limited second-order only,
-at all five output times. This is enough for `plot_results.py` to
+at all five output times; Case C's single grid (400 cells, same
+reasoning as Case B -- the grid-convergence claim is already proven by
+`tests/unit/test_burgers_rarefaction.cpp`, this tutorial is for the
+profile plot), limited second-order only, at all three output times.
+This is enough for `plot_results.py` to
 reproduce every figure in this README out of the box, without re-running
 the C++ binary -- but running it (as shown above) regenerates the exact
 same files, plus every other grid/reconstruction combination `summary.csv`
