@@ -1829,3 +1829,132 @@ Next recommended task:
 PR #3 should now be ready for a final review pass. If accepted: continue
 Phase 2 breadth-first (MPI decomposition prototype), or check with the
 PI on priority.
+
+---
+
+## 2026-10-06 — PR #3 review response: minmod underflow, convergence-claim honesty, transonic rarefaction
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+A further independent review of PR #3 found three issues: a real
+floating-point correctness bug in `minmod`, an overclaiming test
+name/acceptance framing for the Burgers smooth-convergence case, and a
+genuine verification gap (no end-to-end test of Burgers' transonic
+rarefaction case -- the specific scenario `RusanovFlux` was chosen over
+`UpwindFlux` to handle). All three verified directly before fixing.
+
+Files changed:
+- `src/cfe/numerics/fvm/muscl_minmod.hpp` -- `minmod`'s textbook `a*b<=0`
+  sign test replaced with direct sign comparisons. Numerically confirmed
+  (not just reasoned through) that `1e-200*1e-200` underflows to exactly
+  `0.0` in `double` and `1e-25f*1e-25f` to exactly `0.0f` in `float`,
+  both well before either operand itself underflows -- the old test
+  wrongly clipped a real, representable slope to zero at those
+  magnitudes. New comparisons never multiply the two inputs, so this
+  cannot recur at any representable magnitude.
+- `tests/unit/test_muscl_reconstruction.cpp` --
+  `test_minmod_handles_tiny_representable_slopes_without_underflow`:
+  exact (tolerance `0`) checks at `1e-200` (double) and `1e-25f` (float),
+  covering same-sign, opposite-sign, zero-paired, and differing-
+  magnitude cases. Exact tolerance deliberately, not a loose one -- a
+  loose tolerance could let a wrongly-returned `0` slip through
+  unnoticed, which is exactly the failure mode this guards against.
+- `tests/unit/test_burgers_convergence.cpp` -- the test formerly named
+  `test_burgers_smooth_second_order_convergence` is renamed to
+  `test_burgers_smooth_convergence_order_reduced_from_nominal_by_minmod_clipping`
+  and now computes/prints the observed order (`log2(ratio)`) explicitly
+  for every refinement pair, not just the raw ratio -- measured ~1.68,
+  not 2. Acceptance band re-expressed directly in order terms
+  (`[log2(3.0), log2(4.5)]`) -- the identical effective threshold as
+  before, computed rather than transcribed so it provably was not
+  quietly re-picked to force a pass.
+- `docs/adr/0008-burgers-shock-capturing-scheme.md` -- Evidence table
+  gained an explicit observed-order column; prose now states the
+  nominal-(local, design)-vs-measured-(global, this-problem) distinction
+  directly, with the log2 conversion shown, not left implicit.
+- `presentations/0003-phase2-burgers-shock-capturing.md` -- added a
+  plain-language bullet making the same nominal-vs-measured distinction
+  for the non-CS audience.
+- `tests/unit/test_burgers_shock_formation.cpp` -- fixed a stale
+  cross-reference to the old test name in its own header comment.
+- `tests/unit/test_burgers_rarefaction.cpp` (new) -- `u_left=-1 <
+  u_right=1`, fixed far-field `StaticBoundary` both ends. Exact
+  self-similar entropy solution via a closed-form cell-average
+  antiderivative (continuous across both fan edges, correct for cells
+  that straddle an edge, not a point sample -- same construction style
+  as the shock test's own cut-cell reference). Checks: L1 error
+  decreases under refinement; boundedness within `[-1,1]` (the actual
+  transonic-correctness criterion -- a sign/entropy bug at the sonic
+  point would show up as a bounds violation or an unphysical stationary
+  jump, not a subtle error); exact flux-balance conservation
+  (`F(-1)=F(1)=0.5` for Burgers' `u^2/2` flux, so the expected net
+  change is exactly zero despite the domain not being periodic -- a
+  clean property of this specific symmetric choice, confirmed, not
+  assumed). `dt` sized from `max(|u_left|,|u_right|)`, explicitly NOT
+  from a signed state value -- `u_left` is negative here, so the
+  existing shock test's own `cfl*dx/u_left` pattern (only safe because
+  that test's `u_left` happens to be positive) would give a negative
+  timestep. Templated on `Scalar`, exercised at both double and float.
+- `tutorials/burgers_1d_shock_and_steepening/` -- added Case C
+  ("rarefaction") as a third selectable case (`--case=rarefaction`):
+  profile plots at 3 output times, committed data/figure, README
+  section.
+
+Tests added:
+6 new (1 minmod regression, 5 rarefaction) -- 90/90 total on CPU (up
+from 85/85), 99/99 on GPU (up from 93/93; the 6 new CPU-only tests plus
+no new GPU-specific test -- see Known limitations).
+
+Benchmarks run:
+None (no benchmark-relevant code changed).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Rebuilt and re-ran the FULL suite on a real V100 (PSC Bridges-2, job
+`47470583`, node `v012`) after all three fixes: 99/99 tests pass
+(including every pre-existing GPU test, confirming no regression from
+the `minmod` fix or the convergence-test rename), `compute-sanitizer
+--tool initcheck` reports 0 errors. The `minmod` underflow claim was
+checked with an actual throwaway C++ program before trusting it (not
+just mental floating-point arithmetic): confirmed `1e-200*1e-200 ==
+0.0` and `1e-25f*1e-25f == 0.0f` exactly. The renamed convergence
+test's printed output was inspected directly: observed order 1.68-1.69
+across three refinement pairs, matching the ADR's own table to within
+rounding. The rarefaction test's real numbers (also captured via a
+throwaway diagnostic): L1 error 7.21e-2/3.62e-2/1.81e-2/9.07e-3 at
+nx=100/200/400/800 (clean ~2x halving each doubling), zero measured
+overshoot/undershoot at every resolution, domain-integral change
+exactly `0.0` to printed precision at every resolution -- all matching
+the hand-derived expectations before the code was run, not adjusted
+after the fact. The 1D tutorial's Case C plot was inspected directly:
+a smooth, symmetric fan growing correctly and passing cleanly through
+`u=0` at its center with no glitch.
+
+Architecture decisions:
+None -- all three fixes/additions are corrections or additive
+verification, not new design decisions. Confirmed (not just assumed) by
+inspection that `BurgersField`/`RusanovFlux`/`MusclMinmodReconstruction`/
+`StaticBoundary` needed zero changes to support the rarefaction case --
+only a new test and tutorial case were added on top of already-existing
+production types.
+
+Known limitations:
+- No new GPU-specific CUDA test was added for the rarefaction case
+  specifically. Scoped this way deliberately: the review's own framing
+  for this item was a CPU "end-to-end" verification (double+float), and
+  no new production type was introduced that would need fresh GPU
+  coverage -- `MusclMinmodReconstruction`'s only change (the `minmod`
+  fix) is already exercised on GPU by every pre-existing Burgers CUDA
+  test, and the fix only matters at subnormal magnitudes no realistic
+  state value in this codebase approaches. The full existing GPU suite
+  was re-run as a regression check (99/99, 0 sanitizer errors) rather
+  than silently skipped.
+
+Next recommended task:
+PR #3 should now be ready for a final review pass. If accepted: continue
+Phase 2 breadth-first (MPI decomposition prototype), or check with the
+PI on priority.
