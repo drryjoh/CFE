@@ -26,8 +26,8 @@
 // this family for Burgers's first shock-capturing scheme; sharper
 // limiters are named future work (docs/adr/0008-...).
 //
-//   minmod(a, b) = 0                       if a*b <= 0 (disagreeing sign,
-//                                           or either is exactly zero)
+//   minmod(a, b) = 0                       if a, b disagree in sign, or
+//                                           either is exactly zero
 //                = sign(a) * min(|a|, |b|) otherwise
 //   slope(l, c, r) = minmod(c - l, r - c)
 //   right(l, c, r) = c + slope(l, c, r) / 2   -- this cell's value at its
@@ -50,15 +50,27 @@ namespace fvm {
 // The minmod slope limiter: 0 if `a`/`b` disagree in sign (or either is
 // exactly zero), otherwise whichever of the two is smaller in magnitude
 // (with their shared sign).
+//
+// Deliberately does NOT use the textbook `a*b <= 0` sign test (caught in
+// review): that product underflows to exactly 0 for small-but-equal-
+// magnitude, same-sign `a`/`b` well before either operand itself
+// underflows -- e.g. `a=b=1e-200` (double) gives `a*b=1e-400`, which
+// flushes to `0.0` (doubles bottom out around `1e-308`), wrongly taking
+// the `<=0` branch and returning `0` instead of the correct `1e-200`.
+// The same failure mode hits `float` far sooner (`1e-25f` is a perfectly
+// representable `float`, but `(1e-25f)*(1e-25f)=1e-50f` underflows,
+// `float`'s smallest subnormal being around `1e-45`). Direct sign
+// comparisons below never multiply `a` and `b` together, so this
+// failure mode cannot occur at any representable magnitude -- see
+// `test_minmod_handles_tiny_representable_slopes_without_underflow` in
+// test_muscl_reconstruction.cpp for the regression coverage.
 template <class Scalar>
 CFE_HOST_DEVICE
 Scalar minmod(Scalar a, Scalar b)
 {
-  if (a * b <= Scalar(0)) return Scalar(0);
-  const Scalar abs_a = a < Scalar(0) ? -a : a;
-  const Scalar abs_b = b < Scalar(0) ? -b : b;
-  const Scalar smaller = abs_a < abs_b ? a : b;
-  return smaller;
+  if (a > Scalar(0) && b > Scalar(0)) return a < b ? a : b;
+  if (a < Scalar(0) && b < Scalar(0)) return a > b ? a : b;
+  return Scalar(0);
 }
 
 // This cell's limited slope, from its own immediate ("1-ring")
