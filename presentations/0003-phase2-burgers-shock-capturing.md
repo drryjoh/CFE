@@ -83,6 +83,18 @@
   simulation right up to that moment and compared against the exact
   smooth-wave answer — matching closely, including in the final
   instants just before the shock forms.
+- A precise distinction worth stating plainly, caught in review: the
+  limiter from two slides ago is designed to be highly accurate on
+  smooth data like this wave — that's its *textbook* rating. But because
+  this specific wave happens to have a high point and a low point
+  somewhere in the middle (not just a jump), the limiter's safety check
+  quietly kicks in at exactly those two points too, every time, no
+  matter how fine the grid — and that measurably drags down the
+  *overall* accuracy we actually measured for this problem, from the
+  textbook number to a real, consistently lower one. Both facts are
+  true at once and don't contradict each other; we now report and test
+  the number we actually measured, not the textbook one, and renamed the
+  underlying test so its name says that too.
 - After that moment, there is no simple exact formula to compare
   against anymore (the honest smooth-math answer becomes multi-valued,
   which is physically meaningless) — so past that point, the plots are

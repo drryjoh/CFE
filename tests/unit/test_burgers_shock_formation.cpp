@@ -24,8 +24,10 @@
 // so the mean absolute error is expected to shrink only like O(1/nx)
 // (not O(1/nx^2)), a well-known, accepted property of shock-capturing
 // schemes at an actual discontinuity -- distinct from
-// test_burgers_convergence.cpp's *smooth*-solution 2nd-order claim,
-// which this file is not attempting to reproduce.
+// test_burgers_convergence.cpp's *smooth*-solution convergence-rate
+// measurement (itself measurably below the scheme's own nominal 2nd
+// order, for a different, documented reason -- see that file's own
+// header comment), which this file is not attempting to reproduce.
 //
 // Templated on `Scalar` (matching
 // test_scalar_advection_convergence_variants.cpp's own convention) so

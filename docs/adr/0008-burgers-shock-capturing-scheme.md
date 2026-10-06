@@ -181,23 +181,41 @@ printed precision).
 (`tests/unit/test_burgers_convergence.cpp`, `u0(x) = 1.0 +
 0.5*sin(2*pi*x)`, run to `t = 0.5 * t_break` where `t_break =
 1/(2*pi*0.5) ≈ 0.3183`, against the exact method-of-characteristics
-solution):
+solution). **Nominal vs. measured, stated explicitly (review finding):**
+`MusclMinmodReconstruction` is 2nd-order accurate IN SMOOTH REGIONS
+LOCALLY -- that is its nominal, design order. It is NOT globally
+2nd-order for this specific problem: the sine IC has two smooth extrema
+where minmod clips the slope to exactly zero regardless of resolution
+(an accepted, documented TVD-limiter property, not a bug -- see
+`numerics/fvm/muscl_minmod.hpp`'s own header comment), which drags the
+MEASURED global (L2-norm) order down from the nominal 2. The table
+below reports the observed order directly (`log2(error_ratio)`), not
+just the raw ratio, specifically so this distinction is never implicit:
 
-| nx | L2 error | ratio |
-|---|---|---|
-| 40 | 7.18e-3 | -- |
-| 80 | 2.22e-3 | 3.23 |
-| 160 | 6.92e-4 | 3.21 |
-| 320 | 2.15e-4 | 3.22 |
-| 640 | 6.69e-5 | 3.21 |
+| nx | L2 error | ratio | observed order (`log2(ratio)`) |
+|---|---|---|---|
+| 40 | 7.18e-3 | -- | -- |
+| 80 | 2.22e-3 | 3.23 | 1.69 |
+| 160 | 6.92e-4 | 3.21 | 1.68 |
+| 320 | 2.15e-4 | 3.22 | 1.69 |
+| 640 | 6.69e-5 | 3.21 | 1.68 |
 
-The ratio stabilizes tightly around **~3.21-3.23**, not the clean ~4.0 a
-linear problem's scalar advection test shows -- consistent with the
-documented mechanism (minmod clips to 1st order at the IC's two smooth
-extrema; LeVeque Sec. 9.3, Sweby 1984), and stable across refinements
-(not drifting toward either 4 or lower), so this is read as the
-scheme's genuine, resolution-independent signature for this IC, not
-under-resolution noise.
+The observed order stabilizes tightly around **~1.68**, not the nominal
+2 a clean 2nd-order-globally scheme would show (compare
+`test_scalar_advection_convergence.cpp`'s linear-advection case, which
+genuinely does hit ~4.0/order~2 globally, since its IC has no smooth
+extremum for minmod-equivalent clipping to degrade) -- consistent with
+the documented mechanism (minmod clips to 1st order at the IC's two
+smooth extrema; LeVeque Sec. 9.3, Sweby 1984), and stable across
+refinements (not drifting toward either the nominal 2 or 1), so this is
+read as the scheme's genuine, resolution-independent signature for this
+IC, not under-resolution noise. The production test is named
+`test_burgers_smooth_convergence_order_reduced_from_nominal_by_minmod_clipping`
+(not `..._second_order_convergence`, which would overclaim this
+specific measurement) and its acceptance band is expressed directly in
+observed-order terms (`[log2(3.0), log2(4.5)] ≈ [1.58, 2.17]`) -- the
+same effective threshold as before, just computed rather than
+transcribed, so it cannot have been quietly loosened to force a pass.
 
 **GPU port and at-scale verification** (2026-10-02 follow-up, per
 review feedback that every PR needs 3D GPU correctness + an at-scale
