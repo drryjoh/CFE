@@ -110,12 +110,17 @@ just another Riemann problem.
 The fan grows smoothly and symmetrically (span `[5+u_left*t, 5+u_right*t]`
 = `[4,6]` at `t=1`, `[3,7]` at `t=2`), staying well clear of both
 boundaries for the whole run, and passes cleanly through `u=0` at its
-center with no spurious jump or glitch -- the actual transonic-
-correctness criterion, not just "the numbers are close." Checked
-directly (not just plotted): the solution never leaves `[-1,1]`, L1
-error against the exact cell-average solution drops under grid
-refinement, and the domain integral stays unchanged to within floating-
-point tolerance for the whole run -- a clean, exact-zero conservation
+center with no spurious jump or glitch. Checked directly (not just
+plotted, and not by boundedness alone -- see below): L1 error against
+the exact cell-average solution drops under grid refinement, the
+solution never leaves `[-1,1]` (the TVD bound -- a separate property
+from entropy-correctness: a non-physical *stationary* expansion jump,
+the classic failure mode at a transonic point, would stay entirely
+within `[-1,1]` too, so boundedness alone would not catch it; it is the
+L1-error-against-the-correct-spreading-fan check that actually would,
+since a stationary jump's error would not shrink under refinement), and
+the domain integral stays unchanged to within floating-point tolerance
+for the whole run -- a clean, exact-zero conservation
 check specific to this symmetric choice of far-field values (Burgers'
 flux is `u^2/2`, so `F(-1)=F(1)=0.5`, making the net boundary flux
 exactly zero despite this domain not being periodic). `dt` is sized from

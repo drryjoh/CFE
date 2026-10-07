@@ -1885,10 +1885,13 @@ Files changed:
   antiderivative (continuous across both fan edges, correct for cells
   that straddle an edge, not a point sample -- same construction style
   as the shock test's own cut-cell reference). Checks: L1 error
-  decreases under refinement; boundedness within `[-1,1]` (the actual
-  transonic-correctness criterion -- a sign/entropy bug at the sonic
-  point would show up as a bounds violation or an unphysical stationary
-  jump, not a subtle error); exact flux-balance conservation
+  decreases under refinement (this, not boundedness, is what actually
+  detects an entropy-violating "stationary expansion jump" -- the
+  classic non-physical weak solution at a transonic point stays
+  entirely within `[-1,1]`, so a bounds check alone would not catch it;
+  corrected after an initial, wrong claim that it would -- see below);
+  boundedness within `[-1,1]` (the TVD bound, a separate property from
+  entropy-correctness); exact flux-balance conservation
   (`F(-1)=F(1)=0.5` for Burgers' `u^2/2` flux, so the expected net
   change is exactly zero despite the domain not being periodic -- a
   clean property of this specific symmetric choice, confirmed, not
@@ -1958,3 +1961,71 @@ Next recommended task:
 PR #3 should now be ready for a final review pass. If accepted: continue
 Phase 2 breadth-first (MPI decomposition prototype), or check with the
 PI on priority.
+
+---
+
+## 2026-10-07 — PR #3: two documentation corrections
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Review caught two factual errors in prose written during the prior
+entry (code/tests were already correct; only the explanations were
+wrong). Both verified against the actual code before fixing.
+
+Files changed:
+- `docs/adr/0008-burgers-shock-capturing-scheme.md` -- had claimed
+  scalar advection's clean global 2nd-order convergence was because its
+  sine IC "has no smooth extremum for minmod-equivalent clipping to
+  degrade." Checked: `test_scalar_advection_convergence.cpp`'s IC,
+  `sin(2*pi*(x-a*t))`, has exactly the same max/min structure as this
+  file's own Burgers IC -- the claim was simply wrong. The actual reason
+  is that `test_scalar_advection_convergence.cpp` uses
+  `CentralDifferenceReconstruction`, which is unlimited (no TVD clip at
+  all, at an extremum or anywhere else); this file's test uses
+  `MusclMinmodReconstruction`, whose minmod limiter clips regardless of
+  whether a discontinuity is nearby. Corrected: the order reduction
+  measured here is a property of pairing this IC with this (limited)
+  scheme, not a property of the IC alone.
+- `tests/unit/test_burgers_rarefaction.cpp`,
+  `tutorials/burgers_1d_shock_and_steepening/README.md`, and this file's
+  own prior entry -- had claimed the boundedness check
+  (`test_burgers_rarefaction_stays_bounded_within_far_field_states`)
+  would catch an entropy-violating "stationary expansion jump" (the
+  classic non-physical weak solution at a transonic point). Checked: a
+  stationary jump from `u_left` to `u_right` directly at `x0` (instead
+  of spreading into the correct fan) never leaves `[u_left,u_right]` --
+  no value exceeds either bound -- so a pure bounds check could not
+  distinguish it from the correct solution. What actually detects it is
+  the L1-error-against-exact-solution tests
+  (`test_burgers_rarefaction_matches_exact_entropy_solution`,
+  `..._l1_error_decreases_under_grid_refinement`): a stationary jump's
+  error against the correct spreading fan is O(1) and does not shrink
+  under refinement (unlike a true discretization artifact), so those
+  tests -- not boundedness -- are what would catch this specific
+  failure mode. Corrected the attribution in all three places; the
+  boundedness test's own job (the TVD bound) is unchanged and still
+  correctly checked.
+
+Tests added:
+None -- no code changed, only comments/documentation. Re-ran the full
+CPU suite to confirm (90/90, unchanged).
+
+Scientific verification:
+Both corrections were checked against the actual code before being
+accepted as real errors (not just taken on the reviewer's word): the
+linear-advection test's IC was read directly and confirmed to have
+smooth extrema; the rarefaction test's own exact-solution helper was
+checked to confirm a stationary-jump profile is bounds-compatible with
+`[u_left,u_right]` (it is, by construction -- the failure mode is a
+*shape* error, not a *range* error).
+
+Architecture decisions:
+None -- documentation-only.
+
+Known limitations:
+None new.
+
+Next recommended task:
+Unchanged from the prior entry.

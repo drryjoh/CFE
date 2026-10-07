@@ -186,13 +186,26 @@ CFE_TEST(test_burgers_rarefaction_l1_error_decreases_under_grid_refinement)
 
 CFE_TEST(test_burgers_rarefaction_stays_bounded_within_far_field_states)
 {
-  // The actual transonic-correctness criterion: a scheme with a sign or
-  // entropy bug at the sonic point (xi=0, right at the fan's own
-  // center, where a naive signed-wave-speed scheme like UpwindFlux has
-  // no well-defined upwind direction) could produce values outside
-  // [u_left,u_right], or an unphysical stationary jump at xi=0 instead
-  // of a smooth fan -- neither of which this checks for directly, but
-  // both of which would show up as a bounds violation here.
+  // What this DOES catch: spurious overshoot/undershoot beyond
+  // [u_left,u_right] -- the TVD guarantee failing, e.g. ringing from a
+  // sign bug that makes the scheme add dissipation of the wrong sign
+  // somewhere in the fan.
+  //
+  // What this does NOT catch, corrected on review: an entropy-violating
+  // "stationary expansion jump" (the classic non-physical weak solution
+  // at a transonic point -- a scheme with no entropy fix can get stuck
+  // reproducing the initial step, u_left for x<x0 and u_right for
+  // x>x0, instead of spreading it into the fan) stays entirely within
+  // [u_left,u_right] -- no value ever exceeds either bound, so this
+  // check alone would NOT flag it. That failure mode is what
+  // test_burgers_rarefaction_matches_exact_entropy_solution and
+  // test_burgers_rarefaction_l1_error_decreases_under_grid_refinement
+  // are actually for: a stationary jump has an O(1) L1 error against
+  // the correct spreading-fan solution that does NOT shrink under
+  // refinement (a stationary jump is self-sustaining, not a resolution
+  // artifact), which those two tests would catch directly. This test's
+  // own job is narrower -- just the TVD bound -- and is checked here on
+  // its own terms, not stretched to cover entropy-correctness too.
   const RunResult result = run_burgers_rarefaction<double>(400, -1.0, 1.0, 5.0, 10.0, 2.0, 0.4);
   CFE_CHECK(result.max_overshoot < 1e-9);
   CFE_CHECK(result.max_undershoot < 1e-9);

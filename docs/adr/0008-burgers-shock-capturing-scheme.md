@@ -203,10 +203,18 @@ just the raw ratio, specifically so this distinction is never implicit:
 The observed order stabilizes tightly around **~1.68**, not the nominal
 2 a clean 2nd-order-globally scheme would show (compare
 `test_scalar_advection_convergence.cpp`'s linear-advection case, which
-genuinely does hit ~4.0/order~2 globally, since its IC has no smooth
-extremum for minmod-equivalent clipping to degrade) -- consistent with
-the documented mechanism (minmod clips to 1st order at the IC's two
-smooth extrema; LeVeque Sec. 9.3, Sweby 1984), and stable across
+genuinely does hit ~4.0/order~2 globally). That comparison is NOT
+because the linear-advection IC lacks smooth extrema -- its sine profile
+`sin(2*pi*(x-a*t))` has exactly the same max/min structure as this
+file's `1+0.5*sin(2*pi*x)` does. The difference is the RECONSTRUCTION:
+`test_scalar_advection_convergence.cpp` uses
+`CentralDifferenceReconstruction`, which is unlimited (no TVD clip at
+all, at an extremum or anywhere else), so its extrema cost it nothing.
+This test uses `MusclMinmodReconstruction` specifically, whose minmod
+limiter clips to 1st order at a smooth extremum regardless of whether a
+discontinuity is nearby (LeVeque Sec. 9.3, Sweby 1984) -- the order
+reduction measured here is a property of pairing THIS IC with THIS
+(limited) scheme, not a property of the IC alone. Stable across
 refinements (not drifting toward either the nominal 2 or 1), so this is
 read as the scheme's genuine, resolution-independent signature for this
 IC, not under-resolution noise. The production test is named
