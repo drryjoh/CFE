@@ -2125,3 +2125,88 @@ Next recommended task:
 Unchanged from the prior PR #3 entry (MPI decomposition prototype, or
 check with the PI on Phase 2 priority) -- this entry is a
 tutorial/benchmark hygiene fix, not new scope.
+
+## 2026-10-08 — Student-readable comments for Burgers benchmarks/tutorials
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User feedback: the Burgers benchmark/tutorial source was "looking
+cumbersome" to a reader who knows Python but not C++ idioms well --
+anonymous namespaces, backend/boundary "tag" structs, lambda closures,
+and dense multi-line template argument lists were unexplained. Added
+short, mostly single-line `//` comments at exactly those spots across
+all six Burgers benchmark/tutorial files, explaining WHAT each
+construct does (often via a one-line Python analogy) rather than
+restating existing WHY-level design rationale already present from
+prior review rounds. Scoped to benchmarks/tutorials only, per explicit
+instruction ("backend code need not extensive commenting"); Phase 1's
+scalar-advection benchmarks/tutorials use the same terse style and were
+left untouched as out of scope.
+
+Files changed:
+- benchmarks/burgers/bench_burgers.cpp (rewritten with full
+  student-facing commentary: header include-group comments, anonymous
+  namespace/Scalar-alias explainer, SerialBackend/ThreadedBackend "tag"
+  explainer, Field-triple/init-loop/solver-assembly/residual-lambda/
+  dt-closure/warm-up/timing-loop/main() comments)
+- benchmarks/burgers/bench_burgers_cuda.cu, bench_burgers_3d_cuda.cu
+  (same treatment, CUDA-specific additions: why `SolverResidual` is a
+  named functor instead of a lambda here -- nvcc forbids a
+  locally-defined lambda as that template argument -- and why
+  `synchronize()` is required before stopping the timer: GPU kernel
+  launches return before the work finishes)
+- tutorials/burgers_1d_shock_and_steepening/burgers_1d.cpp,
+  tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp,
+  tutorials/burgers_3d_visualization/advect_burgers_gaussian_3d.cpp
+  (targeted inline comments added at the same categories of spots --
+  anonymous namespace, Field triples, solver assembly, residual/
+  write_frame closures, main() -- via Edit rather than a full rewrite,
+  since these files already carry extensive prior-review WHY-commentary
+  that needed to stay intact)
+
+Tests added:
+None -- comment-only change, no behavior to test. Existing suite
+(99 CPU tests) re-run as a regression check.
+
+Scientific verification:
+Comment-only diff confirmed zero behavioral change three ways: (1) all
+six files build cleanly (`cmake --build` targets
+cfe_bench_burgers/cfe_burgers_1d/cfe_burgers_2d/
+cfe_advect_burgers_gaussian_3d; the two `.cu` files could not be
+compiled locally, no nvcc toolchain on this machine -- comments cannot
+break compilation and every surrounding line is byte-identical to the
+already-GPU-verified version, so this is flagged as the one untested
+configuration rather than silently assumed fine); (2) full CPU suite
+(`ctest`) still 100% passing; (3) actually ran all three CPU tutorials
+end-to-end and diffed against the committed `data/`/`vtk_output/`
+fixtures via `git status` -- zero diff in any generated `.csv` or
+`.vtk` file, confirming the regenerated output is byte-identical to
+the pre-comment-pass version (3D: `t=0.5219, state range [1.0000,
+1.3846]` matches exactly; 1D rarefaction L1 at t=2.0: 1.814e-02 matches
+exactly; 2D diagonal shock L1 at n=400,t=0.5: 5.799e-04 matches
+exactly).
+
+Architecture decisions:
+None -- no production library code touched, and no benchmark/tutorial
+numerics changed; this is purely an in-file documentation
+accessibility improvement.
+
+Known limitations:
+The two CUDA benchmark files' comment-only changes are unverified by
+an actual nvcc build (no CUDA toolchain on this development machine) --
+a build on Bridges-2 would close this out definitively, though the
+risk is minimal since only comment lines were touched. Phase 1's
+scalar-advection benchmarks/tutorials were not given the same
+commenting treatment (out of scope per the user's own framing of this
+request as being about "the benchmarks" in the Burgers PR under
+review) -- worth revisiting if/when the user wants the same
+readability pass applied there.
+
+Next recommended task:
+Confirm the two touched `.cu` files still compile under nvcc next time
+Bridges-2 (or any CUDA toolchain) is available, then this PR's
+documentation work is complete. Otherwise, unchanged from the prior
+entry (MPI decomposition prototype, or check with the PI on Phase 2
+priority).

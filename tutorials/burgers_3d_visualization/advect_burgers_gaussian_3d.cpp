@@ -47,8 +47,13 @@
 #include "cfe/solver/explicit/fvm_solver.hpp"
 #include "cfe/solver/time_integration/ssp_rk2.hpp"
 
+// An anonymous namespace: everything below, until the matching `}`, is
+// private to this file only. Closest Python analogy: names that are
+// never exported from a module.
 namespace {
 
+// A short, local name standing in for whichever type `cfe::scalar`
+// currently is (`float` or `double` -- see this file's header comment).
 using Scalar = cfe::scalar;
 
 constexpr std::size_t kN = 64;
@@ -74,6 +79,9 @@ std::string frame_path(const std::filesystem::path& out_dir, int frame)
 
 }  // namespace
 
+// Entry point: builds the grid and initial Gaussian bump, then advances
+// the solver `kTotalSteps` times, writing a VTK frame every
+// `kOutputEvery` steps so the run can be watched as a time series.
 int main()
 {
   const std::filesystem::path out_dir = "vtk_output";
@@ -90,10 +98,19 @@ int main()
   grid.dy = kDx;
   grid.dz = kDx;
 
+  // Three arrays of `kN^3` numbers each (plus ghost cells), the same
+  // shape as a 3D numpy array flattened to 1D: `state` holds the
+  // simulation's current values; `stage1` and `scratch` are scratch
+  // space the time-stepper below uses internally.
   cfe::Field<Scalar, 1> state(grid.n_cells_total());
   cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
+  // Fill `state` with a Gaussian bump riding on a flat background --
+  // the same formula a numpy one-liner
+  // `background + amplitude*np.exp(-r2/(2*sigma**2))` would compute.
+  // Also remember the largest |value| seen, needed below to pick a
+  // stable time-step size.
   Scalar max_abs_u0 = Scalar(0.0);
   for (std::size_t k = 0; k < grid.nz; ++k) {
     for (std::size_t j = 0; j < grid.ny; ++j) {
@@ -111,11 +128,19 @@ int main()
     }
   }
 
+  // `field` picks WHICH equation is being solved (3D Burgers' equation).
+  // `solver` bundles that equation with the grid, the boundary rule on
+  // all three axes (`PeriodicBoundary`: each face wraps around to the
+  // opposite one), and the shock-capturing reconstruction + flux scheme.
   cfe::BurgersField<Scalar, 3> field{};
   cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 3>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary, cfe::fvm::MusclMinmodReconstruction,
                  cfe::RusanovFlux>
       solver{grid, field, cfe::PeriodicBoundary{}};
+  // `residual` is a small function: given the current values (`in`), it
+  // writes the instantaneous rate of change into `out` -- the
+  // right-hand side `f(u)` of the ODE `du/dt = f(u)` the time-stepper
+  // below integrates.
   auto residual = [&](cfe::FieldView<Scalar, 1> in, cfe::FieldView<Scalar, 1> out) {
     solver.residual(in, out);
   };
@@ -131,6 +156,10 @@ int main()
 
   int frame = 0;
   Scalar t = Scalar(0.0);
+  // A closure (like a Python lambda capturing variables from the
+  // enclosing scope) that dumps the current `state` to one `.vtk` file
+  // and appends its timestamp to the `.pvd` manifest, also printing the
+  // current min/max state value to the console as a quick sanity check.
   auto write_frame = [&]() {
     const std::string path = frame_path(out_dir, frame);
     cfe::io::write_vtk_structured_points_cell_scalar(path, grid, state.view(), "state");

@@ -75,10 +75,15 @@
 #include "cfe/solver/explicit/fvm_solver.hpp"
 #include "cfe/solver/time_integration/ssp_rk2.hpp"
 
+// An anonymous namespace: everything below, until the matching `}` near
+// the bottom of this file, is private to this file only. Closest Python
+// analogy: names that are never exported from a module.
 namespace {
 
 namespace fs = std::filesystem;
 
+// A short, local name standing in for whichever type `cfe::scalar`
+// currently is (`float` or `double` -- see this file's header comment).
 using Scalar = cfe::scalar;
 
 constexpr Scalar kPi = Scalar(3.14159265358979323846);
@@ -175,6 +180,10 @@ void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool
   grid.ngx = 2;
   grid.dx = Scalar(1.0) / static_cast<Scalar>(nx);
 
+  // Three arrays of `nx` numbers each (plus ghost cells), the same shape
+  // as a 1D numpy array: `state` holds the simulation's current values;
+  // `stage1` and `scratch` are scratch space the time-stepping algorithm
+  // below uses internally.
   cfe::Field<Scalar, 1> state(grid.n_cells_total());
   cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
@@ -189,12 +198,21 @@ void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = shock_exact_cell_average(x_lo, x_hi, Scalar(0.0));
   }
 
+  // `field` picks WHICH equation is being solved (Burgers' equation).
+  // `boundary` fixes the inflow value (`kShockULeft`) at the left edge
+  // and copies the nearest interior cell at the right edge (outflow).
+  // `solver` bundles the equation, grid, boundary, and the
+  // `Reconstruction`/flux scheme this function was called with.
   cfe::BurgersField<Scalar, 1> field{};
   cfe::InflowOutflowBoundary<Scalar, 1> boundary{cfe::State<Scalar, 1>(kShockULeft)};
   cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>,
                  cfe::InflowOutflowBoundary<Scalar, 1>, cfe::InflowOutflowBoundary<Scalar, 1>,
                  cfe::InflowOutflowBoundary<Scalar, 1>, Reconstruction, cfe::RusanovFlux>
       solver{grid, field, boundary};
+  // `residual` is a small function: given the current values (`in`), it
+  // writes the instantaneous rate of change into `out` -- the
+  // right-hand side `f(u)` of the ODE `du/dt = f(u)` the time-stepper
+  // below integrates.
   auto residual = [&](cfe::FieldView<Scalar, 1> in, cfe::FieldView<Scalar, 1> out) {
     solver.residual(in, out);
   };
@@ -350,6 +368,9 @@ void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
     max_abs_u0 = std::max(max_abs_u0, std::abs(value));
   }
 
+  // Same solver-assembly pattern as Case A above, but with
+  // `PeriodicBoundary` (the right edge wraps around to the left) since
+  // this case's sine wave has no fixed inflow/outflow.
   cfe::BurgersField<Scalar, 1> field{};
   cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary, cfe::fvm::MusclMinmodReconstruction,
@@ -475,6 +496,9 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
   // the faithful choice for a rarefaction, unlike Case A's moving shock.
   cfe::StaticBoundary<Scalar, 1> boundary{cfe::State<Scalar, 1>(kRarefactionULeft),
                                           cfe::State<Scalar, 1>(kRarefactionURight)};
+  // Same solver-assembly pattern as the other two cases, with
+  // `StaticBoundary` (each end fixed to its own far-field value, never
+  // changing) in place of Case A's `InflowOutflowBoundary`.
   cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>, cfe::StaticBoundary<Scalar, 1>,
                  cfe::StaticBoundary<Scalar, 1>, cfe::StaticBoundary<Scalar, 1>,
                  cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>
@@ -541,6 +565,9 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
 
 }  // namespace
 
+// Entry point: parses an optional `--case=` command-line flag, then
+// runs whichever case(s) it selects (all three by default), writing one
+// shared summary CSV plus each case's own field CSVs.
 int main(int argc, char** argv)
 {
   bool run_shock = true;

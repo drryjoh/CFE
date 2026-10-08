@@ -67,6 +67,14 @@
 #include "cfe/numerics/numerical_flux/rusanov.hpp"
 #include "cfe/solver/explicit/fvm_solver.hpp"
 
+// An anonymous namespace: everything below, until the matching `}` near
+// the bottom of this file, is private to this file only. Closest Python
+// analogy: names that are never exported from a module. This file does
+// not use a local `Scalar` alias like the other tutorials -- `cfe::scalar`
+// is spelled out everywhere, since `cut_cell_fraction`/`cell_lower_edge`
+// below are genuine templates whose own parameter is already named
+// `Scalar`, and `DiagonalShockExactBoundary`'s member functions follow
+// that same convention.
 namespace {
 
 namespace fs = std::filesystem;
@@ -292,6 +300,10 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
   grid.dx = cfe::scalar(1.0) / static_cast<cfe::scalar>(n);
   grid.dy = grid.dx;
 
+  // Three arrays of `n*n` numbers each (plus ghost cells), the same
+  // shape as a 2D numpy array flattened to 1D: `state` holds the
+  // simulation's current values; `stage1` and `scratch` are scratch
+  // space `step_once` below uses internally.
   cfe::Field<cfe::scalar, 1> state(grid.n_cells_total());
   cfe::Field<cfe::scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<cfe::scalar, 1> scratch(grid.n_cells_total());
@@ -306,6 +318,10 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
     }
   }
 
+  // `field` picks WHICH equation is being solved (2D Burgers' equation).
+  // `solver` bundles that equation with the grid, the problem-specific
+  // exact-solution boundary on both the X and Y faces, and the
+  // `Reconstruction` scheme this function was called with.
   cfe::BurgersField<cfe::scalar, 2> field{};
   DiagonalShockExactBoundary boundary_x{};
   DiagonalShockExactBoundary boundary_y{};
@@ -391,6 +407,9 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
 
 }  // namespace
 
+// Entry point: for each grid size, runs both reconstructions and writes
+// one shared summary CSV, plus a full field + diagonal-profile CSV for
+// one representative (grid, reconstruction) combination.
 int main()
 {
   const fs::path data_dir = "data";
