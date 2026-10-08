@@ -2029,3 +2029,99 @@ None new.
 
 Next recommended task:
 Unchanged from the prior entry.
+
+---
+
+## 2026-10-08 — Retrofit Burgers tutorials/benchmarks to cfe::scalar
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+User question ("why use double and not scalar here? is this where we
+say we are using double for the rest of the program?") surfaced a real
+inconsistency: this project already has a project-wide precision
+mechanism (`cfe::scalar`, `core/types.hpp`, AGENTS.md #11, configured
+via the `CFE_SCALAR_TYPE` CMake cache variable, used in
+`tutorials/hello_parallel_for/` since Phase 0) that none of the
+Burgers-era tutorials/benchmarks from this session's earlier work used
+-- all six hardcoded `double` directly. Confirmed this (Phase 1's
+scalar-advection tutorials/benchmarks have the identical pattern, so it
+predates this session's Burgers work specifically) before proposing a
+fix, and scoped the retrofit to exactly what the user agreed to: the
+six Burgers tutorial/benchmark files, not the dual-precision unit
+tests (which correctly hardcode both `double` and `float` explicitly on
+purpose, to prove the generic code works at both, independent of
+whatever `cfe::scalar` resolves to -- retrofitting those would defeat
+their purpose).
+
+Files changed:
+- `tutorials/burgers_1d_shock_and_steepening/burgers_1d.cpp`,
+  `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp`,
+  `tutorials/burgers_3d_visualization/advect_burgers_gaussian_3d.cpp`,
+  `benchmarks/burgers/bench_burgers.cpp`,
+  `benchmarks/burgers/bench_burgers_cuda.cu`,
+  `benchmarks/burgers/bench_burgers_3d_cuda.cu` -- every
+  grid/field/solver/state-precision quantity switched from hardcoded
+  `double` to `cfe::scalar`. Reported metrics (L1 error, overshoot/
+  undershoot, domain mean/integral) and wall-clock timing deliberately
+  stay `double` regardless -- the same convention the dual-precision
+  unit tests already use, so reporting precision is never conflated
+  with simulation precision.
+- `burgers_2d.cpp`'s `cut_cell_fraction`/`cell_lower_edge` needed a
+  closer look, not a blind substitution: `DiagonalShockExactBoundary`'s
+  own `fill_x`/`fill_y`/`fill_z` were ALREADY correctly generic
+  (templated on their own `Scalar`, following the same convention
+  `StaticBoundary`/`PeriodicBoundary` use) -- making those two helpers
+  genuine templates (not fixed to `cfe::scalar`) was the more correct
+  fix, letting the boundary struct's existing genericity actually reach
+  all the way down, rather than hardcoding a concrete type one level
+  below where the existing design had already generalized.
+- READMEs for all three tutorials -- added a `## Precision` section
+  documenting `cfe::scalar`/`CFE_SCALAR_TYPE`.
+
+Tests added:
+None (no test files touched -- this was a tutorial/benchmark-only
+retrofit; see Objective for why the dual-precision tests were
+deliberately left alone).
+
+Scientific verification:
+Verified behavior-preserving at the default (`double`) precision
+FIRST, before trusting the retrofit: both tutorials, re-run after every
+file's change, produced byte-identical committed data/figures to
+before (confirmed via `git status` showing zero diff in any
+`data/*.csv` or `figures/*.png`, only source/README changes). Then
+verified the actual payoff, not just "it still compiles": configured
+and built all three CPU tutorials with `-DCFE_SCALAR_TYPE=float` in a
+separate build directory and ran them -- all three ran correctly, with
+results matching the double-precision runs to within expected float
+roundoff (e.g. 1D rarefaction L1 error at t=1.0: 1.812e-2 float vs.
+1.811e-2 double; 2D diagonal shock L1 at n=400,t=0.5: 5.795e-4 float
+vs. 5.799e-4 double), zero overshoot/undershoot preserved at both
+precisions. Rebuilt and re-ran the full suite on a real V100 (PSC
+Bridges-2, job `48627729`, node `v020`) as a regression check (no
+production code changed by this retrofit, so this should -- and did --
+show no change): 99/99 tests pass, `compute-sanitizer --tool initcheck`
+0 errors. Both retrofitted CUDA benchmarks (previously unverified to
+even compile with nvcc, flagged explicitly as pending in the commit
+message) were built and run on the V100: both compiled cleanly and
+produced throughput numbers consistent with the previously-documented
+ones (1D 10^8 cells: 8.16e9 cell-updates/s vs. the prior 7.69e9; 3D
+512^3: 4.21e9 vs. the prior 4.05e9 -- both within normal benchmark
+run-to-run variance, not a regression).
+
+Architecture decisions:
+None -- no production library code changed; this is entirely a
+tutorial/benchmark-level consistency fix adopting an existing,
+already-designed mechanism correctly.
+
+Known limitations:
+None new. The rest of the codebase's tutorials/benchmarks (Phase 1's
+scalar-advection ones) still hardcode `double` -- noted to the user as
+out of scope for this change, not silently left inconsistent without
+being named.
+
+Next recommended task:
+Unchanged from the prior PR #3 entry (MPI decomposition prototype, or
+check with the PI on Phase 2 priority) -- this entry is a
+tutorial/benchmark hygiene fix, not new scope.
