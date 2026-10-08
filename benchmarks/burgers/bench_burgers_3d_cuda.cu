@@ -6,6 +6,11 @@
 // fully dimension-generic Burgers solver (all three of X/Y/Z's
 // `axis_flux_difference` branches active every step) at scale on real
 // GPU hardware.
+//
+// Simulation precision is `cfe::scalar` (core/types.hpp, project-wide
+// via the `CFE_SCALAR_TYPE` CMake cache variable, `double` by default)
+// -- NOT a hardcoded `double` -- matching AGENTS.md #11. Wall-clock
+// timing (`seconds`/`median_s`) stays `double` regardless.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -14,6 +19,7 @@
 
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
+#include "cfe/core/types.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
@@ -24,48 +30,50 @@
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kAmplitudeOffset = 2.0;  // kept positive (sign never changes) across the whole product IC
-constexpr double kAmplitudeWave = 1.0;
+using Scalar = cfe::scalar;
+
+constexpr Scalar kPi = Scalar(3.14159265358979323846);
+constexpr Scalar kAmplitudeOffset = Scalar(2.0);  // kept positive (sign never changes) across the whole product IC
+constexpr Scalar kAmplitudeWave = Scalar(1.0);
 constexpr int kRepetitions = 10;
 
 void run_case(std::size_t n_per_axis)
 {
-  cfe::CartesianGrid<double> grid;
+  cfe::CartesianGrid<Scalar> grid;
   grid.nx = n_per_axis;
   grid.ny = n_per_axis;
   grid.nz = n_per_axis;
   grid.ngx = 2;
   grid.ngy = 2;
   grid.ngz = 2;
-  grid.dx = 1.0 / static_cast<double>(n_per_axis);
+  grid.dx = Scalar(1.0) / static_cast<Scalar>(n_per_axis);
   grid.dy = grid.dx;
   grid.dz = grid.dx;
 
-  std::vector<double> host_ic(grid.n_cells_total(), 0.0);
-  double max_abs_u0 = 0.0;
+  std::vector<Scalar> host_ic(grid.n_cells_total(), Scalar(0.0));
+  Scalar max_abs_u0 = Scalar(0.0);
   for (std::size_t k = 0; k < grid.nz; ++k) {
     for (std::size_t j = 0; j < grid.ny; ++j) {
       for (std::size_t i = 0; i < grid.nx; ++i) {
-        const double x = grid.x_center(grid.ngx + i);
-        const double y = grid.y_center(grid.ngy + j);
-        const double z = grid.z_center(grid.ngz + k);
-        const double value = kAmplitudeOffset +
-                              kAmplitudeWave * std::sin(2.0 * kPi * x) * std::sin(2.0 * kPi * y) *
-                                  std::sin(2.0 * kPi * z);
+        const Scalar x = grid.x_center(grid.ngx + i);
+        const Scalar y = grid.y_center(grid.ngy + j);
+        const Scalar z = grid.z_center(grid.ngz + k);
+        const Scalar value = kAmplitudeOffset +
+                              kAmplitudeWave * std::sin(Scalar(2.0) * kPi * x) *
+                                  std::sin(Scalar(2.0) * kPi * y) * std::sin(Scalar(2.0) * kPi * z);
         host_ic[grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k)] = value;
         max_abs_u0 = std::max(max_abs_u0, std::abs(value));
       }
     }
   }
 
-  cfe::backend::cuda::DeviceField<double, 1> state(grid.n_cells_total());
-  cfe::backend::cuda::DeviceField<double, 1> stage1(grid.n_cells_total());
-  cfe::backend::cuda::DeviceField<double, 1> scratch(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<Scalar, 1> state(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<Scalar, 1> stage1(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<Scalar, 1> scratch(grid.n_cells_total());
   state.copy_from_host(host_ic.data());
 
-  cfe::BurgersField<double, 3> field{};
-  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 3>, cfe::PeriodicBoundary,
+  cfe::BurgersField<Scalar, 3> field{};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 3>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary, cfe::fvm::MusclMinmodReconstruction,
                  cfe::RusanovFlux, cfe::CudaParallelFor>
       solver{grid, field, cfe::PeriodicBoundary{}};
@@ -76,9 +84,9 @@ void run_case(std::size_t n_per_axis)
   // the per-axis speed bounded by max|u0| (Burgers' own characteristic
   // speed is the state itself, same axis-independent flux on every
   // axis).
-  const double dt = 0.25 * grid.dx / (3.0 * max_abs_u0);
+  const Scalar dt = Scalar(0.25) * grid.dx / (Scalar(3.0) * max_abs_u0);
   auto one_step = [&]() {
-    cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), cfe::CudaParallelFor>(
+    cfe::ssp_rk2_step<Scalar, cfe::FieldView<Scalar, 1>, decltype(residual), cfe::CudaParallelFor>(
         state.view(), stage1.view(), scratch.view(), dt, residual, solver.active_cell_count(),
         solver.active_cell_index_map());
     cfe::backend::cuda::synchronize();

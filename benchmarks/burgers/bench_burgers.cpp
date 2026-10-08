@@ -12,6 +12,12 @@
 // codebase) avoids introducing StaticBoundary's slightly different
 // ghost-fill cost as a confound in the comparison against
 // bench_scalar_advection.cpp's own numbers.
+//
+// Simulation precision is `cfe::scalar` (core/types.hpp, project-wide
+// via the `CFE_SCALAR_TYPE` CMake cache variable, `double` by default)
+// -- NOT a hardcoded `double` -- matching AGENTS.md #11. Wall-clock
+// timing (`seconds`/`median_s`) stays `double` regardless -- that is a
+// measurement precision, not a simulation one.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -20,6 +26,7 @@
 
 #include "cfe/backend/cpu/serial.hpp"
 #include "cfe/backend/cpu/threaded.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -30,6 +37,8 @@
 #include "cfe/solver/time_integration/ssp_rk2.hpp"
 
 namespace {
+
+using Scalar = cfe::scalar;
 
 struct SerialBackend
 {
@@ -49,42 +58,42 @@ struct ThreadedBackend
   }
 };
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kAmplitudeOffset = 1.0;
-constexpr double kAmplitudeWave = 0.5;
+constexpr Scalar kPi = Scalar(3.14159265358979323846);
+constexpr Scalar kAmplitudeOffset = Scalar(1.0);
+constexpr Scalar kAmplitudeWave = Scalar(0.5);
 constexpr int kRepetitions = 7;
 
 template <class Backend>
 void run_case(const char* backend_name, std::size_t nx)
 {
-  cfe::CartesianGrid<double> grid;
+  cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
   grid.ngx = 2;
-  grid.dx = 1.0 / static_cast<double>(nx);
+  grid.dx = Scalar(1.0) / static_cast<Scalar>(nx);
 
-  cfe::Field<double, 1> state(grid.n_cells_total());
-  cfe::Field<double, 1> stage1(grid.n_cells_total());
-  cfe::Field<double, 1> scratch(grid.n_cells_total());
-  double max_abs_u0 = 0.0;
+  cfe::Field<Scalar, 1> state(grid.n_cells_total());
+  cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
+  cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
+  Scalar max_abs_u0 = Scalar(0.0);
   for (std::size_t i = 0; i < grid.nx; ++i) {
-    const double x = grid.x_center(grid.ngx + i);
-    const double value = kAmplitudeOffset + kAmplitudeWave * std::sin(2.0 * kPi * x);
+    const Scalar x = grid.x_center(grid.ngx + i);
+    const Scalar value = kAmplitudeOffset + kAmplitudeWave * std::sin(Scalar(2.0) * kPi * x);
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = value;
     max_abs_u0 = std::max(max_abs_u0, std::abs(value));
   }
 
-  cfe::BurgersField<double, 1> field{};
-  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 1>, cfe::PeriodicBoundary,
+  cfe::BurgersField<Scalar, 1> field{};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary, cfe::fvm::MusclMinmodReconstruction,
                  cfe::RusanovFlux, Backend>
       solver{grid, field, cfe::PeriodicBoundary{}};
-  auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
+  auto residual = [&](cfe::FieldView<Scalar, 1> in, cfe::FieldView<Scalar, 1> out) {
     solver.residual(in, out);
   };
 
-  const double dt = 0.4 * grid.dx / max_abs_u0;
+  const Scalar dt = Scalar(0.4) * grid.dx / max_abs_u0;
   auto one_step = [&]() {
-    cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), Backend>(
+    cfe::ssp_rk2_step<Scalar, cfe::FieldView<Scalar, 1>, decltype(residual), Backend>(
         state.view(), stage1.view(), scratch.view(), dt, residual, solver.active_cell_count(),
         solver.active_cell_index_map());
   };

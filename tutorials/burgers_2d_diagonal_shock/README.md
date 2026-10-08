@@ -50,6 +50,17 @@ and that struct's own header comment for why it is tutorial-local
 rather than added to the generic boundary-condition library (it
 hardcodes this one problem's exact solution formula).
 
+## Precision
+
+This tutorial's simulation precision is `cfe::scalar`
+(`src/cfe/core/types.hpp`), the project-wide default set at configure
+time, not a hardcoded `double` -- `cmake -S . -B build
+-DCFE_SCALAR_TYPE=float` switches this tutorial to `float` too (default
+`double`). Reported metrics (L1 error, overshoot/undershoot, domain
+integral) are deliberately always accumulated in `double` regardless,
+the same convention every other Burgers tutorial/test in this repo
+uses.
+
 ## Build and run
 
 From the repo root (builds everything else too):

@@ -45,6 +45,11 @@ binary from):
   time, so ParaView can load the whole run as one time series with a
   slider instead of opening 51 files by hand.
 
+Simulation precision is `cfe::scalar` (`src/cfe/core/types.hpp`), the
+project-wide default set at configure time, not a hardcoded `double` --
+`cmake -S . -B build -DCFE_SCALAR_TYPE=float` switches this tutorial to
+`float` too (default `double`).
+
 ## Build and run
 
 From the repo root (builds everything else too):

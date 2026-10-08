@@ -36,6 +36,20 @@
 // `--case=shock` / `--case=steepening` / `--case=rarefaction` to run
 // just one.
 //
+// Field/grid/solver precision is `cfe::scalar` (core/types.hpp,
+// configured project-wide via the `CFE_SCALAR_TYPE` CMake cache
+// variable, `double` by default) -- NOT a hardcoded `double` -- so
+// `-DCFE_SCALAR_TYPE=float` switches this tutorial's actual simulation
+// precision too, matching AGENTS.md #11's project-wide convention
+// (`tutorials/hello_parallel_for/hello_parallel_for.cpp` is the other
+// existing example). Reported metrics (L1 error, overshoot/undershoot,
+// domain mean/integral) are deliberately still accumulated in `double`
+// regardless of `cfe::scalar`, the same convention
+// tests/unit/test_burgers_*.cpp's dual-precision tests use -- this
+// keeps the reporting itself numerically stable and avoids conflating
+// "accumulation roundoff" with "scheme behavior at reduced storage
+// precision" when `cfe::scalar` is `float`.
+//
 // Output: data/summary.csv (one row per case/grid/reconstruction/time,
 // the single source of truth for every reported number) plus a handful
 // of representative data/case_*.csv field dumps (x, u_numerical,
@@ -50,6 +64,7 @@
 #include <string>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -64,8 +79,10 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kCfl = 0.4;
+using Scalar = cfe::scalar;
+
+constexpr Scalar kPi = Scalar(3.14159265358979323846);
+constexpr Scalar kCfl = Scalar(0.4);
 constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
 
 // ---------------------------------------------------------------------
@@ -77,14 +94,16 @@ constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
 // linearly interpolating between the two cell centers. NaN if the
 // profile never crosses `level` at all (should not happen for either
 // case here, but reported honestly rather than silently returning 0).
-double find_falling_crossing(const std::vector<double>& values, double x0, double dx, double level)
+// Returns `double` (a reported metric, not a state value) even though
+// `values` is `Scalar`-precision.
+double find_falling_crossing(const std::vector<Scalar>& values, Scalar x0, Scalar dx, Scalar level)
 {
   for (std::size_t i = 0; i + 1 < values.size(); ++i) {
     if (values[i] >= level && values[i + 1] < level) {
-      const double x_i = x0 + static_cast<double>(i) * dx;
-      const double x_ip1 = x0 + static_cast<double>(i + 1) * dx;
-      const double frac = (values[i] - level) / (values[i] - values[i + 1]);
-      return x_i + frac * (x_ip1 - x_i);
+      const Scalar x_i = x0 + static_cast<Scalar>(i) * dx;
+      const Scalar x_ip1 = x0 + static_cast<Scalar>(i + 1) * dx;
+      const Scalar frac = (values[i] - level) / (values[i] - values[i + 1]);
+      return static_cast<double>(x_i + frac * (x_ip1 - x_i));
     }
   }
   return kNan;
@@ -108,8 +127,8 @@ void append_summary_row(std::ofstream& out, const std::string& case_name, std::s
       << domain_mean << '\n';
 }
 
-void write_field_csv(const fs::path& path, const std::vector<double>& x, const std::vector<double>& u_num,
-                      const std::vector<double>& u_exact)
+void write_field_csv(const fs::path& path, const std::vector<Scalar>& x, const std::vector<Scalar>& u_num,
+                      const std::vector<Scalar>& u_exact)
 {
   std::ofstream out(path);
   out << "x,u_numerical,u_exact\n";
@@ -128,107 +147,109 @@ void write_field_csv(const fs::path& path, const std::vector<double>& x, const s
 // Case A: moving shock
 // ---------------------------------------------------------------------
 
-constexpr double kShockULeft = 1.0;
-constexpr double kShockURight = 0.0;
-constexpr double kShockOrigin = 0.25;
-constexpr double kShockSpeed = 0.5 * (kShockULeft + kShockURight);  // Rankine-Hugoniot, exact for Burgers
+constexpr Scalar kShockULeft = Scalar(1.0);
+constexpr Scalar kShockURight = Scalar(0.0);
+constexpr Scalar kShockOrigin = Scalar(0.25);
+constexpr Scalar kShockSpeed = Scalar(0.5) * (kShockULeft + kShockURight);  // Rankine-Hugoniot, exact for Burgers
 const std::vector<std::size_t> kShockGrids = {100, 200, 400};
 const std::vector<double> kShockOutputTimes = {0.0, 0.25, 0.5, 1.0};
 
 // Exact cell average of the moving step over [x_lo, x_hi] at time t,
 // correct (a weighted blend, not a 0/1 pick) even for a cell the shock
 // itself currently straddles.
-double shock_exact_cell_average(double x_lo, double x_hi, double t)
+Scalar shock_exact_cell_average(Scalar x_lo, Scalar x_hi, Scalar t)
 {
-  const double xs = kShockOrigin + kShockSpeed * t;
+  const Scalar xs = kShockOrigin + kShockSpeed * t;
   if (xs <= x_lo) return kShockURight;
   if (xs >= x_hi) return kShockULeft;
-  const double frac_left = (xs - x_lo) / (x_hi - x_lo);
-  return frac_left * kShockULeft + (1.0 - frac_left) * kShockURight;
+  const Scalar frac_left = (xs - x_lo) / (x_hi - x_lo);
+  return frac_left * kShockULeft + (Scalar(1.0) - frac_left) * kShockURight;
 }
 
 template <class Reconstruction>
 void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool write_fields,
                      std::ofstream& summary, const fs::path& data_dir)
 {
-  cfe::CartesianGrid<double> grid;
+  cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
   grid.ngx = 2;
-  grid.dx = 1.0 / static_cast<double>(nx);
+  grid.dx = Scalar(1.0) / static_cast<Scalar>(nx);
 
-  cfe::Field<double, 1> state(grid.n_cells_total());
-  cfe::Field<double, 1> stage1(grid.n_cells_total());
-  cfe::Field<double, 1> scratch(grid.n_cells_total());
+  cfe::Field<Scalar, 1> state(grid.n_cells_total());
+  cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
+  cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
   // Initialize finite-volume states using (exact) cell averages, not a
   // cell-center 0/1 sample -- the IC already contains the discontinuity
   // at x=0.25, so this uses the exact same cut-cell formula the
   // reference solution at later times uses.
   for (std::size_t i = 0; i < grid.nx; ++i) {
-    const double x_lo = static_cast<double>(i) * grid.dx;
-    const double x_hi = x_lo + grid.dx;
-    state(grid.flat_index(grid.ngx + i, 0, 0), 0) = shock_exact_cell_average(x_lo, x_hi, 0.0);
+    const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
+    const Scalar x_hi = x_lo + grid.dx;
+    state(grid.flat_index(grid.ngx + i, 0, 0), 0) = shock_exact_cell_average(x_lo, x_hi, Scalar(0.0));
   }
 
-  cfe::BurgersField<double, 1> field{};
-  cfe::InflowOutflowBoundary<double, 1> boundary{cfe::State<double, 1>(kShockULeft)};
-  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 1>,
-                 cfe::InflowOutflowBoundary<double, 1>, cfe::InflowOutflowBoundary<double, 1>,
-                 cfe::InflowOutflowBoundary<double, 1>, Reconstruction, cfe::RusanovFlux>
+  cfe::BurgersField<Scalar, 1> field{};
+  cfe::InflowOutflowBoundary<Scalar, 1> boundary{cfe::State<Scalar, 1>(kShockULeft)};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>,
+                 cfe::InflowOutflowBoundary<Scalar, 1>, cfe::InflowOutflowBoundary<Scalar, 1>,
+                 cfe::InflowOutflowBoundary<Scalar, 1>, Reconstruction, cfe::RusanovFlux>
       solver{grid, field, boundary};
-  auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
+  auto residual = [&](cfe::FieldView<Scalar, 1> in, cfe::FieldView<Scalar, 1> out) {
     solver.residual(in, out);
   };
 
-  auto report = [&](double t) {
-    std::vector<double> x(grid.nx), u_num(grid.nx), u_exact(grid.nx);
+  auto report = [&](Scalar t) {
+    std::vector<Scalar> x(grid.nx), u_num(grid.nx), u_exact(grid.nx);
     double sum_abs_error = 0.0;
-    double max_val = state(grid.flat_index(grid.ngx, 0, 0), 0);
+    double max_val = static_cast<double>(state(grid.flat_index(grid.ngx, 0, 0), 0));
     double min_val = max_val;
     for (std::size_t i = 0; i < grid.nx; ++i) {
-      const double x_lo = static_cast<double>(i) * grid.dx;
-      const double x_hi = x_lo + grid.dx;
-      const double value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
-      const double exact = shock_exact_cell_average(x_lo, x_hi, t);
+      const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
+      const Scalar x_hi = x_lo + grid.dx;
+      const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
+      const Scalar exact = shock_exact_cell_average(x_lo, x_hi, t);
       x[i] = grid.x_center(grid.ngx + i);
       u_num[i] = value;
       u_exact[i] = exact;
-      sum_abs_error += std::abs(value - exact) * grid.dx;
-      max_val = std::max(max_val, value);
-      min_val = std::min(min_val, value);
+      sum_abs_error += static_cast<double>(std::abs(value - exact)) * static_cast<double>(grid.dx);
+      max_val = std::max(max_val, static_cast<double>(value));
+      min_val = std::min(min_val, static_cast<double>(value));
     }
-    const double shock_numerical = find_falling_crossing(u_num, x[0], grid.dx, 0.5 * (kShockULeft + kShockURight));
-    const double shock_exact = kShockOrigin + kShockSpeed * t;
-    const double overshoot = std::max(0.0, max_val - kShockULeft);
-    const double undershoot = std::max(0.0, kShockURight - min_val);
+    const double shock_numerical =
+        find_falling_crossing(u_num, x[0], grid.dx, Scalar(0.5) * (kShockULeft + kShockURight));
+    const double shock_exact = static_cast<double>(kShockOrigin + kShockSpeed * t);
+    const double overshoot = std::max(0.0, max_val - static_cast<double>(kShockULeft));
+    const double undershoot = std::max(0.0, static_cast<double>(kShockURight) - min_val);
     double domain_mean = 0.0;
-    for (double v : u_num) domain_mean += v;
-    domain_mean *= grid.dx;
+    for (Scalar v : u_num) domain_mean += static_cast<double>(v);
+    domain_mean *= static_cast<double>(grid.dx);
 
-    append_summary_row(summary, "shock", grid.nx, reconstruction_name, t, sum_abs_error, shock_exact,
+    const double t_d = static_cast<double>(t);
+    append_summary_row(summary, "shock", grid.nx, reconstruction_name, t_d, sum_abs_error, shock_exact,
                         shock_numerical, overshoot, undershoot, domain_mean);
     if (write_fields) {
       char name[160];
       std::snprintf(name, sizeof(name), "case_shock_nx%04zu_%s_t%.2f.csv", grid.nx,
-                    reconstruction_name.c_str(), t);
+                    reconstruction_name.c_str(), t_d);
       write_field_csv(data_dir / name, x, u_num, u_exact);
     }
     std::printf(
         "  [shock nx=%4zu %-20s] t=%.2f  L1=%.3e  shock(exact=%.4f, num=%.4f)  overshoot=%.2e  "
         "undershoot=%.2e\n",
-        grid.nx, reconstruction_name.c_str(), t, sum_abs_error, shock_exact, shock_numerical, overshoot,
+        grid.nx, reconstruction_name.c_str(), t_d, sum_abs_error, shock_exact, shock_numerical, overshoot,
         undershoot);
   };
 
-  report(0.0);
-  double t = 0.0;
+  report(Scalar(0.0));
+  Scalar t = Scalar(0.0);
   for (std::size_t seg = 1; seg < kShockOutputTimes.size(); ++seg) {
-    const double t_target = kShockOutputTimes[seg];
-    const double dt_target = kCfl * grid.dx / kShockULeft;
-    const int n_steps = static_cast<int>(std::ceil((t_target - t) / dt_target));
-    const double dt = (t_target - t) / static_cast<double>(n_steps);
+    const Scalar t_target = static_cast<Scalar>(kShockOutputTimes[seg]);
+    const Scalar dt_target = kCfl * grid.dx / kShockULeft;
+    const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));
+    const Scalar dt = (t_target - t) / static_cast<Scalar>(n_steps);
     for (int step = 0; step < n_steps; ++step) {
-      cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), dt, residual,
+      cfe::ssp_rk2_step<Scalar>(state.view(), stage1.view(), scratch.view(), dt, residual,
                                  solver.active_cell_count(), solver.active_cell_index_map());
     }
     t = t_target;
@@ -255,16 +276,16 @@ void run_case_shock(std::ofstream& summary, const fs::path& data_dir)
 // Case B: sinusoidal steepening
 // ---------------------------------------------------------------------
 
-constexpr double kSteepeningBackground = 1.0;
-constexpr double kSteepeningAmplitude = 0.5;
-constexpr double kSteepeningDomainLength = 1.0;
+constexpr Scalar kSteepeningBackground = Scalar(1.0);
+constexpr Scalar kSteepeningAmplitude = Scalar(0.5);
+constexpr Scalar kSteepeningDomainLength = Scalar(1.0);
 // t_s = -1/min(u0') ; u0'(x) = amplitude*2*pi*cos(2*pi*x), min = -amplitude*2*pi
 // -> t_s = 1/(2*pi*amplitude) = 1/pi for amplitude=0.5, matching the spec's own stated value.
-constexpr double kSteepeningBreakTime = 1.0 / (2.0 * kPi * kSteepeningAmplitude);
+constexpr Scalar kSteepeningBreakTime = Scalar(1.0) / (Scalar(2.0) * kPi * kSteepeningAmplitude);
 const std::vector<double> kSteepeningOutputTimes = {0.0, 0.15, 0.30, 0.40, 0.60};
 constexpr std::size_t kSteepeningGrid = 400;
 
-double steepening_ic(double x) { return kSteepeningBackground + kSteepeningAmplitude * std::sin(2.0 * kPi * x); }
+Scalar steepening_ic(Scalar x) { return kSteepeningBackground + kSteepeningAmplitude * std::sin(Scalar(2.0) * kPi * x); }
 
 // Exact method-of-characteristics solution (x = xi + u0(xi)*t, u = u0(xi))
 // -- only valid, and only used, strictly before kSteepeningBreakTime;
@@ -287,105 +308,107 @@ double steepening_ic(double x) { return kSteepeningBackground + kSteepeningAmpli
 // by the IC's own amplitude times the elapsed time, so [x-2, x+2] safely
 // brackets the root for every (x, t) this tutorial ever calls this
 // with.
-double steepening_exact_presolve(double x, double t)
+Scalar steepening_exact_presolve(Scalar x, Scalar t)
 {
-  auto g = [&](double xi) { return xi + steepening_ic(xi) * t - x; };
-  double lo = x - 2.0;
-  double hi = x + 2.0;
-  double g_hi = g(hi);
+  auto g = [&](Scalar xi) { return xi + steepening_ic(xi) * t - x; };
+  Scalar lo = x - Scalar(2.0);
+  Scalar hi = x + Scalar(2.0);
+  Scalar g_hi = g(hi);
   for (int iteration = 0; iteration < 100; ++iteration) {
-    const double mid = 0.5 * (lo + hi);
-    const double g_mid = g(mid);
-    if (std::abs(g_mid) < 1e-13 || (hi - lo) < 1e-13) return steepening_ic(mid);
-    if ((g_mid > 0.0) == (g_hi > 0.0)) {
+    const Scalar mid = Scalar(0.5) * (lo + hi);
+    const Scalar g_mid = g(mid);
+    if (std::abs(g_mid) < Scalar(1e-13) || (hi - lo) < Scalar(1e-13)) return steepening_ic(mid);
+    if ((g_mid > Scalar(0.0)) == (g_hi > Scalar(0.0))) {
       hi = mid;
       g_hi = g_mid;
     } else {
       lo = mid;
     }
   }
-  return steepening_ic(0.5 * (lo + hi));
+  return steepening_ic(Scalar(0.5) * (lo + hi));
 }
 
 void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
 {
-  std::printf("=== Case B: sinusoidal steepening (breaking time t_s=%.5f) ===\n", kSteepeningBreakTime);
+  std::printf("=== Case B: sinusoidal steepening (breaking time t_s=%.5f) ===\n",
+              static_cast<double>(kSteepeningBreakTime));
 
-  cfe::CartesianGrid<double> grid;
+  cfe::CartesianGrid<Scalar> grid;
   grid.nx = kSteepeningGrid;
   grid.ngx = 2;
-  grid.dx = kSteepeningDomainLength / static_cast<double>(kSteepeningGrid);
+  grid.dx = kSteepeningDomainLength / static_cast<Scalar>(kSteepeningGrid);
 
-  cfe::Field<double, 1> state(grid.n_cells_total());
-  cfe::Field<double, 1> stage1(grid.n_cells_total());
-  cfe::Field<double, 1> scratch(grid.n_cells_total());
+  cfe::Field<Scalar, 1> state(grid.n_cells_total());
+  cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
+  cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
-  double max_abs_u0 = 0.0;
+  Scalar max_abs_u0 = Scalar(0.0);
   for (std::size_t i = 0; i < grid.nx; ++i) {
-    const double x = grid.x_center(grid.ngx + i);
-    const double value = steepening_ic(x);
+    const Scalar x = grid.x_center(grid.ngx + i);
+    const Scalar value = steepening_ic(x);
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = value;
     max_abs_u0 = std::max(max_abs_u0, std::abs(value));
   }
 
-  cfe::BurgersField<double, 1> field{};
-  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 1>, cfe::PeriodicBoundary,
+  cfe::BurgersField<Scalar, 1> field{};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary, cfe::fvm::MusclMinmodReconstruction,
                  cfe::RusanovFlux>
       solver{grid, field, cfe::PeriodicBoundary{}};
-  auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
+  auto residual = [&](cfe::FieldView<Scalar, 1> in, cfe::FieldView<Scalar, 1> out) {
     solver.residual(in, out);
   };
 
-  const double bound_low = kSteepeningBackground - kSteepeningAmplitude;
-  const double bound_high = kSteepeningBackground + kSteepeningAmplitude;
+  const double bound_low = static_cast<double>(kSteepeningBackground - kSteepeningAmplitude);
+  const double bound_high = static_cast<double>(kSteepeningBackground + kSteepeningAmplitude);
 
-  auto report = [&](double t) {
+  auto report = [&](Scalar t) {
     const bool pre_shock = t < kSteepeningBreakTime;
-    std::vector<double> x(grid.nx), u_num(grid.nx), u_exact;
+    std::vector<Scalar> x(grid.nx), u_num(grid.nx), u_exact;
     if (pre_shock) u_exact.resize(grid.nx);
     double sum_abs_error = 0.0;
-    double max_val = state(grid.flat_index(grid.ngx, 0, 0), 0);
+    double max_val = static_cast<double>(state(grid.flat_index(grid.ngx, 0, 0), 0));
     double min_val = max_val;
     double domain_integral = 0.0;
     for (std::size_t i = 0; i < grid.nx; ++i) {
-      const double value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
+      const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
       x[i] = grid.x_center(grid.ngx + i);
       u_num[i] = value;
-      domain_integral += value * grid.dx;
-      max_val = std::max(max_val, value);
-      min_val = std::min(min_val, value);
+      domain_integral += static_cast<double>(value) * static_cast<double>(grid.dx);
+      max_val = std::max(max_val, static_cast<double>(value));
+      min_val = std::min(min_val, static_cast<double>(value));
       if (pre_shock) {
-        const double exact = steepening_exact_presolve(x[i], t);
+        const Scalar exact = steepening_exact_presolve(x[i], t);
         u_exact[i] = exact;
-        sum_abs_error += std::abs(value - exact) * grid.dx;
+        sum_abs_error += static_cast<double>(std::abs(value - exact)) * static_cast<double>(grid.dx);
       }
     }
     const double l1_error = pre_shock ? sum_abs_error : kNan;
     const double overshoot = std::max(0.0, max_val - bound_high);
     const double undershoot = std::max(0.0, bound_low - min_val);
 
-    append_summary_row(summary, "steepening", grid.nx, "second_order_limited", t, l1_error, kNan, kNan,
+    const double t_d = static_cast<double>(t);
+    append_summary_row(summary, "steepening", grid.nx, "second_order_limited", t_d, l1_error, kNan, kNan,
                         overshoot, undershoot, domain_integral);
     char name[160];
-    std::snprintf(name, sizeof(name), "case_steepening_t%.2f.csv", t);
+    std::snprintf(name, sizeof(name), "case_steepening_t%.2f.csv", t_d);
     write_field_csv(data_dir / name, x, u_num, u_exact);
     std::printf(
         "  [steepening %s] t=%.2f  %s  domain_mean=%.6f  overshoot=%.2e  undershoot=%.2e\n",
-        pre_shock ? "pre-shock " : "post-shock", t, pre_shock ? "(exact reference available)"
+        pre_shock ? "pre-shock " : "post-shock", t_d, pre_shock ? "(exact reference available)"
                                                                : "(NUMERICAL ONLY -- no exact reference)",
         domain_integral, overshoot, undershoot);
   };
 
-  report(0.0);
-  double t = 0.0;
+  report(Scalar(0.0));
+  Scalar t = Scalar(0.0);
   for (std::size_t seg = 1; seg < kSteepeningOutputTimes.size(); ++seg) {
-    const double t_target = kSteepeningOutputTimes[seg];
-    const double dt_target = kCfl * grid.dx / max_abs_u0;
-    const int n_steps = static_cast<int>(std::ceil((t_target - t) / dt_target));
-    const double dt = (t_target - t) / static_cast<double>(n_steps);
+    const Scalar t_target = static_cast<Scalar>(kSteepeningOutputTimes[seg]);
+    const Scalar dt_target = kCfl * grid.dx / max_abs_u0;
+    const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));
+    const Scalar dt = (t_target - t) / static_cast<Scalar>(n_steps);
     for (int step = 0; step < n_steps; ++step) {
-      cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), dt, residual,
+      cfe::ssp_rk2_step<Scalar>(state.view(), stage1.view(), scratch.view(), dt, residual,
                                  solver.active_cell_count(), solver.active_cell_index_map());
     }
     t = t_target;
@@ -397,10 +420,10 @@ void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
 // Case C: transonic rarefaction
 // ---------------------------------------------------------------------
 
-constexpr double kRarefactionULeft = -1.0;
-constexpr double kRarefactionURight = 1.0;
-constexpr double kRarefactionOrigin = 5.0;
-constexpr double kRarefactionDomainLength = 10.0;
+constexpr Scalar kRarefactionULeft = Scalar(-1.0);
+constexpr Scalar kRarefactionURight = Scalar(1.0);
+constexpr Scalar kRarefactionOrigin = Scalar(5.0);
+constexpr Scalar kRarefactionDomainLength = Scalar(10.0);
 constexpr std::size_t kRarefactionGrid = 400;
 const std::vector<double> kRarefactionOutputTimes = {0.0, 1.0, 2.0};  // fan spans [3,7] at t=2.0 --
                                                                        // 3.0 of margin either side of [0,10]
@@ -409,19 +432,19 @@ const std::vector<double> kRarefactionOutputTimes = {0.0, 1.0, 2.0};  // fan spa
 // tests/unit/test_burgers_rarefaction.cpp's own helper -- see that
 // file's header comment for the full derivation). u_left < u_right
 // selects a fan (Lax entropy condition), not a shock.
-double rarefaction_exact_cell_average(double x_lo, double x_hi, double x0, double t, double u_left,
-                                       double u_right)
+Scalar rarefaction_exact_cell_average(Scalar x_lo, Scalar x_hi, Scalar x0, Scalar t, Scalar u_left,
+                                       Scalar u_right)
 {
-  if (t == 0.0) {
+  if (t == Scalar(0.0)) {
     if (x_hi <= x0) return u_left;
     if (x_lo >= x0) return u_right;
-    const double frac_left = (x0 - x_lo) / (x_hi - x_lo);
-    return frac_left * u_left + (1.0 - frac_left) * u_right;
+    const Scalar frac_left = (x0 - x_lo) / (x_hi - x_lo);
+    return frac_left * u_left + (Scalar(1.0) - frac_left) * u_right;
   }
-  auto antideriv = [&](double s) {
-    if (s <= u_left * t) return u_left * s - 0.5 * u_left * u_left * t;
-    if (s >= u_right * t) return u_right * s - 0.5 * u_right * u_right * t;
-    return s * s / (2.0 * t);
+  auto antideriv = [&](Scalar s) {
+    if (s <= u_left * t) return u_left * s - Scalar(0.5) * u_left * u_left * t;
+    if (s >= u_right * t) return u_right * s - Scalar(0.5) * u_right * u_right * t;
+    return s * s / (Scalar(2.0) * t);
   };
   return (antideriv(x_hi - x0) - antideriv(x_lo - x0)) / (x_hi - x_lo);
 }
@@ -430,33 +453,33 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
 {
   std::printf("=== Case C: transonic rarefaction ===\n");
 
-  cfe::CartesianGrid<double> grid;
+  cfe::CartesianGrid<Scalar> grid;
   grid.nx = kRarefactionGrid;
   grid.ngx = 2;
-  grid.dx = kRarefactionDomainLength / static_cast<double>(kRarefactionGrid);
+  grid.dx = kRarefactionDomainLength / static_cast<Scalar>(kRarefactionGrid);
 
-  cfe::Field<double, 1> state(grid.n_cells_total());
-  cfe::Field<double, 1> stage1(grid.n_cells_total());
-  cfe::Field<double, 1> scratch(grid.n_cells_total());
+  cfe::Field<Scalar, 1> state(grid.n_cells_total());
+  cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
+  cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
   for (std::size_t i = 0; i < grid.nx; ++i) {
-    const double x_lo = static_cast<double>(i) * grid.dx;
-    const double x_hi = x_lo + grid.dx;
+    const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
+    const Scalar x_hi = x_lo + grid.dx;
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = rarefaction_exact_cell_average(
-        x_lo, x_hi, kRarefactionOrigin, 0.0, kRarefactionULeft, kRarefactionURight);
+        x_lo, x_hi, kRarefactionOrigin, Scalar(0.0), kRarefactionULeft, kRarefactionURight);
   }
 
-  cfe::BurgersField<double, 1> field{};
+  cfe::BurgersField<Scalar, 1> field{};
   // Fixed far-field values on BOTH ends -- see test_burgers_rarefaction.cpp's
   // own comment for why StaticBoundary (not InflowOutflowBoundary) is
   // the faithful choice for a rarefaction, unlike Case A's moving shock.
-  cfe::StaticBoundary<double, 1> boundary{cfe::State<double, 1>(kRarefactionULeft),
-                                           cfe::State<double, 1>(kRarefactionURight)};
-  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 1>, cfe::StaticBoundary<double, 1>,
-                 cfe::StaticBoundary<double, 1>, cfe::StaticBoundary<double, 1>,
+  cfe::StaticBoundary<Scalar, 1> boundary{cfe::State<Scalar, 1>(kRarefactionULeft),
+                                          cfe::State<Scalar, 1>(kRarefactionURight)};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>, cfe::StaticBoundary<Scalar, 1>,
+                 cfe::StaticBoundary<Scalar, 1>, cfe::StaticBoundary<Scalar, 1>,
                  cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>
       solver{grid, field, boundary};
-  auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
+  auto residual = [&](cfe::FieldView<Scalar, 1> in, cfe::FieldView<Scalar, 1> out) {
     solver.residual(in, out);
   };
 
@@ -464,50 +487,51 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
   // magnitudes -- not from a signed state value: u_left is negative
   // here, so Case A's own `cfl*dx/u_left` pattern (safe only because
   // Case A's u_left happens to be positive) would give a negative dt.
-  const double max_speed = std::max(std::abs(kRarefactionULeft), std::abs(kRarefactionURight));
+  const Scalar max_speed = std::max(std::abs(kRarefactionULeft), std::abs(kRarefactionURight));
 
-  auto report = [&](double t) {
-    std::vector<double> x(grid.nx), u_num(grid.nx), u_exact(grid.nx);
+  auto report = [&](Scalar t) {
+    std::vector<Scalar> x(grid.nx), u_num(grid.nx), u_exact(grid.nx);
     double sum_abs_error = 0.0;
-    double max_val = state(grid.flat_index(grid.ngx, 0, 0), 0);
+    double max_val = static_cast<double>(state(grid.flat_index(grid.ngx, 0, 0), 0));
     double min_val = max_val;
     double domain_integral = 0.0;
     for (std::size_t i = 0; i < grid.nx; ++i) {
-      const double x_lo = static_cast<double>(i) * grid.dx;
-      const double x_hi = x_lo + grid.dx;
-      const double value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
-      const double exact =
+      const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
+      const Scalar x_hi = x_lo + grid.dx;
+      const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
+      const Scalar exact =
           rarefaction_exact_cell_average(x_lo, x_hi, kRarefactionOrigin, t, kRarefactionULeft,
                                           kRarefactionURight);
       x[i] = grid.x_center(grid.ngx + i);
       u_num[i] = value;
       u_exact[i] = exact;
-      sum_abs_error += std::abs(value - exact) * grid.dx;
-      max_val = std::max(max_val, value);
-      min_val = std::min(min_val, value);
-      domain_integral += value * grid.dx;
+      sum_abs_error += static_cast<double>(std::abs(value - exact)) * static_cast<double>(grid.dx);
+      max_val = std::max(max_val, static_cast<double>(value));
+      min_val = std::min(min_val, static_cast<double>(value));
+      domain_integral += static_cast<double>(value) * static_cast<double>(grid.dx);
     }
-    const double overshoot = std::max(0.0, max_val - kRarefactionURight);
-    const double undershoot = std::max(0.0, kRarefactionULeft - min_val);
+    const double overshoot = std::max(0.0, max_val - static_cast<double>(kRarefactionURight));
+    const double undershoot = std::max(0.0, static_cast<double>(kRarefactionULeft) - min_val);
 
-    append_summary_row(summary, "rarefaction", grid.nx, "second_order_limited", t, sum_abs_error, kNan,
+    const double t_d = static_cast<double>(t);
+    append_summary_row(summary, "rarefaction", grid.nx, "second_order_limited", t_d, sum_abs_error, kNan,
                         kNan, overshoot, undershoot, domain_integral);
     char name[160];
-    std::snprintf(name, sizeof(name), "case_rarefaction_t%.2f.csv", t);
+    std::snprintf(name, sizeof(name), "case_rarefaction_t%.2f.csv", t_d);
     write_field_csv(data_dir / name, x, u_num, u_exact);
     std::printf("  [rarefaction] t=%.2f  L1=%.3e  overshoot=%.2e  undershoot=%.2e  domain_integral=%.6f\n",
-                t, sum_abs_error, overshoot, undershoot, domain_integral);
+                t_d, sum_abs_error, overshoot, undershoot, domain_integral);
   };
 
-  report(0.0);
-  double t = 0.0;
+  report(Scalar(0.0));
+  Scalar t = Scalar(0.0);
   for (std::size_t seg = 1; seg < kRarefactionOutputTimes.size(); ++seg) {
-    const double t_target = kRarefactionOutputTimes[seg];
-    const double dt_target = kCfl * grid.dx / max_speed;
-    const int n_steps = static_cast<int>(std::ceil((t_target - t) / dt_target));
-    const double dt = (t_target - t) / static_cast<double>(n_steps);
+    const Scalar t_target = static_cast<Scalar>(kRarefactionOutputTimes[seg]);
+    const Scalar dt_target = kCfl * grid.dx / max_speed;
+    const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));
+    const Scalar dt = (t_target - t) / static_cast<Scalar>(n_steps);
     for (int step = 0; step < n_steps; ++step) {
-      cfe::ssp_rk2_step<double>(state.view(), stage1.view(), scratch.view(), dt, residual,
+      cfe::ssp_rk2_step<Scalar>(state.view(), stage1.view(), scratch.view(), dt, residual,
                                  solver.active_cell_count(), solver.active_cell_index_map());
     }
     t = t_target;

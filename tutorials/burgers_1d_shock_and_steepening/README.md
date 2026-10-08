@@ -129,6 +129,18 @@ negative here, so Case A's own `dt = cfl*dx/u_left` pattern (safe only
 because Case A's `u_left` happens to be positive) would give a negative
 timestep.
 
+## Precision
+
+This tutorial's simulation precision is `cfe::scalar`
+(`src/cfe/core/types.hpp`), the project-wide default set at configure
+time, not a hardcoded `double` -- `cmake -S . -B build
+-DCFE_SCALAR_TYPE=float` switches this tutorial to `float` too (default
+`double`). Reported metrics (L1 error, overshoot/undershoot, domain
+mean) are deliberately always accumulated in `double` regardless, the
+same convention the dual-precision unit tests use, so the reporting
+itself never conflates "roundoff in the summary statistic" with "scheme
+behavior at reduced storage precision."
+
 ## Build and run
 
 From the repo root (builds everything else too):

@@ -4,6 +4,11 @@
 // RusanovFlux in place of CentralDifferenceReconstruction + UpwindFlux.
 // Same smooth-periodic-IC convention as bench_burgers.cpp -- see that
 // file's header comment for why.
+//
+// Simulation precision is `cfe::scalar` (core/types.hpp, project-wide
+// via the `CFE_SCALAR_TYPE` CMake cache variable, `double` by default)
+// -- NOT a hardcoded `double` -- matching AGENTS.md #11. Wall-clock
+// timing (`seconds`/`median_s`) stays `double` regardless.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -12,6 +17,7 @@
 
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
+#include "cfe/core/types.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
@@ -22,42 +28,44 @@
 
 namespace {
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kAmplitudeOffset = 1.0;
-constexpr double kAmplitudeWave = 0.5;
+using Scalar = cfe::scalar;
+
+constexpr Scalar kPi = Scalar(3.14159265358979323846);
+constexpr Scalar kAmplitudeOffset = Scalar(1.0);
+constexpr Scalar kAmplitudeWave = Scalar(0.5);
 constexpr int kRepetitions = 10;
 
 void run_case(std::size_t nx)
 {
-  cfe::CartesianGrid<double> grid;
+  cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
   grid.ngx = 2;
-  grid.dx = 1.0 / static_cast<double>(nx);
+  grid.dx = Scalar(1.0) / static_cast<Scalar>(nx);
 
-  std::vector<double> host_ic(grid.n_cells_total(), 0.0);
-  double max_abs_u0 = 0.0;
+  std::vector<Scalar> host_ic(grid.n_cells_total(), Scalar(0.0));
+  Scalar max_abs_u0 = Scalar(0.0);
   for (std::size_t i = 0; i < grid.nx; ++i) {
-    const double x = grid.x_center(grid.ngx + i);
-    const double value = kAmplitudeOffset + kAmplitudeWave * std::sin(2.0 * kPi * x);
+    const Scalar x = grid.x_center(grid.ngx + i);
+    const Scalar value = kAmplitudeOffset + kAmplitudeWave * std::sin(Scalar(2.0) * kPi * x);
     host_ic[grid.flat_index(grid.ngx + i, 0, 0)] = value;
     max_abs_u0 = std::max(max_abs_u0, std::abs(value));
   }
 
-  cfe::backend::cuda::DeviceField<double, 1> state(grid.n_cells_total());
-  cfe::backend::cuda::DeviceField<double, 1> stage1(grid.n_cells_total());
-  cfe::backend::cuda::DeviceField<double, 1> scratch(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<Scalar, 1> state(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<Scalar, 1> stage1(grid.n_cells_total());
+  cfe::backend::cuda::DeviceField<Scalar, 1> scratch(grid.n_cells_total());
   state.copy_from_host(host_ic.data());
 
-  cfe::BurgersField<double, 1> field{};
-  cfe::FvmSolver<double, cfe::AoSLayout, cfe::BurgersField<double, 1>, cfe::PeriodicBoundary,
+  cfe::BurgersField<Scalar, 1> field{};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::BurgersField<Scalar, 1>, cfe::PeriodicBoundary,
                  cfe::PeriodicBoundary, cfe::PeriodicBoundary, cfe::fvm::MusclMinmodReconstruction,
                  cfe::RusanovFlux, cfe::CudaParallelFor>
       solver{grid, field, cfe::PeriodicBoundary{}};
   cfe::SolverResidual<decltype(solver)> residual{&solver};
 
-  const double dt = 0.4 * grid.dx / max_abs_u0;
+  const Scalar dt = Scalar(0.4) * grid.dx / max_abs_u0;
   auto one_step = [&]() {
-    cfe::ssp_rk2_step<double, cfe::FieldView<double, 1>, decltype(residual), cfe::CudaParallelFor>(
+    cfe::ssp_rk2_step<Scalar, cfe::FieldView<Scalar, 1>, decltype(residual), cfe::CudaParallelFor>(
         state.view(), stage1.view(), scratch.view(), dt, residual, solver.active_cell_count(),
         solver.active_cell_index_map());
     cfe::backend::cuda::synchronize();
