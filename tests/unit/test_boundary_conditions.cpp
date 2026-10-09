@@ -160,3 +160,28 @@ CFE_TEST(test_periodic_boundary_rejects_narrower_extent_than_ghost_depth_on_ever
     CFE_CHECK(threw);
   }
 }
+
+CFE_TEST(test_inflow_outflow_boundary_fixes_low_end_and_extrapolates_high_end)
+{
+  const auto grid = make_1d_grid(4, 2);
+  cfe::Field<double, 1> state(grid.n_cells_total());
+
+  // Real cells (padded index 2..5) get values 10, 20, 30, 40 -- the
+  // nearest-to-high-boundary real cell is 40.
+  for (std::size_t i = 0; i < grid.nx; ++i) {
+    state(grid.flat_index(grid.ngx + i, 0, 0), 0) = static_cast<double>((i + 1) * 10);
+  }
+
+  cfe::InflowOutflowBoundary<double, 1> bc(cfe::State<double, 1>(-7.0));
+  cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::X, bc);
+
+  // Low end: every ghost layer gets the fixed inflow value.
+  for (std::size_t g = 0; g < grid.ngx; ++g) {
+    CFE_CHECK_NEAR(state(grid.flat_index(g, 0, 0), 0), -7.0, 1e-12);
+  }
+  // High end: every ghost layer copies the SAME single nearest real cell
+  // (40) -- zero-order extrapolation, not a mirror/reflection.
+  for (std::size_t g = 0; g < grid.ngx; ++g) {
+    CFE_CHECK_NEAR(state(grid.flat_index(grid.ngx + grid.nx + g, 0, 0), 0), 40.0, 1e-12);
+  }
+}

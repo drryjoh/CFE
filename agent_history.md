@@ -1220,3 +1220,993 @@ rounds. Recommended next: open the follow-up task for recovering the
 lost auto-vectorization (compiler hints, or a compile-time fast path for
 the common contiguous-offset case), tracked as explicit future work in
 `docs/performance/0004-...md` Observation 4 and `0005-...md`.
+
+---
+
+## 2026-10-02 — Phase 2 (first slice): Burgers equation and shock-capturing numerics
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Phase 1 (PR #2) merged to `main` (squash commit `78b96e4`). Per task
+0003, add the inviscid Burgers equation and a shock-capturing (TVD)
+reconstruction/numerical-flux pair, closing two canonical problems
+`VERIFICATION.md` names but nothing yet implemented: "Burgers smooth
+convergence" and "Burgers shock formation." Deliberately a narrower
+slice of `ROADMAP.md`'s full Phase 2 -- MPI, DG prototype, state
+sizes through 100, the memory-layout study, and a Burgers CUDA
+port/benchmark/visualization tutorial are all explicitly deferred to
+separate follow-up tasks (see `tasks/0003-...md`'s own exclusion list).
+
+Files changed:
+- `src/cfe/fields/burgers/field.hpp` (new) -- `BurgersField<Scalar,
+  Dim>`: `physical_flux(state, axis) = state^2/2`,
+  `wave_speed(left, right, axis) = max(|left|,|right|)`. Same
+  `(state, axis)`-in Calculator shape `ScalarAdvectionField` already
+  established -- `fvm_solver.hpp` needed zero changes.
+- `src/cfe/numerics/numerical_flux/rusanov.hpp` (new) -- `rusanov_flux`/
+  `RusanovFlux`: local Lax-Friedrichs, entropy-satisfying for Burgers'
+  convex flux (closing the gap `upwind.hpp`'s own header comment
+  documents for `UpwindFlux`). Same
+  `NumericalFlux::operator()(left, right, axis, field)` shape.
+- `src/cfe/numerics/fvm/muscl_minmod.hpp` (new) -- `minmod`,
+  `muscl_minmod_slope/value_right/value_left`, and the
+  `MusclMinmodReconstruction` functor: TVD, minmod-limited MUSCL. Same
+  `Reconstruction::right(...)/left(...)` 3-point-stencil shape
+  `CentralDifferenceReconstruction` already uses; that type keeps
+  serving linear advection unchanged, this is a second, additive pair.
+- `tests/unit/test_burgers_flux.cpp`, `test_muscl_reconstruction.cpp`
+  (new) -- hand-computed reference values for every new free
+  function/functor (shock/rarefaction/degenerate-equal-state cases for
+  Rusanov; monotone/local-extremum/genuinely-linear cases for minmod).
+- `tests/unit/test_burgers_shock_formation.cpp` (new) -- "Burgers shock
+  formation": a Riemann-type step (`StaticBoundary` fixing both ends),
+  checked against the exact Rankine-Hugoniot solution, overshoot/
+  undershoot, TVD, and flux-balance conservation (see Scientific
+  verification below) -- templated on `Scalar`, exercised at both
+  double and float precision.
+- `tests/unit/test_burgers_convergence.cpp` (new) -- "Burgers smooth
+  convergence": smooth periodic IC run strictly before the analytic
+  breaking time, checked against a Newton-solved method-of-
+  characteristics exact reference.
+- `tests/CMakeLists.txt` -- the 5 new test files wired in.
+- `docs/adr/0008-burgers-shock-capturing-scheme.md` (new) -- records
+  minmod+Rusanov as the scheme choice, with the Evidence section below
+  reproduced there.
+- `tasks/0003-phase2-burgers-shock-capturing.md` (new) -- formal task
+  spec scoping this as a first slice of Phase 2.
+
+Tests added:
+22 new tests (78/78 total, up from 56/56 at Phase 1's close): Burgers
+Calculator hand-values (2), Rusanov hand-values incl. the degenerate
+equal-state case (4), minmod/MUSCL hand-values incl. the local-extremum
+clip and the genuinely-linear no-clip case (8), shock-formation (6,
+incl. a float-precision variant), smooth convergence (2, incl. a
+breaking-time sanity check on the test's own setup). CPU-only this
+task, per task 0003's explicit scope (no CUDA changes).
+
+Benchmarks run:
+None -- explicitly deferred to a follow-up task (task 0003's own
+"Benchmarks: Not required this task").
+
+Performance change:
+N/A (no production hot path touched beyond new, additive leaf types
+substituted as template arguments; `fvm_solver.hpp`/`ssp_rk2.hpp`/
+`ghost_fill.hpp`/`cartesian_grid.hpp` were not modified).
+
+Scientific verification:
+Both `VERIFICATION.md`-named canonical problems verified with real,
+reported numbers, not "ran and looked reasonable" (full tables in ADR
+0008's Evidence section):
+- **Shock formation** (Riemann step, `u_left=2`, `u_right=1`, exact
+  shock speed `s=1.5`, run to `t=2.0`): mean absolute error against the
+  exact solution halves almost exactly with each doubling of resolution
+  (4.21e-3 at nx=200 -> 5.26e-4 at nx=1600) -- the expected O(1/nx)
+  behavior for a captured shock, not a formal 2nd-order claim (any
+  limited scheme smears a discontinuity over O(1) cells regardless of
+  resolution). Measured overshoot/undershoot was exactly `0.0` at every
+  resolution tested. Total variation was exactly `1.0` (`=u_left-
+  u_right`) before and after, at every resolution -- zero measured
+  oscillation anywhere. Flux-balance conservation
+  (`integral_final-integral_initial` vs. `(F(u_left)-F(u_right))*T`)
+  matched to `1e-6`, both sides equal to `3.000000` at the printed
+  precision.
+- **Smooth convergence** (`u0=1.0+0.5*sin(2*pi*x)`, run to half the
+  analytic breaking time, against a Newton-solved method-of-
+  characteristics exact reference): the error ratio stabilizes tightly
+  at **~3.21-3.23** across 5 refinement levels (40->640 cells) -- not
+  the clean ~4.0 the linear-advection test shows, root-caused (not
+  assumed) to minmod clipping the slope to exactly zero at the IC's two
+  smooth extrema, a documented, accepted property of TVD limiters
+  (Sweby, 1984; see `numerics/fvm/muscl_minmod.hpp`'s own header
+  comment). The convergence test's acceptance band was loosened from
+  `[3.5, 4.5]` to `[3.0, 4.5]` specifically to reflect this, with the
+  mechanism stated in the test file rather than the threshold silently
+  narrowed to make a tight-but-unexplained number pass.
+- Note on the non-periodic shock test's "conservation" claim: the
+  Riemann-step domain is not periodic (mass genuinely flows in/out at
+  the two StaticBoundary ends), so "domain integral constant in time"
+  (the periodic convergence test's own conservation check) does not
+  apply here -- what was actually verified is the flux-form scheme's
+  exact flux-balance guarantee instead (see test file's own comment for
+  why this is the correct, not weaker, substitute).
+
+Architecture decisions:
+`docs/adr/0008-burgers-shock-capturing-scheme.md` (new): minmod-limited
+MUSCL + Rusanov selected as Burgers' first shock-capturing pair --
+simplest provably-TVD/entropy-correct combination, matching every prior
+phase's "smallest capability needed" approach. Named alternatives for
+later phases: superbee/van Leer/MC limiters and WENO (AGENTS.md #18);
+HLLC/AUSM/exact Godunov (Phase 3's Euler work already names HLLC/AUSM).
+Confirms, rather than merely asserts, Phase 1's own stated genericity
+claim for `FvmSolver`/`Reconstruction`/`NumericalFlux`: a genuinely
+nonlinear, shock-forming equation required zero changes to any of
+`fvm_solver.hpp`, `ssp_rk2.hpp`, `ghost_fill.hpp`, or
+`cartesian_grid.hpp`.
+
+Known limitations:
+- CUDA port, benchmark sweep, and visualization tutorial for Burgers are
+  not done -- explicitly deferred, per task 0003's own scope.
+- The rest of `ROADMAP.md` Phase 2 (MPI decomposition + communication
+  benchmark, DG storage/communication prototype, state sizes through
+  100, the memory-layout study) is not started.
+- Only minmod is implemented; sharper limiters (superbee/van Leer/MC)
+  and more accurate fluxes (exact Godunov/HLLC/AUSM) are named future
+  work in ADR 0008, not implemented.
+
+Next recommended task:
+Either (a) port Burgers to CUDA + benchmark + visualization tutorial,
+mirroring Phase 1's own CPU-then-GPU sequencing, or (b) continue Phase 2
+breadth-first into the MPI decomposition prototype -- both are
+reasonable next slices; recommend checking with the PI on which matters
+more before committing effort, since task 0003 deliberately left this
+open rather than presuming the order.
+
+---
+
+## 2026-10-02 — Burgers 3D CPU sanity, CUDA port, and at-scale GPU benchmark (PR #3 follow-up)
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Mid-review of PR #3, the user asked whether a 3D Burgers test existed
+that could run on GPU and check scale -- it did not (the task 0003
+entry above explicitly deferred CUDA/3D/benchmark work). The user then
+stated a standing policy: every PR adding a Field/scheme needs this
+coverage in the same PR, not deferred (recorded in auto-memory as
+`cfe_feedback_pr_gpu_scale_test`). This entry folds that work into PR
+#3 rather than opening a separate follow-up task.
+
+Files changed:
+- `tests/unit/test_burgers_3d_sanity.cpp` (new) -- CPU-only: a Riemann
+  shock varying only in X, uniform/periodic in Y/Z, must match the 1D
+  reference column-for-column (same philosophy as
+  `test_scalar_advection_2d_sanity.cpp`, extended one dimension
+  further). Established 3D residual-loop correctness on CPU *before*
+  porting to GPU, matching this project's own staged-verification
+  discipline.
+- `tests/unit/test_burgers_cuda.cu`, `test_burgers_3d_cuda.cu` (new) --
+  CPU-vs-GPU correctness, 1D and 3D, mirroring
+  `test_scalar_advection_cuda.cu`/`test_scalar_advection_3d_cuda.cu`
+  exactly. Both use the actual shock-formation Riemann setup (not a
+  smooth proxy), so this simultaneously verifies the GPU port AND
+  exercises `StaticBoundary` on CUDA for the first time in this
+  codebase (every prior CUDA test used only `PeriodicBoundary`).
+- `benchmarks/burgers/bench_burgers.cpp`, `bench_burgers_cuda.cu`,
+  `bench_burgers_3d_cuda.cu`, `CMakeLists.txt` (new) -- mirror
+  `benchmarks/scalar_advection/`'s three-file structure and resolution
+  sweeps exactly (CPU 10^4-10^7; GPU 1D 10^6-10^8; GPU 3D up to 512^3).
+- `benchmarks/CMakeLists.txt`, `tests/CMakeLists.txt` -- new
+  files/subdirectory wired in.
+- `docs/performance/0006-phase2-burgers-cuda-results.md` (new) -- full
+  results tables, environment, methodology.
+- `docs/adr/0008-...md` -- GPU-port/at-scale evidence appended to the
+  existing Evidence section.
+
+Tests added:
+3 new CPU tests (3D sanity) + 2 new CUDA tests (1D, 3D) = 92 total
+listed, 87/87 actually executed on this machine (CPU here has no CUDA
+compiler; all 87 -- the 5 CUDA-gated tests included -- ran and passed
+on the V100 allocation, see Scientific verification below).
+
+Benchmarks run:
+`cfe_bench_burgers` (Apple M5, serial+threaded, CPU baseline) and
+`cfe_bench_burgers_cuda`/`cfe_bench_burgers_3d_cuda` (V100, PSC
+Bridges-2, job `47335443`, node `v009`, via the `gpuinteract` QOS
+fast-lane -- see [[bridges2_gpu_access]]).
+
+Performance change:
+N/A (new capability, not a change to existing code -- no prior Burgers
+GPU/benchmark numbers existed to compare against).
+
+Scientific verification:
+Built and ran on real V100 hardware (not assumed/deferred): 87/87 unit
+tests passed, including `test_burgers_cuda_matches_cpu_reference` (1D,
+400 cells, 400 steps) and `test_burgers_3d_cuda_matches_cpu_reference`
+(3D, 96^3 cells, 200 steps), both matching the CPU reference to `1e-9`
+cell-by-cell. `compute-sanitizer --tool initcheck` run over the entire
+suite immediately after: **0 errors** -- checked directly rather than
+assumed clean by analogy to the earlier scalar-advection/DeviceField
+fix, given this project's own history of finding a genuine bug exactly
+this way twice already this PR cycle's predecessor (PR #2).
+Benchmarked at the same scale Phase 1 established for scalar advection:
+1D up to 10^8 cells (~7.69e9 cell-updates/s, 13.0ms/step); 3D up to
+512^3/~1.34e8 cells (~4.05e9 cell-updates/s, 33.1ms/step). Both are a
+modest (~10-15%), expected reduction from scalar advection's own
+numbers at the same scale (0003-...md), attributed directly to
+Burgers' extra per-cell work (a `minmod` branch per face per axis, a
+nonlinear flux evaluation, the Rusanov dissipation term) -- not treated
+as an unexplained regression requiring investigation.
+
+Architecture decisions:
+None new -- confirms `docs/adr/0008-...md`'s existing decision (minmod +
+Rusanov) now extends to GPU and 3D without any additional design choice
+needed, since every new type was already `CFE_HOST_DEVICE`.
+
+Known limitations:
+- The Burgers CPU serial-backend throughput is below scalar advection's
+  own (even pre-regression) baseline at the same cell count, consistent
+  with the extra per-cell work but not separately root-caused via
+  vectorization remarks the way 0004/0005 did for scalar advection --
+  not investigated further here since GPU is this codebase's actual "at
+  scale" target.
+- A Burgers visualization tutorial (mirroring
+  `tutorials/scalar_advection_3d_visualization/`) is still not done.
+- The rest of `ROADMAP.md` Phase 2 (MPI, DG prototype, state sizes
+  through 100, memory-layout study) is still not started.
+
+Next recommended task:
+Burgers visualization tutorial (quick, mirrors an existing pattern), or
+move on to the MPI decomposition prototype -- same open question as the
+prior entry, now with CUDA/3D/benchmark work no longer blocking either
+choice.
+
+---
+
+## 2026-10-02 — Burgers 3D visualization tutorial (PR #3 follow-up)
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+The user asked whether a Burgers tutorial existed (a Gaussian bump
+deforming to a shock, or a sine wave) -- it did not; this was the "known
+limitation" flagged at the end of the prior entry. Closes it: a 3D
+Gaussian-bump visualization tutorial, mirroring
+`tutorials/scalar_advection_3d_visualization/` exactly in structure, but
+demonstrating genuinely different physics.
+
+Files changed:
+- `tutorials/burgers_3d_visualization/advect_burgers_gaussian_3d.cpp`,
+  `CMakeLists.txt`, `README.md` (new) -- same `FvmSolver` + `BurgersField`
+  + `MusclMinmodReconstruction` + `RusanovFlux` + SSP-RK2 stack as the
+  rest of this task, run on a `64^3` periodic grid, a positive-background
+  Gaussian bump (`1.0 + 0.5*exp(-r^2/(2*sigma^2))`, same `A+B` pattern
+  `test_burgers_convergence.cpp` uses, chosen so the state never changes
+  sign), 500 steps, 51 VTK frames + a `.pvd` manifest.
+- `tutorials/CMakeLists.txt` -- new subdirectory wired in.
+
+Tests added:
+None -- a visualization tutorial, not a correctness claim (the
+underlying solver stack is already verified by
+`test_burgers_3d_cuda.cu`/`test_burgers_shock_formation.cpp`; this file
+just confirms, at run time, that the printed state range per frame never
+exceeds the initial `[1.0, ~1.497]` bounds -- a live, visible
+demonstration of the same TVD guarantee those tests verify numerically).
+
+Benchmarks run:
+None (not a performance artifact).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Ran locally (CPU, Apple M5): state range printed per frame stayed
+bounded in `[1.0000, 1.4968]` (initial) shrinking to `[1.0000, 1.3846]`
+by the final frame (`t=0.52`) -- confirms, by direct observation rather
+than assumption, that (a) the TVD guarantee holds with a real,
+non-trivial 3D multi-axis initial condition, not just the 1D Riemann
+step `test_burgers_shock_formation.cpp` checks numerically, and (b) the
+bump is genuinely deforming (the peak decaying monotonically as the
+leading faces steepen and mass spreads via the trailing rarefaction),
+not just sitting still or translating unchanged the way the linear
+scalar-advection tutorial's bump does.
+
+Found and fixed one bug during this work, isolated to the tutorial
+itself (not the solver): the per-frame diagnostic min/max computation
+seeded its running min from storage index `0`, which is a ghost cell
+(never written before the first ghost-fill call, left at whatever
+`Field`'s zero-initialization gives it) -- not a real cell. This wrongly
+printed `state range [0.0000, 1.4968]` for frame 0 (implying the state
+once hit zero, which never happened). Fixed by seeding from the first
+real cell (`grid.flat_index(grid.ngx, grid.ngy, grid.ngz)`) instead.
+Re-verified: frame 0 now correctly prints `[1.0000, 1.4968]`.
+
+Architecture decisions:
+None -- pure application of already-existing, already-verified types.
+
+Known limitations:
+- The rest of `ROADMAP.md` Phase 2 (MPI, DG prototype, state sizes
+  through 100, memory-layout study) is still not started.
+
+Next recommended task:
+PR #3 is now caught up on every item raised during its own review
+(CPU correctness, 3D, CUDA, at-scale benchmark, visualization). Move on
+to the MPI decomposition prototype, or check with the PI on Phase 2's
+remaining priority order.
+
+---
+
+## 2026-10-02 — Two quantitative Burgers verification/plotting tutorials (1D and 2D)
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+A detailed, explicit user request for two rigorous, reproducible,
+plotted Burgers tutorials -- exact cut-cell references (including cells
+the moving discontinuity straddles), grid-convergence sweeps, a
+first-order-vs-limited-second-order reconstruction comparison, and
+committed data/figures a reader can inspect without re-running anything.
+Builds entirely on PR #3's existing production machinery
+(`BurgersField`/`RusanovFlux`/`MusclMinmodReconstruction` plugged into
+the unchanged `FvmSolver`/`ssp_rk2_step`); net new production code is
+two small, additive types.
+
+Files changed:
+- `src/cfe/numerics/fvm/first_order_reconstruction.hpp` (new) --
+  `FirstOrderReconstruction`: piecewise-constant, same two-method shape
+  as every other `Reconstruction` type -- what "first-order vs limited
+  second-order" actually swaps between.
+- `src/cfe/grid/boundary/boundary_condition.hpp` -- added
+  `InflowOutflowBoundary`: fixed Dirichlet at the low end, zero-order
+  extrapolation at the high end. First real implementation of AGENTS.md
+  #17's named "extrapolation/outflow" BC category (explicitly the
+  simple zero-order kind, not Phase 3's characteristic-based one).
+- `tests/unit/test_boundary_conditions.cpp`,
+  `tests/unit/test_interface_flux.cpp` -- one new hand-computed test
+  each for the two new types above.
+- `tutorials/burgers_1d_shock_and_steepening/` (new) -- one executable,
+  two selectable cases (`--case=shock`/`--case=steepening`, default
+  both): Case A (moving shock, `InflowOutflowBoundary`, 3 grids x 2
+  reconstructions x 4 output times, exact fractional-coverage cell
+  averages including shock-straddled cells); Case B (sinusoidal
+  steepening, periodic, exact method-of-characteristics reference
+  before the analytic breaking time, numerical-only after it). Both
+  cases use the existing, unmodified `cfe::ssp_rk2_step` directly --
+  neither boundary's ghost VALUES depend on wall-clock time here, so
+  ghosts refreshing every residual call (the stack's existing default
+  behavior) already satisfies "update ghost states before every
+  residual evaluation, using the correct RK stage time."
+- `tutorials/burgers_2d_diagonal_shock/` (new) -- a diagonal moving
+  shock (`u=1` where `x+y<0.5+t`), 3 grids x 2 reconstructions x 3
+  output times, exact cut-cell area fractions for a square clipped by a
+  slope-(-1) line (`cut_cell_fraction`, used identically for both the
+  t=0 IC and every later reference). This IS the case where ghost
+  values genuinely depend on t -- `ssp_rk2_step` was deliberately left
+  unmodified (zero blast radius on that shared, already-reviewed
+  helper), and this tutorial instead hand-rolls Heun's method
+  explicitly (`step_once`), setting a tutorial-local
+  `DiagonalShockExactBoundary`'s `time` member to the correct stage
+  time (t_n, then t_n+dt) between the two stages.
+- Both tutorial directories: `plot_results.py` (numpy/pandas/matplotlib),
+  `README.md`, `data/` (summary.csv in full + one representative raw
+  field/profile set per tutorial), `figures/` (committed PNGs).
+- `tutorials/CMakeLists.txt` -- both new subdirectories wired in.
+- `.gitignore` -- added `.venv/` (both new READMEs suggest a local venv
+  for the Python dependencies).
+
+Tests added:
+2 new CPU unit tests (`test_inflow_outflow_boundary_fixes_low_end_and_
+extrapolates_high_end`, `test_first_order_reconstruction_ignores_
+neighbors_and_returns_cell_value_at_both_faces`) -- 81/81 total.
+
+Benchmarks run:
+None -- these are correctness/verification tutorials, not performance
+artifacts; CPU-only by the same established convention every other
+tutorial in this repo already uses (performance/scale lives in
+benchmarks/tests, not tutorials).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Both C++ binaries and both Python plotting scripts were actually run
+(not assumed) before calling this done, producing the committed
+data/figures directly:
+- **Case A (1D moving shock):** L1 error vs. exact cell average drops
+  essentially linearly with grid refinement for both reconstructions
+  (confirmed O(dx) at the captured shock, the expected, not a flawed,
+  behavior per docs/adr/0008-...md); limited second-order consistently
+  roughly half the first-order error at matching resolution; shock
+  position converges to the exact Rankine-Hugoniot position as
+  resolution increases (e.g. nx=400, t=1.0: exact=0.7500,
+  numerical=0.7503); **zero measured overshoot/undershoot at every
+  grid/reconstruction/time combination** (both schemes, not just the
+  TVD-limited one -- first-order is unconditionally monotone by
+  construction).
+- **Case B (1D sinusoidal steepening):** domain mean held at exactly
+  `1.000000` at all 5 output times, including the 2 past the analytic
+  breaking time -- conservation confirmed directly, not assumed, even
+  post-shock. A genuine bug was found and fixed during this work: the
+  pre-shock exact reference (plain Newton's method on the implicit
+  characteristics equation) produced a visibly wrong, jagged artifact at
+  `t=0.30` (very close to the breaking time `t_s=0.318`), caught by
+  inspecting the generated plot, not by a numeric check alone -- Newton
+  can overshoot badly where the equation's derivative gets small, which
+  happens near the breaking time by construction. Fixed by switching to
+  a bracketed bisection solve (the same equation is provably monotonic
+  below the breaking time, so bisection is unconditionally robust
+  there) -- re-verified: the regenerated plot is clean at every output
+  time, including t=0.30.
+- **2D diagonal shock:** the hand-rolled, per-stage-time-dependent
+  SSP-RK2 driver produces a shock that stays measurably straight and
+  tracks `x+y=0.5+t` closely at every grid/time (e.g. n=400, t=0.5: the
+  diagonal (x=y) crossing's exact position is 0.5000, numerical 0.4999),
+  L1 error drops under refinement for both reconstructions, and **zero
+  measured overshoot/undershoot** at every grid/reconstruction/time --
+  indirectly but concretely confirming the per-stage time-threading is
+  correct: a bug in which stage saw which ghost time would most likely
+  show up as spurious oscillation or a measurably wrong shock speed,
+  neither of which appeared.
+
+Architecture decisions:
+- `InflowOutflowBoundary` added to core (`src/cfe/grid/boundary/`) as a
+  genuinely reusable type, not tutorial-local -- unlike
+  `DiagonalShockExactBoundary` (2D tutorial), which hardcodes one
+  problem's exact-solution formula and stays tutorial-local by design
+  (same physics/generic-numerics separation already established for
+  Reconstruction/NumericalFlux types).
+- Deliberately did NOT add a time parameter to `cfe::ssp_rk2_step` to
+  support the 2D tutorial's time-dependent ghost fills -- that shared,
+  already-reviewed helper is used unmodified by every other solver in
+  this codebase; the 2D tutorial hand-rolls its own two-stage loop
+  instead, confined entirely to tutorial-local code.
+
+Known limitations:
+- No CUDA port for either tutorial -- consistent with every other
+  tutorial in this repo being CPU-only (performance/scale is a
+  benchmark/test concern here, not a tutorial one).
+- The 2D tutorial's post-shock story has no analogue to worry about
+  (the diagonal shock has no breaking-time complication the 1D Case B
+  does), so this limitation list is shorter than that entry's.
+
+Next recommended task:
+Continue Phase 2 breadth-first (MPI decomposition prototype), or check
+with the PI on priority -- same open question as every entry since
+PR #3 began.
+
+---
+
+## 2026-10-02 — 1D tutorial: shock-capturing zoom-in plot
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+User follow-up on the two new tutorials above: add a plot zooming in on
+Case A's captured front at the final time, centered on the shock
+location, `x in [-0.05, 0.05]`, to directly show what the limiter
+actually buys (narrower smearing), not just a smaller L1 number.
+
+Files changed:
+- `tutorials/burgers_1d_shock_and_steepening/burgers_1d.cpp` -- the
+  finest-grid field-CSV write, previously second-order-only, now
+  happens for `FirstOrderReconstruction` too (so the zoom plot can put
+  both schemes side by side at matching resolution).
+- `plot_results.py` -- new `plot_case_a_shock_zoom()`: re-centers each
+  reconstruction's field data on ITS OWN numerically-detected shock
+  position (`summary.csv`'s `shock_position_numerical` -- the
+  C++-computed value, not recomputed in Python) before windowing, since
+  first-order and second-order land at very slightly different
+  positions and a single shared shift would not put both fronts at
+  `x=0`.
+- `README.md` -- embeds the new figure, explains the re-centering choice
+  and what the two panels show.
+- `data/case_shock_nx0400_first_order_t*.csv` (new, 4 files) --
+  first-order field data at the finest grid, all four output times.
+
+Tests added:
+None (plotting/visualization change only; no production code touched).
+
+Scientific verification:
+Ran the C++ binary and the plotting script again, inspected the
+resulting figure directly: first-order smears the captured shock over
+roughly 4-5 cells, limited second-order (minmod) over roughly 2-3 --
+visibly, not just numerically, confirming the limiter's benefit at the
+discontinuity itself, consistent with (and a direct visual explanation
+of) the existing convergence plot's "both converge at the same O(dx)
+rate, but second-order's prefactor is about half" finding.
+
+Architecture decisions:
+None -- tutorial-only change.
+
+Known limitations:
+None new.
+
+Next recommended task:
+Unchanged from the prior entry.
+
+---
+
+## 2026-10-03 — PR #3 review response: Rusanov sign bug, 2D ghost-cell consistency, 3D blind spot, docs
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Independent review of PR #3 at commit `1d3654f` found two P2 numerical
+issues plus two additional gaps (3D test coverage, required
+documentation). All four verified directly before fixing (not taken on
+faith), fixed, and re-verified -- including on real V100 hardware.
+
+Files changed:
+- `src/cfe/numerics/numerical_flux/rusanov.hpp` -- `rusanov_flux` now
+  takes `|field.wave_speed(...)|`, not the raw return value.
+  `ScalarAdvectionField::wave_speed` is signed (designed for
+  `UpwindFlux`'s direction selection); pairing it with `RusanovFlux`
+  previously used that sign directly as the dissipation coefficient,
+  flipping it for negative velocities and silently selecting the wrong
+  upwind state (reproduced the review's exact case: v=-1, (uL,uR)=(1,2)
+  gave -1, not -2). No-op for `BurgersField` (already non-negative).
+- `tests/unit/test_burgers_flux.cpp` -- 2 new regression tests proving
+  `rusanov_flux` now exactly matches `upwind_flux` for linear advection
+  at both velocity signs.
+- `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp` --
+  `DiagonalShockExactBoundary` previously filled ghost cells with a
+  cell-center 0/1 point sample, inconsistent with the `cut_cell_fraction`
+  cell-average formulation used everywhere else in the file (IC,
+  reference). Fixed by reusing `cut_cell_fraction` for every ghost cell
+  too (moved its definition earlier in the file so the boundary struct
+  can call it; added a `cell_lower_edge` helper to compute each ghost
+  cell's footprint without unsigned underflow). Re-ran the full
+  grid/reconstruction/time sweep and regenerated all data/figures:
+  L1 error improved ~40% at matching resolution (n=400, second-order,
+  t=0.5: 9.72e-4 -> 5.80e-4), confirming this was a real, measurable
+  inconsistency.
+- `tests/unit/test_burgers_3d_sanity.cpp` -- new CPU-only test: a smooth
+  IC varying in all three directions at once (not just X), built
+  exactly symmetric under swapping Y and Z. Checks the evolved field
+  stays Y/Z-symmetric (a real axis-mixup/wrong-spacing bug would break
+  this outright, unlike the X-only tests, which have zero Y/Z gradient
+  to transport and so cannot distinguish correct from broken Y/Z code)
+  and that mass is conserved.
+- `tests/unit/test_burgers_3d_cuda.cu` -- new CUDA test: the same
+  genuinely-multi-axis IC, CPU vs. GPU, plus a conservation check on the
+  GPU result directly.
+- `docs/type-reference.md` -- added entries for every Phase 2 type that
+  was missing one: `BurgersField`, `InflowOutflowBoundary`,
+  `FirstOrderReconstruction`, `minmod`/`muscl_minmod_*`/
+  `MusclMinmodReconstruction`, `rusanov_flux`/`RusanovFlux`.
+- `presentations/0003-phase2-burgers-shock-capturing.md` (new) --
+  required per AGENTS.md #26, missing from the original PR.
+
+Tests added:
+3 new (2 Rusanov regression, 1 CPU Y/Z-symmetry) + 1 new CUDA test --
+93/93 total (up from 87/87), including on real V100 hardware.
+
+Benchmarks run:
+None (no benchmark-relevant code changed; the Rusanov fix only affects
+dissipation sign for Fields with a signed `wave_speed`, which no
+existing benchmark uses).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Rebuilt and re-ran the FULL suite on a real V100 (PSC Bridges-2, job
+`47382581`, node `v016`) after all fixes: 93/93 tests pass,
+`compute-sanitizer --tool initcheck` reports 0 errors. (A first
+allocation, job `47382376` on node `v020`, expired mid-verification when
+the local SSH ControlMaster socket wedged -- diagnosed via `ssh -O
+check` showing the master alive but every channel through it hanging,
+confirmed by a trivial fresh command also hanging; fixed with `ssh -O
+exit` to tear down the stale master, then a fresh connection worked
+immediately. A new allocation was requested and the full verification
+redone from scratch on it -- the first allocation's partial build was
+not trusted or reused.) The Rusanov fix was verified against the
+review's own reported numbers before considering it resolved (recomputed
+by hand: v=-1, (uL,uR)=(1,2) now gives exactly -2, matching
+`upwind_flux`). The 2D ghost-cell fix was verified by observing an
+actual, measured improvement in the regenerated data (not just "it still
+passes"), consistent with the review's own description of the bug's
+effect. The 3D symmetry test's tolerance (1e-10) was chosen with the
+specific floating-point-reordering mechanism in mind (summing
+X+Y+Z vs X+Z+Y is mathematically identical but not bit-identical) rather
+than picked arbitrarily, and reasoned through explicitly in the test's
+own comment before being treated as safe from false failures.
+
+Architecture decisions:
+None -- all four fixes are corrections to already-decided designs, not
+new design decisions.
+
+Known limitations:
+None new.
+
+Next recommended task:
+PR #3 should now be ready for a final review pass. If accepted: continue
+Phase 2 breadth-first (MPI decomposition prototype), or check with the
+PI on priority.
+
+---
+
+## 2026-10-06 — PR #3 review response: minmod underflow, convergence-claim honesty, transonic rarefaction
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+A further independent review of PR #3 found three issues: a real
+floating-point correctness bug in `minmod`, an overclaiming test
+name/acceptance framing for the Burgers smooth-convergence case, and a
+genuine verification gap (no end-to-end test of Burgers' transonic
+rarefaction case -- the specific scenario `RusanovFlux` was chosen over
+`UpwindFlux` to handle). All three verified directly before fixing.
+
+Files changed:
+- `src/cfe/numerics/fvm/muscl_minmod.hpp` -- `minmod`'s textbook `a*b<=0`
+  sign test replaced with direct sign comparisons. Numerically confirmed
+  (not just reasoned through) that `1e-200*1e-200` underflows to exactly
+  `0.0` in `double` and `1e-25f*1e-25f` to exactly `0.0f` in `float`,
+  both well before either operand itself underflows -- the old test
+  wrongly clipped a real, representable slope to zero at those
+  magnitudes. New comparisons never multiply the two inputs, so this
+  cannot recur at any representable magnitude.
+- `tests/unit/test_muscl_reconstruction.cpp` --
+  `test_minmod_handles_tiny_representable_slopes_without_underflow`:
+  exact (tolerance `0`) checks at `1e-200` (double) and `1e-25f` (float),
+  covering same-sign, opposite-sign, zero-paired, and differing-
+  magnitude cases. Exact tolerance deliberately, not a loose one -- a
+  loose tolerance could let a wrongly-returned `0` slip through
+  unnoticed, which is exactly the failure mode this guards against.
+- `tests/unit/test_burgers_convergence.cpp` -- the test formerly named
+  `test_burgers_smooth_second_order_convergence` is renamed to
+  `test_burgers_smooth_convergence_order_reduced_from_nominal_by_minmod_clipping`
+  and now computes/prints the observed order (`log2(ratio)`) explicitly
+  for every refinement pair, not just the raw ratio -- measured ~1.68,
+  not 2. Acceptance band re-expressed directly in order terms
+  (`[log2(3.0), log2(4.5)]`) -- the identical effective threshold as
+  before, computed rather than transcribed so it provably was not
+  quietly re-picked to force a pass.
+- `docs/adr/0008-burgers-shock-capturing-scheme.md` -- Evidence table
+  gained an explicit observed-order column; prose now states the
+  nominal-(local, design)-vs-measured-(global, this-problem) distinction
+  directly, with the log2 conversion shown, not left implicit.
+- `presentations/0003-phase2-burgers-shock-capturing.md` -- added a
+  plain-language bullet making the same nominal-vs-measured distinction
+  for the non-CS audience.
+- `tests/unit/test_burgers_shock_formation.cpp` -- fixed a stale
+  cross-reference to the old test name in its own header comment.
+- `tests/unit/test_burgers_rarefaction.cpp` (new) -- `u_left=-1 <
+  u_right=1`, fixed far-field `StaticBoundary` both ends. Exact
+  self-similar entropy solution via a closed-form cell-average
+  antiderivative (continuous across both fan edges, correct for cells
+  that straddle an edge, not a point sample -- same construction style
+  as the shock test's own cut-cell reference). Checks: L1 error
+  decreases under refinement (this, not boundedness, is what actually
+  detects an entropy-violating "stationary expansion jump" -- the
+  classic non-physical weak solution at a transonic point stays
+  entirely within `[-1,1]`, so a bounds check alone would not catch it;
+  corrected after an initial, wrong claim that it would -- see below);
+  boundedness within `[-1,1]` (the TVD bound, a separate property from
+  entropy-correctness); exact flux-balance conservation
+  (`F(-1)=F(1)=0.5` for Burgers' `u^2/2` flux, so the expected net
+  change is exactly zero despite the domain not being periodic -- a
+  clean property of this specific symmetric choice, confirmed, not
+  assumed). `dt` sized from `max(|u_left|,|u_right|)`, explicitly NOT
+  from a signed state value -- `u_left` is negative here, so the
+  existing shock test's own `cfl*dx/u_left` pattern (only safe because
+  that test's `u_left` happens to be positive) would give a negative
+  timestep. Templated on `Scalar`, exercised at both double and float.
+- `tutorials/burgers_1d_shock_and_steepening/` -- added Case C
+  ("rarefaction") as a third selectable case (`--case=rarefaction`):
+  profile plots at 3 output times, committed data/figure, README
+  section.
+
+Tests added:
+6 new (1 minmod regression, 5 rarefaction) -- 90/90 total on CPU (up
+from 85/85), 99/99 on GPU (up from 93/93; the 6 new CPU-only tests plus
+no new GPU-specific test -- see Known limitations).
+
+Benchmarks run:
+None (no benchmark-relevant code changed).
+
+Performance change:
+N/A.
+
+Scientific verification:
+Rebuilt and re-ran the FULL suite on a real V100 (PSC Bridges-2, job
+`47470583`, node `v012`) after all three fixes: 99/99 tests pass
+(including every pre-existing GPU test, confirming no regression from
+the `minmod` fix or the convergence-test rename), `compute-sanitizer
+--tool initcheck` reports 0 errors. The `minmod` underflow claim was
+checked with an actual throwaway C++ program before trusting it (not
+just mental floating-point arithmetic): confirmed `1e-200*1e-200 ==
+0.0` and `1e-25f*1e-25f == 0.0f` exactly. The renamed convergence
+test's printed output was inspected directly: observed order 1.68-1.69
+across three refinement pairs, matching the ADR's own table to within
+rounding. The rarefaction test's real numbers (also captured via a
+throwaway diagnostic): L1 error 7.21e-2/3.62e-2/1.81e-2/9.07e-3 at
+nx=100/200/400/800 (clean ~2x halving each doubling), zero measured
+overshoot/undershoot at every resolution, domain-integral change
+exactly `0.0` to printed precision at every resolution -- all matching
+the hand-derived expectations before the code was run, not adjusted
+after the fact. The 1D tutorial's Case C plot was inspected directly:
+a smooth, symmetric fan growing correctly and passing cleanly through
+`u=0` at its center with no glitch.
+
+Architecture decisions:
+None -- all three fixes/additions are corrections or additive
+verification, not new design decisions. Confirmed (not just assumed) by
+inspection that `BurgersField`/`RusanovFlux`/`MusclMinmodReconstruction`/
+`StaticBoundary` needed zero changes to support the rarefaction case --
+only a new test and tutorial case were added on top of already-existing
+production types.
+
+Known limitations:
+- No new GPU-specific CUDA test was added for the rarefaction case
+  specifically. Scoped this way deliberately: the review's own framing
+  for this item was a CPU "end-to-end" verification (double+float), and
+  no new production type was introduced that would need fresh GPU
+  coverage -- `MusclMinmodReconstruction`'s only change (the `minmod`
+  fix) is already exercised on GPU by every pre-existing Burgers CUDA
+  test, and the fix only matters at subnormal magnitudes no realistic
+  state value in this codebase approaches. The full existing GPU suite
+  was re-run as a regression check (99/99, 0 sanitizer errors) rather
+  than silently skipped.
+
+Next recommended task:
+PR #3 should now be ready for a final review pass. If accepted: continue
+Phase 2 breadth-first (MPI decomposition prototype), or check with the
+PI on priority.
+
+---
+
+## 2026-10-07 — PR #3: two documentation corrections
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+Review caught two factual errors in prose written during the prior
+entry (code/tests were already correct; only the explanations were
+wrong). Both verified against the actual code before fixing.
+
+Files changed:
+- `docs/adr/0008-burgers-shock-capturing-scheme.md` -- had claimed
+  scalar advection's clean global 2nd-order convergence was because its
+  sine IC "has no smooth extremum for minmod-equivalent clipping to
+  degrade." Checked: `test_scalar_advection_convergence.cpp`'s IC,
+  `sin(2*pi*(x-a*t))`, has exactly the same max/min structure as this
+  file's own Burgers IC -- the claim was simply wrong. The actual reason
+  is that `test_scalar_advection_convergence.cpp` uses
+  `CentralDifferenceReconstruction`, which is unlimited (no TVD clip at
+  all, at an extremum or anywhere else); this file's test uses
+  `MusclMinmodReconstruction`, whose minmod limiter clips regardless of
+  whether a discontinuity is nearby. Corrected: the order reduction
+  measured here is a property of pairing this IC with this (limited)
+  scheme, not a property of the IC alone.
+- `tests/unit/test_burgers_rarefaction.cpp`,
+  `tutorials/burgers_1d_shock_and_steepening/README.md`, and this file's
+  own prior entry -- had claimed the boundedness check
+  (`test_burgers_rarefaction_stays_bounded_within_far_field_states`)
+  would catch an entropy-violating "stationary expansion jump" (the
+  classic non-physical weak solution at a transonic point). Checked: a
+  stationary jump from `u_left` to `u_right` directly at `x0` (instead
+  of spreading into the correct fan) never leaves `[u_left,u_right]` --
+  no value exceeds either bound -- so a pure bounds check could not
+  distinguish it from the correct solution. What actually detects it is
+  the L1-error-against-exact-solution tests
+  (`test_burgers_rarefaction_matches_exact_entropy_solution`,
+  `..._l1_error_decreases_under_grid_refinement`): a stationary jump's
+  error against the correct spreading fan is O(1) and does not shrink
+  under refinement (unlike a true discretization artifact), so those
+  tests -- not boundedness -- are what would catch this specific
+  failure mode. Corrected the attribution in all three places; the
+  boundedness test's own job (the TVD bound) is unchanged and still
+  correctly checked.
+
+Tests added:
+None -- no code changed, only comments/documentation. Re-ran the full
+CPU suite to confirm (90/90, unchanged).
+
+Scientific verification:
+Both corrections were checked against the actual code before being
+accepted as real errors (not just taken on the reviewer's word): the
+linear-advection test's IC was read directly and confirmed to have
+smooth extrema; the rarefaction test's own exact-solution helper was
+checked to confirm a stationary-jump profile is bounds-compatible with
+`[u_left,u_right]` (it is, by construction -- the failure mode is a
+*shape* error, not a *range* error).
+
+Architecture decisions:
+None -- documentation-only.
+
+Known limitations:
+None new.
+
+Next recommended task:
+Unchanged from the prior entry.
+
+---
+
+## 2026-10-08 — Retrofit Burgers tutorials/benchmarks to cfe::scalar
+
+Agent:
+Model: Claude Sonnet 5
+
+Objective:
+User question ("why use double and not scalar here? is this where we
+say we are using double for the rest of the program?") surfaced a real
+inconsistency: this project already has a project-wide precision
+mechanism (`cfe::scalar`, `core/types.hpp`, AGENTS.md #11, configured
+via the `CFE_SCALAR_TYPE` CMake cache variable, used in
+`tutorials/hello_parallel_for/` since Phase 0) that none of the
+Burgers-era tutorials/benchmarks from this session's earlier work used
+-- all six hardcoded `double` directly. Confirmed this (Phase 1's
+scalar-advection tutorials/benchmarks have the identical pattern, so it
+predates this session's Burgers work specifically) before proposing a
+fix, and scoped the retrofit to exactly what the user agreed to: the
+six Burgers tutorial/benchmark files, not the dual-precision unit
+tests (which correctly hardcode both `double` and `float` explicitly on
+purpose, to prove the generic code works at both, independent of
+whatever `cfe::scalar` resolves to -- retrofitting those would defeat
+their purpose).
+
+Files changed:
+- `tutorials/burgers_1d_shock_and_steepening/burgers_1d.cpp`,
+  `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp`,
+  `tutorials/burgers_3d_visualization/advect_burgers_gaussian_3d.cpp`,
+  `benchmarks/burgers/bench_burgers.cpp`,
+  `benchmarks/burgers/bench_burgers_cuda.cu`,
+  `benchmarks/burgers/bench_burgers_3d_cuda.cu` -- every
+  grid/field/solver/state-precision quantity switched from hardcoded
+  `double` to `cfe::scalar`. Reported metrics (L1 error, overshoot/
+  undershoot, domain mean/integral) and wall-clock timing deliberately
+  stay `double` regardless -- the same convention the dual-precision
+  unit tests already use, so reporting precision is never conflated
+  with simulation precision.
+- `burgers_2d.cpp`'s `cut_cell_fraction`/`cell_lower_edge` needed a
+  closer look, not a blind substitution: `DiagonalShockExactBoundary`'s
+  own `fill_x`/`fill_y`/`fill_z` were ALREADY correctly generic
+  (templated on their own `Scalar`, following the same convention
+  `StaticBoundary`/`PeriodicBoundary` use) -- making those two helpers
+  genuine templates (not fixed to `cfe::scalar`) was the more correct
+  fix, letting the boundary struct's existing genericity actually reach
+  all the way down, rather than hardcoding a concrete type one level
+  below where the existing design had already generalized.
+- READMEs for all three tutorials -- added a `## Precision` section
+  documenting `cfe::scalar`/`CFE_SCALAR_TYPE`.
+
+Tests added:
+None (no test files touched -- this was a tutorial/benchmark-only
+retrofit; see Objective for why the dual-precision tests were
+deliberately left alone).
+
+Scientific verification:
+Verified behavior-preserving at the default (`double`) precision
+FIRST, before trusting the retrofit: both tutorials, re-run after every
+file's change, produced byte-identical committed data/figures to
+before (confirmed via `git status` showing zero diff in any
+`data/*.csv` or `figures/*.png`, only source/README changes). Then
+verified the actual payoff, not just "it still compiles": configured
+and built all three CPU tutorials with `-DCFE_SCALAR_TYPE=float` in a
+separate build directory and ran them -- all three ran correctly, with
+results matching the double-precision runs to within expected float
+roundoff (e.g. 1D rarefaction L1 error at t=1.0: 1.812e-2 float vs.
+1.811e-2 double; 2D diagonal shock L1 at n=400,t=0.5: 5.795e-4 float
+vs. 5.799e-4 double), zero overshoot/undershoot preserved at both
+precisions. Rebuilt and re-ran the full suite on a real V100 (PSC
+Bridges-2, job `48627729`, node `v020`) as a regression check (no
+production code changed by this retrofit, so this should -- and did --
+show no change): 99/99 tests pass, `compute-sanitizer --tool initcheck`
+0 errors. Both retrofitted CUDA benchmarks (previously unverified to
+even compile with nvcc, flagged explicitly as pending in the commit
+message) were built and run on the V100: both compiled cleanly and
+produced throughput numbers consistent with the previously-documented
+ones (1D 10^8 cells: 8.16e9 cell-updates/s vs. the prior 7.69e9; 3D
+512^3: 4.21e9 vs. the prior 4.05e9 -- both within normal benchmark
+run-to-run variance, not a regression).
+
+Architecture decisions:
+None -- no production library code changed; this is entirely a
+tutorial/benchmark-level consistency fix adopting an existing,
+already-designed mechanism correctly.
+
+Known limitations:
+None new. The rest of the codebase's tutorials/benchmarks (Phase 1's
+scalar-advection ones) still hardcode `double` -- noted to the user as
+out of scope for this change, not silently left inconsistent without
+being named.
+
+Next recommended task:
+Unchanged from the prior PR #3 entry (MPI decomposition prototype, or
+check with the PI on Phase 2 priority) -- this entry is a
+tutorial/benchmark hygiene fix, not new scope.
+
+## 2026-10-08 — Student-readable comments for Burgers benchmarks/tutorials
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User feedback: the Burgers benchmark/tutorial source was "looking
+cumbersome" to a reader who knows Python but not C++ idioms well --
+anonymous namespaces, backend/boundary "tag" structs, lambda closures,
+and dense multi-line template argument lists were unexplained. Added
+short, mostly single-line `//` comments at exactly those spots across
+all six Burgers benchmark/tutorial files, explaining WHAT each
+construct does (often via a one-line Python analogy) rather than
+restating existing WHY-level design rationale already present from
+prior review rounds. Scoped to benchmarks/tutorials only, per explicit
+instruction ("backend code need not extensive commenting"); Phase 1's
+scalar-advection benchmarks/tutorials use the same terse style and were
+left untouched as out of scope.
+
+Files changed:
+- benchmarks/burgers/bench_burgers.cpp (rewritten with full
+  student-facing commentary: header include-group comments, anonymous
+  namespace/Scalar-alias explainer, SerialBackend/ThreadedBackend "tag"
+  explainer, Field-triple/init-loop/solver-assembly/residual-lambda/
+  dt-closure/warm-up/timing-loop/main() comments)
+- benchmarks/burgers/bench_burgers_cuda.cu, bench_burgers_3d_cuda.cu
+  (same treatment, CUDA-specific additions: why `SolverResidual` is a
+  named functor instead of a lambda here -- nvcc forbids a
+  locally-defined lambda as that template argument -- and why
+  `synchronize()` is required before stopping the timer: GPU kernel
+  launches return before the work finishes)
+- tutorials/burgers_1d_shock_and_steepening/burgers_1d.cpp,
+  tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp,
+  tutorials/burgers_3d_visualization/advect_burgers_gaussian_3d.cpp
+  (targeted inline comments added at the same categories of spots --
+  anonymous namespace, Field triples, solver assembly, residual/
+  write_frame closures, main() -- via Edit rather than a full rewrite,
+  since these files already carry extensive prior-review WHY-commentary
+  that needed to stay intact)
+
+Tests added:
+None -- comment-only change, no behavior to test. Existing suite
+(99 CPU tests) re-run as a regression check.
+
+Scientific verification:
+Comment-only diff confirmed zero behavioral change three ways: (1) all
+six files build cleanly (`cmake --build` targets
+cfe_bench_burgers/cfe_burgers_1d/cfe_burgers_2d/
+cfe_advect_burgers_gaussian_3d; the two `.cu` files could not be
+compiled locally, no nvcc toolchain on this machine -- comments cannot
+break compilation and every surrounding line is byte-identical to the
+already-GPU-verified version, so this is flagged as the one untested
+configuration rather than silently assumed fine); (2) full CPU suite
+(`ctest`) still 100% passing; (3) actually ran all three CPU tutorials
+end-to-end and diffed against the committed `data/`/`vtk_output/`
+fixtures via `git status` -- zero diff in any generated `.csv` or
+`.vtk` file, confirming the regenerated output is byte-identical to
+the pre-comment-pass version (3D: `t=0.5219, state range [1.0000,
+1.3846]` matches exactly; 1D rarefaction L1 at t=2.0: 1.814e-02 matches
+exactly; 2D diagonal shock L1 at n=400,t=0.5: 5.799e-04 matches
+exactly).
+
+Architecture decisions:
+None -- no production library code touched, and no benchmark/tutorial
+numerics changed; this is purely an in-file documentation
+accessibility improvement.
+
+Known limitations:
+The two CUDA benchmark files' comment-only changes are unverified by
+an actual nvcc build (no CUDA toolchain on this development machine) --
+a build on Bridges-2 would close this out definitively, though the
+risk is minimal since only comment lines were touched. Phase 1's
+scalar-advection benchmarks/tutorials were not given the same
+commenting treatment (out of scope per the user's own framing of this
+request as being about "the benchmarks" in the Burgers PR under
+review) -- worth revisiting if/when the user wants the same
+readability pass applied there.
+
+Next recommended task:
+Confirm the two touched `.cu` files still compile under nvcc next time
+Bridges-2 (or any CUDA toolchain) is available, then this PR's
+documentation work is complete. Otherwise, unchanged from the prior
+entry (MPI decomposition prototype, or check with the PI on Phase 2
+priority).

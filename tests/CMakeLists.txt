@@ -20,6 +20,12 @@ add_executable(cfe_unit_tests
   unit/test_scalar_advection_2d_convergence.cpp
   unit/test_fvm_solver_ghost_residual.cpp
   unit/test_ssp_rk2_index_map.cpp
+  unit/test_burgers_flux.cpp
+  unit/test_muscl_reconstruction.cpp
+  unit/test_burgers_shock_formation.cpp
+  unit/test_burgers_convergence.cpp
+  unit/test_burgers_rarefaction.cpp
+  unit/test_burgers_3d_sanity.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
@@ -32,6 +38,8 @@ if(CFE_ENABLE_CUDA)
     unit/test_backend_execution_cuda.cu
     unit/test_scalar_advection_cuda.cu
     unit/test_scalar_advection_3d_cuda.cu
+    unit/test_burgers_cuda.cu
+    unit/test_burgers_3d_cuda.cu
   )
   set_target_properties(cfe_unit_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()
