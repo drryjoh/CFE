@@ -26,6 +26,7 @@ add_executable(cfe_unit_tests
   unit/test_burgers_convergence.cpp
   unit/test_burgers_rarefaction.cpp
   unit/test_burgers_3d_sanity.cpp
+  unit/test_slab_partition.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
@@ -45,3 +46,7 @@ if(CFE_ENABLE_CUDA)
 endif()
 
 add_test(NAME cfe_unit_tests COMMAND cfe_unit_tests)
+
+if(CFE_ENABLE_MPI)
+  add_subdirectory(mpi)
+endif()

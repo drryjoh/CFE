@@ -2210,3 +2210,132 @@ Bridges-2 (or any CUDA toolchain) is available, then this PR's
 documentation work is complete. Otherwise, unchanged from the prior
 entry (MPI decomposition prototype, or check with the PI on Phase 2
 priority).
+
+## 2026-10-09 — Phase 2: first MPI domain-decomposition prototype
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+PR #3 (Phase 2 first slice: Burgers equation) merged to `main` (squash
+commit `3436514`). Picked up the standing "MPI decomposition prototype"
+item, recommended as the next task across ~6 consecutive prior entries.
+Task spec `tasks/0004-phase2-mpi-decomposition.md`, branch
+`cfe/development/phase_0004` off `main`. Implemented 1D slab domain
+decomposition along X with blocking halo exchange, closing
+`ROADMAP.md` Phase 2's "first MPI decomposition prototype" +
+"communication benchmark" items. Followed the plug-in seam ADR 0004
+and `grid/ghost/ghost_fill.hpp`'s own header comment already named for
+this: zero changes to `FvmSolver`, `fill_ghost_cells`, `CartesianGrid`,
+or `ssp_rk2_step`.
+
+New production code:
+- `src/cfe/grid/partition/slab_partition.hpp` -- `SlabPartition` +
+  `make_slab_partition(global_nx, rank, size, periodic)`. Deliberately
+  zero MPI dependency (plain `int` rank/size), so it is unit-tested by
+  the ordinary single-process `cfe_unit_tests` binary with no
+  `CFE_ENABLE_MPI` gating at all.
+- `src/cfe/backend/mpi/mpi_environment.hpp` / `mpi_datatype.hpp` --
+  RAII `MPI_Init`/`MPI_Finalize` guard + rank/size helpers, `Scalar` ->
+  `MPI_Datatype` mapping. `CFE_ENABLE_MPI`-gated.
+- `src/cfe/grid/boundary/mpi_halo_boundary.hpp` -- `MpiHaloBoundary
+  <Scalar,N>`, same duck-typed `fill_x`/`fill_y`/`fill_z` shape every
+  other boundary type uses. `fill_y`/`fill_z` throw (X-axis-only by
+  design) but still had to be written and compile -- the same
+  `fill_ghost_cells`-instantiates-all-three-switch-cases gotcha
+  `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp`'s
+  `DiagonalShockExactBoundary` already ran into, rediscovered here the
+  hard way (first build attempt failed with "no member named fill_y").
+  Pack/unpack is one general strided loop (mirrors
+  `PeriodicBoundary::fill_x`'s own index decomposition), two blocking
+  `MPI_Sendrecv` calls per `fill_x` (one per direction), buffers sized
+  once per grid shape and never shrunk.
+- `CFE_ENABLE_MPI` CMake option in root `CMakeLists.txt`, mirroring the
+  existing `CFE_ENABLE_CUDA` auto-detect/gate pattern exactly via
+  `find_package(MPI COMPONENTS CXX)`.
+- `benchmarks/mpi/bench_mpi_halo_exchange.cpp` -- isolates just the
+  halo-exchange step (not a full timestep); three sweeps (rank count
+  1/2/4/8, problem size via a 2D/3D domain decomposed only along X since
+  a literal 1D problem's message size never changes with `nx`, ghost
+  depth 2/4/8).
+
+Tests added:
+- `tests/unit/test_slab_partition.cpp` -- 6 tests, pure math, no MPI
+  needed: even/uneven splits, periodic/non-periodic neighbor
+  assignment, single-rank edge case. 96/96 total unit tests passing,
+  zero regressions on the existing CPU-only suite.
+- `tests/mpi/test_mpi_halo_exchange.cpp` -- a separate executable
+  (needs `mpirun`), registered as `ctest` entries at `np=2`/`np=4` via
+  CMake's `MPIEXEC_*` variables (not a hardcoded `mpirun -n`). Decomposes
+  `ScalarAdvectionField` over a periodic domain and checks the result
+  is BIT-IDENTICAL (tolerance 0) to an independently-computed
+  single-rank reference run of the same global problem, not just
+  "close" to the analytic solution -- the reference needs no gather or
+  second binary: every process also simulates the full global domain
+  entirely locally (no MPI calls) and compares its own decomposed real
+  cells against the matching slice. Bit-identity is achievable because
+  `ssp_rk2_step`/`FvmSolver::residual` are fully per-cell-independent
+  (no reduction/atomics) and a halo-exchanged ghost value is a literal
+  byte copy -- the one care point (keeping `grid.origin_x == 0` on
+  every rank and deriving each cell's coordinate from its GLOBAL index
+  directly, the same single multiply-add `x_center()` performs when
+  `origin_x` is zero) avoids a real `(a+b)*dx` vs. `a*dx+b*dx` rounding
+  mismatch that would otherwise break bit-identity.
+
+Scientific verification:
+No MPI toolchain exists on this development machine by default (same
+situation Phase 0/1/2 had with CUDA) -- installed OpenMPI locally via
+Homebrew (user-approved) specifically so this could be built and run
+for real here, not just design-reviewed. CPU-only build
+(`CFE_ENABLE_MPI=OFF`, the default) fully unaffected: full existing
+`ctest` suite still green. With `CFE_ENABLE_MPI=ON`: `test_slab_partition`
+passes (part of the 96/96 total); `test_mpi_halo_exchange` passes
+bit-identically at 1, 2, 3, 4, 5, and 8 ranks, including the
+non-power-of-two counts (3, 5) that exercise the remainder-cell split
+under real communication, not just the pure-math unit test. Confirmed
+the oracle actually has teeth, not just a tautology: deliberately
+introduced a one-line off-by-one bug in the packed high-face real-cell
+index, rebuilt, reran at np=4 -- caught immediately (160/160 global
+cells mismatched, non-zero exit code) -- then reverted and reconfirmed
+passing. `bench_mpi_halo_exchange` ran locally at 1/2/4/8 ranks,
+producing well-formed CSV with sensible size/ghost-depth trends;
+committed as `benchmarks/results/phase2_mpi_halo_exchange_apple_m5.csv`
+-- explicitly a local sanity check, NOT the authoritative scaling
+result (an oversubscribed laptop is not representative hardware, and
+the real target is PSC Bridges-2, not yet reached for this task).
+
+Architecture decisions:
+`docs/adr/0009-mpi-domain-decomposition.md` -- three decisions: 1D slab
+decomposition along X (not full 2D/3D block decomposition, deferred),
+blocking `MPI_Sendrecv` (not non-blocking overlap, deferred per
+AGENTS.md #16's own "eventually"), `MpiHaloBoundary` living in
+`grid/boundary/` (not `backend/mpi/`, matching every other boundary
+type's existing precedent). Status Proposed, not Accepted, until
+Bridges-2 verification lands.
+
+Known limitations:
+Everything in task 0004's "Do not implement" list, most importantly:
+(1) `BurgersField` (or any state-dependent-CFL field) is NOT yet safe
+to decompose -- its `wave_speed()` is `max|u|` over the whole initial
+condition, and computing that per-rank over only a local slice could
+give different ranks different `dt` for the same timestep, a real
+correctness break needing an `MPI_Allreduce(MAX)` not yet built; this
+task's oracle deliberately uses `ScalarAdvectionField` instead, whose
+wave speed is a fixed constant. (2) A non-periodic domain's two true
+physical-boundary ranks get a no-op `Sendrecv` on their outward side --
+`MpiHaloBoundary` does not compose with a second boundary condition to
+give that edge a real value; only the periodic case is
+exercised/tested. (3) PSC Bridges-2 verification has not happened yet
+for this task -- local verification (via Homebrew OpenMPI) is thorough
+but is not the target hardware; module availability for an MPI
+implementation there (OpenMPI or Cray MPICH) has not been confirmed.
+
+Next recommended task:
+Run the np=2/np=4 correctness tests and the 1/2/4/8-rank benchmark
+sweep for real on PSC Bridges-2, then flip ADR 0009's status to
+Accepted. After that: either 2D/3D block decomposition (the
+structurally similar next step for this same feature), the
+`MPI_Allreduce(MAX)` fix that would make Burgers safe to decompose, or
+continue Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study -- recommend checking with
+the PI on which matters most.
