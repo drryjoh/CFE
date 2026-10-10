@@ -55,8 +55,34 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCFE_ENABLE_MPI=ON
 cmake --build build --target cfe_mpi_scalar_advection_3d -j
 ```
 
-Run once per rank count and collect the CSV (this binary prints its own
-header every time, so only the data row after the first run is kept):
+## Running in parallel
+
+This is an ordinary MPI program: launch it with `mpirun` (or `mpiexec`,
+or `srun` on a Slurm cluster -- see task 0004's own notes in
+`docs/adr/0009-mpi-domain-decomposition.md` on cluster-specific launch
+quirks) and the `-n` flag picks the rank count. One run, by itself,
+looks like this:
+
+```bash
+mpirun -n 4 build/tutorials/mpi_scalar_advection_3d_strong_scaling/cfe_mpi_scalar_advection_3d
+```
+
+`(px,py,pz)` -- how the 128^3 global grid is split into a 3D grid of
+ranks -- is chosen automatically from whatever rank count `-n` gives it
+(see "What it does" above); you do not pick it yourself. If your
+machine has fewer physical/logical cores than the rank count you ask
+for, add `--oversubscribe` (OpenMPI) so `mpirun` doesn't refuse to
+launch more ranks than it thinks you have cores -- this doesn't change
+the *result* (every rank still computes and communicates correctly,
+just competing for the same core), only the wall-clock timing, which is
+why the strong-scaling sweep below should ideally be run on a machine
+with at least as many cores as the largest rank count tested.
+
+**To actually measure strong scaling** (the point of this tutorial),
+run that same command at several different `-n` values and compare the
+reported wall-clock time across them -- a single run, by itself, only
+tells you "it works," not "it scales." The loop below does exactly
+that and collects the result into one CSV:
 
 ```bash
 cd tutorials/mpi_scalar_advection_3d_strong_scaling
@@ -80,9 +106,32 @@ pip install numpy pandas matplotlib
 python3 plot_results.py
 ```
 
-Writes `figures/strong_scaling_time.png` (wall-clock vs. rank count,
-log-log, against an ideal `T(1)/ranks` reference line) and
-`figures/strong_scaling_speedup.png` (speedup and parallel efficiency).
+Writes `figures/expected_scaling_reference.png` (see "What to expect"
+below -- this one is produced even if `data/summary.csv` doesn't exist
+yet, since it isn't derived from any measurement), plus, once
+`data/summary.csv` exists, `figures/strong_scaling_time.png`
+(wall-clock vs. rank count, log-log, against an ideal `T(1)/ranks`
+reference line) and `figures/strong_scaling_speedup.png` (speedup and
+parallel efficiency).
+
+## What to expect
+
+Before looking at this tutorial's own measured numbers, it helps to
+know what strong scaling *in general* looks like, and why it's never
+perfectly linear in practice:
+
+![Expected scaling reference](figures/expected_scaling_reference.png)
+
+This is a **conceptual reference, not measured data** -- a standard
+textbook model (`efficiency(N) = 1 / (1 + alpha*(N-1))`, where `alpha`
+is the fraction of each rank's time spent on communication/overhead
+rather than useful computation). The further `alpha` is from zero, the
+sooner speedup levels off and adding more ranks stops helping much.
+Every real strong-scaling curve (including this tutorial's own, below)
+sits somewhere between the "ideal" dashed line and one of these
+overhead curves -- never above the ideal line, and further below it as
+communication cost becomes a larger fraction of a shrinking per-rank
+workload.
 
 ## What the numbers show
 
@@ -119,11 +168,13 @@ which the real cluster data shows is not actually true.
 
 ## What is committed vs. regenerated
 
-`data/summary.csv` (tiny, just the four measured rows) and both PNGs
-under `figures/` are committed in full. The VTK frames themselves are
-**not** committed (even the smallest, 1-rank case would be ~20 ASCII
-files per run) -- regenerate them by running the binary once; they are
-for interactive viewing in ParaView, not for this README to embed.
+`data/summary.csv` (tiny, just the four measured rows) and all three
+PNGs under `figures/` (including the data-independent
+`expected_scaling_reference.png`) are committed in full. The VTK frames
+themselves are **not** committed (even the smallest, 1-rank case would
+be ~20 ASCII files per run) -- regenerate them by running the binary
+once; they are for interactive viewing in ParaView, not for this
+README to embed.
 
 ## Things to try
 
