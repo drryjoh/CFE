@@ -2636,3 +2636,81 @@ Burgers, non-blocking communication/computation overlap, a true
 breadth-first into the DG communication prototype / state-size-100
 sweep / memory-layout study -- recommend checking with the PI on which
 matters most.
+
+## 2026-10-11 — Task 0006: MPI-safe Burgers via collective CFL (`MPI_Allreduce(MAX)`)
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User asked directly "so we can't run burgers yet in MPI?" after PR #4
+was opened -- confirmed correctly (BurgersField's `max|u|`-based `dt`
+was computed per-rank over only a local IC slice, not synchronized),
+then asked to implement the fix and get "the whole mechanism" in,
+closing the one correctness gap named (and deliberately deferred) in
+both tasks 0004 and 0005. Task spec
+`tasks/0006-phase2-mpi-burgers-cfl-allreduce.md`, continuing on the
+same `cfe/development/phase_0004` branch (PR #4 already open against
+it, not yet merged).
+
+New production code:
+- `src/cfe/backend/mpi/mpi_reduce.hpp` -- `allreduce_max<Scalar>
+  (local_value, comm=MPI_COMM_WORLD)`, a thin wrapper over
+  `MPI_Allreduce(..., MPI_MAX, ...)` reusing `mpi_datatype_for`. No
+  other production code changed -- the fix is entirely at the call
+  site that already computes `max_abs_u0` in every existing
+  single-rank Burgers test/tutorial/benchmark; this is the MPI version
+  of that exact same line.
+
+Tests added:
+`tests/mpi/test_mpi_burgers_steepening.cpp` (np=2, np=4) -- decomposes
+the periodic sinusoidal-steepening-into-shock case
+(`tutorials/burgers_1d_shock_and_steepening/`'s own Case B IC/
+parameters), run past the analytic breaking time so a genuine shock
+exists. Deliberately a non-uniform-amplitude IC (sine peaks at x=0.25,
+troughs at x=0.75) chosen so that at 4 ranks, two of them see a local
+maximum ~33% smaller than the true global one -- large enough to
+matter, not rounding noise. Same bit-identical-vs-independently-
+computed-reference oracle as the existing MPI correctness tests.
+
+Scientific verification:
+Passes bit-identically at np=1/2/4/8 locally (Homebrew OpenMPI). Full
+`ctest` suite (6 entries with `CFE_ENABLE_MPI=ON`) green; CPU-only
+build unaffected. Confirmed the oracle has teeth with a notably
+stronger result than expected: sabotaged the fix (skipped
+`allreduce_max`, used the rank-local maximum directly), rebuilt, reran
+at np=4 -- **the job hung rather than just producing a wrong answer**.
+Root cause: `n_steps` is also derived from `max|u|`, so ranks with
+different (now-wrong) local maxima computed different step counts for
+the same nominal final time, desynchronizing their blocking `Sendrecv`
+calls mid-run (one rank's loop exits while its neighbor is still
+blocked waiting for a partner call that will never come). Killed the
+hung process, reverted the sabotage, rebuilt, reconfirmed passing at
+np=1/2/4/8. This is a stronger, more convincing argument for the fix
+than a silent-wrong-answer failure mode would have been, and is
+recorded in ADR 0009's amendment so a future state-dependent-CFL field
+(Euler, Phase 3) doesn't have to rediscover it.
+
+Architecture decisions:
+Amendment to `docs/adr/0009-mpi-domain-decomposition.md` (continuing
+its 2026-10-11 entry, not a new ADR number) -- the fix itself, the
+evidence, and the hang-not-just-wrong-answer finding. Also updated that
+ADR's original "Future constraint" paragraph (written when this gap was
+first identified) to point forward to the new amendment rather than
+leaving it reading as still-open.
+
+Known limitations:
+Only verified in 1D (the existing periodic steepening case) -- 2D/3D
+Burgers decomposition should work with the identical fix but is not
+re-verified here. Non-periodic domain composition and GPU-aware MPI
+remain out of scope, unchanged from tasks 0004/0005. PSC Bridges-2
+verification for this specific task is the next step (not yet run as
+of this entry).
+
+Next recommended task:
+Run `test_mpi_burgers_steepening` (np=2/np=4) for real on PSC Bridges-2,
+then this task is fully closed out. After that: 2D/3D Burgers
+decomposition re-verification, non-blocking communication/computation
+overlap, a true 3-axis communication-only benchmark sweep, or continue
+Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study.

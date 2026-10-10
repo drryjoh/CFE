@@ -59,6 +59,7 @@ conditions, interface-value/numerical-flux, SSP-RK2, the
 | `CFE_CUDA_CHECK(expr)` | `backend/cuda/cuda_check.cuh` | Throws `std::runtime_error` with file/line/`cudaGetErrorString` on any non-`cudaSuccess` CUDA API result. Every `cudaMalloc`/`cudaMemcpy`/launch-error-check in this codebase goes through this. |
 | `cfe::backend::mpi::Environment` (Phase 2, `CFE_ENABLE_MPI`-gated) | `backend/mpi/mpi_environment.hpp` | RAII `MPI_Init`/`MPI_Finalize` guard, constructed once at the top of `main()`. `rank(comm=MPI_COMM_WORLD)`/`size(comm=MPI_COMM_WORLD)` free functions alongside it. |
 | `cfe::backend::mpi::mpi_datatype_for<Scalar>()` (Phase 2, `CFE_ENABLE_MPI`-gated) | `backend/mpi/mpi_datatype.hpp` | Maps `float`/`double` to `MPI_FLOAT`/`MPI_DOUBLE`. Only those two are specialized — an unsupported `Scalar` fails to compile. |
+| `cfe::backend::mpi::allreduce_max<Scalar>(local_value, comm=MPI_COMM_WORLD)` (Phase 2, task 0006, `CFE_ENABLE_MPI`-gated) | `backend/mpi/mpi_reduce.hpp` | Thin wrapper over `MPI_Allreduce(..., MPI_MAX, ...)` — every rank gets the same (global) maximum back. Needed by any state-dependent-CFL field (e.g. `BurgersField`'s `max|u|`-based `dt`): call once after computing a rank-local reduction, before sizing a shared timestep, or different ranks can pick different `dt`/step counts for the same nominal run — confirmed to hang (not just mis-time) a decomposed Burgers run when skipped, see ADR 0009. |
 
 ## `cfe::grid` — Cartesian grid, boundary conditions, ghost cells (Phase 1)
 

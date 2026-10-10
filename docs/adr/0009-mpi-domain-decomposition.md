@@ -225,15 +225,19 @@ fully periodic case is exercised/tested in this task; a future non-periodic
 MPI use case needs that composition designed and built, not assumed to
 fall out for free.
 
-**Future constraint**: `BurgersField`'s state-dependent CFL sizing
-(`dt` from `max|u|` over the whole initial condition) is NOT
-MPI-decomposition-safe as written -- if computed per-rank over only a
-local slice of a non-uniform IC, different ranks could pick different
-`dt` for the same timestep, a real correctness break. This needs an
-`MPI_Allreduce(MAX)` across ranks, not yet implemented. This task's
-correctness oracle deliberately uses `ScalarAdvectionField` instead
-(its `wave_speed()` is a fixed constant, needing no synchronization) --
-see `tasks/0004-phase2-mpi-decomposition.md`'s "Do not implement" list.
+**Future constraint (closed by task 0006 -- see amendment below)**:
+`BurgersField`'s state-dependent CFL sizing (`dt` from `max|u|` over
+the whole initial condition) was NOT MPI-decomposition-safe as
+originally written -- if computed per-rank over only a local slice of
+a non-uniform IC, different ranks could pick different `dt` for the
+same timestep, a real correctness break. This task's own correctness
+oracle deliberately used `ScalarAdvectionField` instead (its
+`wave_speed()` is a fixed constant, needing no synchronization) -- see
+`tasks/0004-phase2-mpi-decomposition.md`'s "Do not implement" list.
+Task 0006 added the missing `MPI_Allreduce(MAX)` and a real Burgers
+correctness test; see this ADR's 2026-10-11 Burgers-fix amendment for
+what was found (a more severe failure mode than expected) and the
+evidence.
 
 ## Amendment 2026-10-11: generalized to full 3D block decomposition (task 0005)
 
@@ -283,6 +287,38 @@ scaling at 1/2/4/8 ranks, local + Bridges-2 -- see that tutorial's
 README for the actual numbers and their interpretation). Existing
 X-only `test_mpi_halo_exchange` (np=2/np=4) re-verified passing after
 the constructor refactor -- no regression.
+
+## Amendment 2026-10-11 (continued): Burgers CFL fix (task 0006)
+
+Closes the `BurgersField`/`MPI_Allreduce(MAX)` gap named in the
+original ADR text and in both tasks 0004/0005's "Do not implement"
+lists. `src/cfe/backend/mpi/mpi_reduce.hpp` adds `allreduce_max
+<Scalar>(local_value, comm)`, a thin wrapper over `MPI_Allreduce(...,
+MPI_MAX, ...)`. Any state-dependent-CFL field's `dt`-sizing code now
+computes its own rank-local maximum first (unchanged from every
+existing single-rank Burgers test/tutorial/benchmark), then calls this
+once before using the result -- no other production code changed.
+
+**Evidence, including a more severe failure mode than expected**:
+`tests/mpi/test_mpi_burgers_steepening.cpp` decomposes the periodic
+sinusoidal-steepening-into-shock case (`tutorials/
+burgers_1d_shock_and_steepening/`'s own Case B IC and parameters), run
+past the analytic breaking time so a genuine shock exists, deliberately
+with a non-uniform-amplitude IC chosen so that at 4 ranks, two of them
+see a local maximum ~33% smaller than the true global one -- large
+enough to matter, not rounding noise. Passes bit-identically at
+np=1/2/4/8 (local) and on Bridges-2. The sabotage-then-revert check
+(skipping `allreduce_max`, using the rank-local maximum directly) was
+tried and found to do something worse than produce a wrong-but-passing
+result: because `n_steps` is derived from `max|u|` too, ranks with
+different local maxima computed **different step counts** for the
+same nominal final time, which desynchronized their blocking
+`Sendrecv` calls mid-run -- one rank's loop exits while its neighbor is
+still blocked waiting for a partner call that will never come, hanging
+the job rather than just returning a wrong answer. This is a stronger
+argument for the fix than a silent-wrong-answer failure mode would have
+been, and is recorded here so a future state-dependent-CFL field (e.g.
+Euler, Phase 3) does not have to rediscover it.
 
 ## Revisit criteria
 
