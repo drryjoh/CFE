@@ -48,3 +48,9 @@ add_subdirectory(burgers_2d_diagonal_shock)
 # increasing rank count. MPI-only -- a no-op subdirectory when
 # CFE_ENABLE_MPI is off (see this tutorial's own CMakeLists.txt).
 add_subdirectory(mpi_scalar_advection_3d_strong_scaling)
+
+# Same strong-scaling story as the tutorial above, but for Burgers'
+# equation (task spec 0007, follow-up to task 0006's MPI_Allreduce(MAX)
+# CFL fix) -- demonstrates both that the fix works and that a
+# decomposed Burgers run scales. MPI-only, same gating.
+add_subdirectory(mpi_burgers_3d_strong_scaling)

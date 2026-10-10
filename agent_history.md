@@ -2760,3 +2760,64 @@ into the DG communication prototype / state-size-100 sweep /
 memory-layout study -- recommend checking with the PI on which matters
 most, or simply getting PR #4 reviewed and merged before taking on
 more new scope.
+
+## 2026-10-11 — Task 0007: 3D MPI Burgers strong-scaling tutorial
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User asked, after confirming PR #4 looked ready for review: "do you
+have scaling for burgers?" -- answer was no (only `ScalarAdvectionField`
+had a strong-scaling tutorial so far; task 0006 only added a
+correctness test for decomposed Burgers, not a scaling demonstration).
+User asked to build it. Task spec
+`tasks/0007-phase2-mpi-burgers-strong-scaling-tutorial.md`, continuing
+on `cfe/development/phase_0004` (PR #4 still open, not yet merged).
+
+New tutorial:
+`tutorials/mpi_burgers_3d_strong_scaling/` -- direct sibling of
+`tutorials/mpi_scalar_advection_3d_strong_scaling/` (same
+`CartesianPartition`/`MpiHaloBoundary`/auto-factored-`(px,py,pz)`/
+per-rank-VTK/`MPI_Barrier`-timed structure), but `BurgersField<Scalar,3>`
++ `MusclMinmodReconstruction` + `RusanovFlux` with the same Gaussian-
+bump IC/constants `tutorials/burgers_3d_visualization/` already uses,
+and task 0006's `cfe::backend::mpi::allreduce_max` synchronizing the
+CFL-driving `max|u|` before computing `dt`. Zero new production code --
+purely an application of already-built, already-verified machinery to a
+new tutorial.
+
+Scientific verification:
+Confirmed task 0006's fix is genuinely exercised here, not just invoked
+for show: the bump's true global peak is ~1.49921, but most individual
+ranks' own local maxima (checked directly from the running IC loop)
+only reach ~1.15-1.23 at an 8-rank decomposition -- a meaningful,
+non-contrived gap, exactly the scenario the fix exists for. TVD
+boundedness checked across **every** committed frame and **every**
+rank (not spot-checked): `state` stays in exactly `[1.0, 1.49921]`
+throughout the run, matching the initial condition's own bounds with
+no overshoot. VTK per-rank tiling re-verified numerically (8 pieces at
+a 2x2x2 decomposition exactly cover the unit cube, no gaps/overlaps).
+Local laptop strong-scaling sweep: 1 rank 62.62s, 2 ranks 32.36s
+(1.94x), 4 ranks 18.83s (3.33x), 8 ranks 24.80s (2.53x, same
+falloff-past-4-ranks pattern the sibling tutorial's laptop numbers
+already showed, for the same reason -- communication overhead growing
+relative to shrinking per-rank work on shared, non-dedicated cores).
+
+Architecture decisions:
+None -- no new design decisions, purely an application of tasks
+0004/0005/0006's already-decided machinery.
+
+Known limitations:
+PSC Bridges-2 verification for this specific tutorial is the next step
+(not yet run as of this entry, pending in a follow-up commit per this
+project's standing "local sanity check, then cluster numbers for the
+record" pattern).
+
+Next recommended task:
+Run the strong-scaling sweep for real on PSC Bridges-2, fill in the
+authoritative numbers (same workflow every prior MPI task used). After
+that: 2D/3D Burgers decomposition re-verification, non-blocking
+overlap, a true 3-axis communication-only benchmark sweep, or continue
+Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study.
