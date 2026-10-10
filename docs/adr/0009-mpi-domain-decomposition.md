@@ -1,7 +1,7 @@
 # ADR 0009: MPI domain decomposition (first prototype)
 
-**Status:** Proposed
-**Date:** 2026-10-09
+**Status:** Accepted
+**Date:** 2026-10-09 (updated 2026-10-10: PSC Bridges-2 verification)
 
 ## Context
 
@@ -83,8 +83,50 @@ Disadvantages:
   -- confirms the benchmark harness itself produces well-formed,
   monotonic-with-message-size timing data. This local run is a
   sanity check only, not the authoritative scaling result (an
-  oversubscribed laptop is not representative hardware) -- the
-  Bridges-2 run is still pending.
+  oversubscribed laptop is not representative hardware).
+- **2026-10-10: verified on real PSC Bridges-2 hardware** (RM-shared
+  partition, job `49005352`, node `r193`, 8 CPUs, GCC 13.3.1 +
+  OpenMPI 5.0.8 -- see "Bridges-2 execution notes" below for the
+  module/launch details). CPU-only (`CFE_ENABLE_MPI=OFF`) build
+  completely unaffected. With `CFE_ENABLE_MPI=ON`: `test_slab_partition`
+  passes as part of the full `cfe_unit_tests` suite; `test_mpi_
+  halo_exchange` passes bit-identically via the registered `ctest`
+  entries at `np=2`/`np=4`, and via a manual sweep at `np=1,2,4,8,16`
+  (the last with `--oversubscribe`, since this allocation only had 8
+  real cores). `bench_mpi_halo_exchange` ran its full rank-count/size/
+  ghost-depth sweep at 1/2/4/8 real (non-oversubscribed) ranks --
+  `benchmarks/results/phase2_mpi_halo_exchange_bridges2_rm_shared_cpu.csv`.
+  This is a CPU-only RM-shared node, not a V100 GPU node specifically
+  (that pool was fully allocated cluster-wide at the time -- not a
+  policy limit; `gpuinteract` QOS allows up to 8 GPUs/user) -- entirely
+  appropriate since this task's code has zero CUDA dependency.
+
+### Bridges-2 execution notes (new, not previously documented)
+
+Two environment-specific gotchas surfaced only on the cluster, neither
+a code defect:
+
+1. **Nested `srun` job steps restrict visible cores.** Launching
+   `ctest`/`mpirun` via `srun --jobid=<id> [--cpus-per-task=N] bash -c
+   "..."` creates a *job step* with its own sub-cgroup that, on this
+   cluster, exposed only 1 CPU to `mpirun`'s slot detection regardless
+   of `--cpus-per-task` -- `mpirun` then refused to launch 2+ ranks
+   ("not enough slots"), and explicit `--host <node>:N` hit a
+   mapping/binding failure against that same restricted cpuset. Fix:
+   connect directly to the allocated compute node (`ssh <node>`, no
+   nested `srun` step) before invoking `ctest`/`mpirun` -- this exposes
+   the job's full core allocation correctly. (A bare `srun -n N
+   ./binary` without a job step wrapper was also tried first and does
+   NOT work as an mpirun substitute here: this OpenMPI build's PMIx
+   plugin fails to load under this cluster's Slurm PMIx version, and
+   PMI2 falls back to launching `N` independent single-rank
+   "singletons" instead of one coordinated `N`-rank job -- `mpirun` is
+   the correct launcher on this cluster, not raw `srun`.)
+2. **RM-shared is not an interconnect-optimized fabric.** The measured
+   halo-exchange bandwidth (~0.7-1.4 GB/s) is lower than a dedicated
+   HPC interconnect would give -- expected and fine for a CPU-only
+   shared node whose primary job is general compute, not communication
+   benchmarking; not a code performance regression to chase.
 
 ### Exchange mechanism
 
@@ -161,11 +203,9 @@ by `backend/mpi/mpi_environment.hpp` (process bootstrap) and
 `backend/mpi/mpi_datatype.hpp` (Scalar -> MPI_Datatype mapping) as the
 reusable plumbing it calls into.
 
-Status is **Proposed**, not **Accepted**: local verification (this
-dev machine, via Homebrew OpenMPI) passed in full, but the actual
-target hardware is PSC Bridges-2, which has not yet been reached for
-this task. Flip to Accepted once the np=2/np=4 correctness tests and
-the 1/2/4/8-rank benchmark sweep have been run there.
+Status is **Accepted**: verified first locally (this dev machine, via
+Homebrew OpenMPI) and then for real on PSC Bridges-2 (2026-10-10,
+RM-shared CPU node -- see Evidence above), both passing in full.
 
 ## Consequences
 

@@ -2339,3 +2339,95 @@ structurally similar next step for this same feature), the
 continue Phase 2 breadth-first into the DG communication prototype /
 state-size-100 sweep / memory-layout study -- recommend checking with
 the PI on which matters most.
+
+## 2026-10-10 — Task 0004: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: verify
+the MPI prototype for real on PSC Bridges-2, not just locally. User
+asked specifically whether the V100 GPU partition could provide 2-4
+GPUs for this; investigated and reported honestly that policy allows
+up to 8 (`gpuinteract` QOS cap), but the V100 pool was fully allocated
+cluster-wide at the time (every V100 node showed 0 free GPUs; two
+other users' jobs were also queued), so a multi-GPU request would
+queue rather than grant immediately. Pointed out this task's code is
+100% CPU-only (zero CUDA), so verifying it doesn't need a GPU at all --
+user agreed to verify on a plain CPU allocation (RM-shared partition,
+336 idle CPUs available immediately) instead of waiting in the GPU
+queue.
+
+What was done:
+Allocated an RM-shared CPU node (`rminteract` QOS, 8 cores, job
+`49005352`, node `r193`, 20-minute walltime). Checked out
+`cfe/development/phase_0004` into the existing Bridges-2 scratch
+checkout (`~/scratch_cfe/CFE`), loaded `gcc/13.3.1-p20240614` +
+`openmpi/5.0.8-gcc13.3.1`, configured with `-DCFE_ENABLE_MPI=ON`, built
+clean. Ran the full `ctest` suite (all 3 registered tests passing),
+a broader manual rank sweep of `test_mpi_halo_exchange` (1/2/3/4/8/16
+ranks, all bit-identical passes), and the full `bench_mpi_halo_exchange`
+rank-count/size/ghost-depth sweep at 1/2/4/8 real (non-oversubscribed)
+ranks -- committed as
+`benchmarks/results/phase2_mpi_halo_exchange_bridges2_rm_shared_cpu.csv`.
+Released the allocation (`scancel`) once done, to free the node for
+other users.
+
+Environment gotchas found and worked around (documented in ADR 0009,
+not previously known -- this project's first MPI work on this
+cluster): (1) wrapping `ctest`/`mpirun` in a nested `srun --jobid=...`
+job step restricted `mpirun`'s visible core count to 1 regardless of
+`--cpus-per-task`, causing spurious "not enough slots" errors --
+fixed by connecting directly to the allocated node (`ssh <node>`) and
+running `mpirun` there without a nested job-step wrapper; (2) this
+OpenMPI build's PMIx plugin fails to load under this cluster's Slurm
+PMIx version, so a bare `srun -n N ./binary` (no `mpirun`) silently
+launches `N` independent single-rank "singletons" instead of one
+coordinated job -- `mpirun` (not raw `srun`) is the correct launcher
+for this project's MPI code on this cluster.
+
+Scientific verification:
+100% pass rate on every test at every rank count tried, on real
+cluster hardware, with real inter-process communication (not
+`--oversubscribe`d onto a single core, except for the np=16 case on an
+8-core allocation, called out explicitly as such). Benchmark produced
+well-formed, monotonic-with-message-size data; measured bandwidth
+(~0.7-1.4 GB/s) is unremarkable for a CPU-only shared node without a
+dedicated HPC interconnect -- not a code regression, just the expected
+character of this particular partition, noted as such rather than
+investigated further.
+
+Also recovered from an environment issue, not a code bug: the
+`/private/tmp/CFE-phase1-doc` worktree's `.git` link had gone missing
+again between tool calls (same transient `/private/tmp` loss this
+project hit once before in an earlier session) -- confirmed via
+`git worktree list` and `git log` on the remote that nothing was lost
+(branch `cfe/development/phase_0004` was already fully pushed), then
+fixed with `git worktree prune` + `rm -rf` + fresh `git worktree add`
+from the remote branch. Zero data loss; purely a local worktree
+bookkeeping recovery.
+
+Architecture decisions:
+`docs/adr/0009-mpi-domain-decomposition.md` status flipped from
+Proposed to **Accepted**, with the Bridges-2 evidence and the two
+environment gotchas above appended to its Evidence section.
+
+Known limitations:
+Unchanged from the prior entry: `BurgersField` still not
+decomposition-safe (needs `MPI_Allreduce(MAX)`, not yet built); a
+non-periodic domain's true physical-boundary ranks still don't get a
+composed real value from `MpiHaloBoundary` alone; only a single-node
+(8-core) allocation was exercised -- multi-node Bridges-2 scaling
+remains explicit future work, same as before. The committed benchmark
+CSV is from a CPU-only RM-shared node, not a V100/GPU-partition node --
+flagged plainly in its filename and in ADR 0009, not presented as
+GPU-interconnect-representative.
+
+Next recommended task:
+Task 0004 is now fully closed out (code, tests, benchmark, and ADR all
+verified on real target hardware). Next: either 2D/3D block
+decomposition, the `MPI_Allreduce(MAX)` fix for Burgers, or continue
+Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study -- recommend checking with
+the PI on which matters most, same open question as before.
