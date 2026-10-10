@@ -112,13 +112,16 @@ once `data/summary.csv` exists, `figures/strong_scaling_time.png` and
 
 ## Isosurface video
 
+<video src="figures/isosurface.mp4" controls width="600"></video>
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate  # optional but recommended
 pip install pyvista imageio imageio-ffmpeg
 python3 render_isosurface_video.py
 ```
 
-Writes `figures/isosurface.mp4`: every rank's VTK tile, every frame,
+Writes `figures/isosurface.mp4` (the committed copy above is already
+this): every rank's VTK tile, every frame,
 stitched back into one full-domain grid, one isosurface extracted via
 VTK's marching-cubes filter (through PyVista) at a threshold held fixed
 across the whole run, viewed from a slowly-orbiting camera positioned

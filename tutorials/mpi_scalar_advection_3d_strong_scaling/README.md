@@ -114,6 +114,32 @@ yet, since it isn't derived from any measurement), plus, once
 reference line) and `figures/strong_scaling_speedup.png` (speedup and
 parallel efficiency).
 
+## Isosurface video
+
+<video src="figures/isosurface.mp4" controls width="600"></video>
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate  # optional but recommended
+pip install pyvista imageio imageio-ffmpeg
+python3 render_isosurface_video.py
+```
+
+Writes `figures/isosurface.mp4` (the committed copy above is already
+this): every rank's VTK tile, every frame, stitched back into one
+full-domain grid, one isosurface extracted via VTK's marching-cubes
+filter (through PyVista) at a threshold held fixed across the whole
+run, viewed from a slowly-orbiting camera positioned outside the
+simulated cube. Watch for the surface staying a **rigid, undeformed
+sphere** throughout -- only its *position* moves, translating
+diagonally and wrapping once it crosses a periodic boundary. That's the
+whole point of the contrast with the sibling Burgers tutorial's own
+video, where the same starting shape visibly steepens and deforms:
+this equation is linear, so nothing about the shape itself ever
+changes, no matter how long the run goes.
+
+Requires `vtk_output/` to exist first (run the binary -- any rank count
+works, the result is bit-identical regardless of how many ranks ran it).
+
 ## What to expect
 
 Before looking at this tutorial's own measured numbers, it helps to
@@ -168,12 +194,15 @@ which the real cluster data shows is not actually true.
 
 ## What is committed vs. regenerated
 
-`data/summary.csv` (tiny, just the four measured rows) and all three
+`data/summary.csv` (tiny, just the four measured rows), all three
 PNGs under `figures/` (including the data-independent
-`expected_scaling_reference.png`) are committed in full. The VTK frames
-themselves are **not** committed (even the smallest, 1-rank case would
-be ~20 ASCII files per run) -- regenerate them by running the binary
-once; they are for interactive viewing in ParaView, not for this
+`expected_scaling_reference.png`), and `figures/isosurface.mp4` are all
+committed in full (the video is a few hundred KB -- small enough to
+commit directly, so it's viewable right from the README with no local
+setup). The VTK frames themselves are **not** committed (even the
+smallest, 1-rank case would be ~20 ASCII files per run) -- regenerate
+them by running the binary once; they are for interactive viewing in
+ParaView if you want to look around yourself, not for this
 README to embed.
 
 ## Things to try
