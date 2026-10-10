@@ -2431,3 +2431,136 @@ decomposition, the `MPI_Allreduce(MAX)` fix for Burgers, or continue
 Phase 2 breadth-first into the DG communication prototype /
 state-size-100 sweep / memory-layout study -- recommend checking with
 the PI on which matters most, same open question as before.
+
+## 2026-10-11 — Task 0005: full 3D MPI block decomposition + strong-scaling tutorial
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User asked whether any tutorial exercised task 0004's MPI work yet
+(confirmed: no -- only a unit test, a correctness test, and a
+communication-only benchmark) and asked for a 3D tutorial demonstrating
+strong scaling, which meant generalizing 1D-slab-along-X to full 3D
+block decomposition first. Task spec
+`tasks/0005-phase2-mpi-3d-block-decomposition.md`, continuing on the
+same `cfe/development/phase_0004` branch (task 0004 was never opened as
+a PR -- user confirmed continuing on it directly rather than branching
+fresh, since this is a direct generalization of the same MPI work).
+
+Key design discovery made while planning (verified by directly
+re-reading `fvm_solver.hpp`'s `residual()`/`axis_flux_difference`, not
+assumed): this solver's reconstruction is strictly axis-split -- no
+code path ever reads a ghost cell that is simultaneously a ghost on two
+axes at once (a "corner"). Full 3D block decomposition therefore only
+needs face-neighbor (6-direction) exchange, the same kind already built
+for X alone -- not the diagonal/corner communication originally assumed
+necessary. This simplified the task considerably; recorded as an
+amendment to ADR 0009 (same decision, new evidence, not a new ADR
+number).
+
+New/changed production code:
+- `src/cfe/grid/partition/cartesian_partition.hpp` -- `CartesianPartition`
+  + `make_cartesian_partition(...)`. Reuses `make_slab_partition` once
+  per axis for local extent/offset (not duplicated), computes 6
+  face-neighbor ranks via a 3D rank-coordinate unravel/flatten.
+  `px*py*pz` must equal the communicator size -- an always-on check
+  (not `assert`), since this depends on runtime launch configuration,
+  same reasoning `boundary_condition.hpp`'s existing ghost-depth check
+  uses. Zero MPI dependency, unit-tested without any toolchain.
+- `src/cfe/grid/boundary/mpi_halo_boundary.hpp` (refactored): the
+  constructor now takes `(MPI_Comm, int left_rank, int right_rank)`
+  directly instead of a whole `SlabPartition` -- axis-agnostic, so the
+  same type now serves `BoundaryX`/`BoundaryY`/`BoundaryZ`
+  simultaneously (three instances, one per axis, via explicit aggregate
+  construction into `FvmSolver` -- zero changes needed there, exactly
+  as ADR 0004's seam promised). `fill_x`/`fill_y`/`fill_z` are now all
+  real, genuinely-reachable implementations (task 0004's X-only
+  throwing Y/Z stubs are gone), sharing one `if constexpr`-dispatched
+  private `exchange<Axis>` helper -- mirrors
+  `detail::axis_flux_difference`'s own dispatch pattern, avoids
+  tripling the pack/exchange/unpack logic. Existing call sites
+  (`tests/mpi/test_mpi_halo_exchange.cpp`,
+  `benchmarks/mpi/bench_mpi_halo_exchange.cpp`) updated to pass
+  `partition.left_rank, partition.right_rank` instead of the whole
+  partition object.
+- `tutorials/mpi_scalar_advection_3d_strong_scaling/` -- the
+  full-solver strong-scaling demonstration task 0004 deferred: fixed
+  128^3 global problem (Gaussian bump, `velocity=(1,1,1)`), run at
+  1/2/4/8 ranks via a tutorial-local "most cube-like factorization"
+  helper picking `(px,py,pz)` from the rank count. Each rank writes
+  only its own local VTK block (reusing the existing, unchanged
+  `cfe::io::write_vtk_structured_points_cell_scalar` verbatim -- it
+  already writes `grid.origin_x/y/z` into the VTK `ORIGIN` field, so no
+  writer changes were needed for per-rank pieces to tile correctly).
+
+Tests added:
+- `tests/unit/test_cartesian_partition.cpp` -- 6 tests, pure math, no
+  MPI needed: single-rank 1x1x1, local extents/offsets at 2x2x2, face
+  neighbors at 2x2x2 (including the "2-wide periodic axis: left==right"
+  edge case), a non-cubic 4x2x1 shape, non-periodic edge ranks getting
+  `kNoNeighbor`, and mixed per-axis periodicity. 102/102 total unit
+  tests passing (96 prior + 6 new), zero regressions.
+- `tests/mpi/test_mpi_halo_exchange_3d.cpp` -- fixed 2x2x2 (np=8),
+  decomposes `ScalarAdvectionField<Scalar,3>`, same
+  bit-identical-vs.-independently-computed-reference oracle as the
+  existing 1D test, extended to all three axes. Existing X-only
+  `test_mpi_halo_exchange` (np=2/np=4) re-verified passing after the
+  constructor refactor -- confirmed the generalization is a pure
+  behavior-preserving refactor on the already-proven axis.
+
+Scientific verification:
+Installed-locally (Homebrew OpenMPI, same machine/setup as task 0004):
+full CPU-only build (`CFE_ENABLE_MPI=OFF`) unaffected, all 4 registered
+`ctest` entries pass (`cfe_unit_tests`, `mpi_halo_exchange_np2`,
+`mpi_halo_exchange_np4`, `mpi_halo_exchange_3d_np8`), manual sweep at
+1/2/3/4/5/8 ranks all bit-identical. Confirmed the 3D oracle has teeth
+specifically on the newly-generalized axes (not just reusing X's
+already-proven path): deliberately sabotaged the Y-axis pack formula
+with an off-by-one, rebuilt, reran at np=8 -- caught immediately
+(multiple mismatched cells reported across several ranks), reverted,
+reconfirmed passing. VTK tiling verified numerically (not just visually
+assumed): at 8 ranks, every piece's `ORIGIN`/`DIMENSIONS`/`SPACING`
+confirmed to exactly tile `[0,1]^3` with no gaps or overlaps.
+
+Strong-scaling tutorial run locally (Apple Silicon laptop, 10 cores,
+`mpirun --oversubscribe` not needed at these rank counts): 1 rank
+8.70s, 2 ranks 4.69s (1.85x), 4 ranks 3.33s (2.61x), 8 ranks 3.84s
+(2.26x -- *regressed* from 4 ranks). Interpreted honestly in the
+tutorial's own README, not hidden: as rank count grows, each rank's
+local block shrinks while halo-exchange overhead does not shrink
+proportionally, so the communication-to-computation ratio grows --
+exactly the effect task 0004's own `bench_mpi_halo_exchange` already
+measured in isolation. A laptop's shared memory bus/heterogeneous core
+types also make this noisier than dedicated cluster hardware would be.
+Flagged as a local sanity check pending the authoritative Bridges-2
+numbers (see immediately-following work, if present in this file, for
+whether that follow-up has landed yet).
+
+Architecture decisions:
+Amendment to `docs/adr/0009-mpi-domain-decomposition.md` (2026-10-11
+section) -- the corner-cell-not-needed finding and the decomposition-
+granularity decision's extension from 1D to full 3D, both decided
+against actual re-derived evidence from this solver's real stencil
+shape, not carried over by assumption from the original ADR text.
+
+Known limitations:
+Carried forward unchanged from task 0004: `BurgersField` still not
+decomposition-safe (`MPI_Allreduce(MAX)` not yet built); non-periodic
+true physical-boundary ranks still don't get a composed real value
+from `MpiHaloBoundary` alone; non-blocking overlap still deferred.
+New: the strong-scaling tutorial's local numbers are not the
+authoritative result (same "verify locally, confirm on Bridges-2"
+pattern every GPU benchmark in this project already follows) --
+pending as of this entry; a true 3-axis-decomposed communication-only
+benchmark sweep (task 0004's benchmark still only varies the Y/Z
+cross-section size, not actual 3-axis decomposition) is explicit future
+work, not built in this task.
+
+Next recommended task:
+Run the strong-scaling tutorial's 1/2/4/8-rank sweep for real on PSC
+Bridges-2 (same workflow task 0004 used), fill in the authoritative
+numbers in the tutorial README and presentation. After that: either the
+`MPI_Allreduce(MAX)` fix for Burgers, non-blocking communication/
+computation overlap, or continue Phase 2 breadth-first into the DG
+communication prototype / state-size-100 sweep / memory-layout study.

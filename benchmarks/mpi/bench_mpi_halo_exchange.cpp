@@ -102,7 +102,7 @@ void run_ranks_sweep(int rank, int size)
   grid.dz = 1.0 / static_cast<Scalar>(kNz);
 
   cfe::Field<Scalar, 1> state(grid.n_cells_total());
-  cfe::MpiHaloBoundary<Scalar, 1> boundary(MPI_COMM_WORLD, partition);
+  cfe::MpiHaloBoundary<Scalar, 1> boundary(MPI_COMM_WORLD, partition.left_rank, partition.right_rank);
 
   const double median_s = time_one_fill_x_median(boundary, state, grid);
   const double bytes = bytes_per_exchange(kNgx, grid.padded_ny(), grid.padded_nz());
@@ -128,7 +128,7 @@ void run_size_sweep(int rank, int size)
     grid.dz = 1.0 / static_cast<Scalar>(n);
 
     cfe::Field<Scalar, 1> state(grid.n_cells_total());
-    cfe::MpiHaloBoundary<Scalar, 1> boundary(MPI_COMM_WORLD, partition);
+    cfe::MpiHaloBoundary<Scalar, 1> boundary(MPI_COMM_WORLD, partition.left_rank, partition.right_rank);
 
     const double median_s = time_one_fill_x_median(boundary, state, grid);
     const double bytes = bytes_per_exchange(kNgx, grid.padded_ny(), grid.padded_nz());
@@ -156,7 +156,7 @@ void run_ghost_depth_sweep(int rank, int size)
     grid.dz = 1.0 / static_cast<Scalar>(kNz);
 
     cfe::Field<Scalar, 1> state(grid.n_cells_total());
-    cfe::MpiHaloBoundary<Scalar, 1> boundary(MPI_COMM_WORLD, partition);
+    cfe::MpiHaloBoundary<Scalar, 1> boundary(MPI_COMM_WORLD, partition.left_rank, partition.right_rank);
 
     const double median_s = time_one_fill_x_median(boundary, state, grid);
     const double bytes = bytes_per_exchange(ngx, grid.padded_ny(), grid.padded_nz());

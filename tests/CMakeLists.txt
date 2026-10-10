@@ -27,6 +27,7 @@ add_executable(cfe_unit_tests
   unit/test_burgers_rarefaction.cpp
   unit/test_burgers_3d_sanity.cpp
   unit/test_slab_partition.cpp
+  unit/test_cartesian_partition.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)

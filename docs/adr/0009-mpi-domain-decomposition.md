@@ -235,10 +235,61 @@ correctness oracle deliberately uses `ScalarAdvectionField` instead
 (its `wave_speed()` is a fixed constant, needing no synchronization) --
 see `tasks/0004-phase2-mpi-decomposition.md`'s "Do not implement" list.
 
+## Amendment 2026-10-11: generalized to full 3D block decomposition (task 0005)
+
+The "decomposition granularity" decision above is extended from "1D
+slab along X" to **full 3D block decomposition**, still face-neighbor
+exchange only -- the other two decisions (blocking `Sendrecv`,
+`grid/boundary/` location) are unchanged, so this amends the existing
+ADR rather than opening a new one (per the Revisit criteria below,
+which this directly answers).
+
+**Key finding that made this simpler than originally assumed**:
+re-reading `fvm_solver.hpp`'s `residual()` and
+`detail::axis_flux_difference` directly shows this solver's
+reconstruction is strictly axis-split -- the interior loop fixes a real
+cell's own `(i,j,k)`, and each axis's flux pass only ever varies *that*
+axis's index while holding the other two at the real cell's own real
+value. **No code path ever reads a ghost cell that is simultaneously a
+ghost on two axes at once (a "corner").** This was verified by direct
+inspection (not assumed), and means full 3D block decomposition needs
+only the same **face-neighbor** exchange (6 directions: +-X/+-Y/+-Z)
+already built for X -- not the diagonal/corner communication this ADR's
+original "Option B: full 2D/3D block decomposition" disadvantage
+assumed it would need. That assumption is now known to be wrong for
+this solver's stencil shape (a different, block/compact-stencil method
+-- e.g. a genuinely multi-dimensional WENO or a DG scheme with
+diagonal-coupling flux terms -- would need to revisit this).
+
+**New types**: `grid/partition/cartesian_partition.hpp`
+(`CartesianPartition`/`make_cartesian_partition`) generalizes
+`SlabPartition` to 3 axes by calling it once per axis for the local
+extent/offset split, then computing 6 face-neighbor ranks via a 3D
+rank-coordinate unravel/flatten. `MpiHaloBoundary` was refactored (its
+constructor now takes a raw `(left_rank, right_rank)` pair instead of a
+whole `SlabPartition`, so the same type serves any one axis) so all
+three of `fill_x`/`fill_y`/`fill_z` are now genuinely-reachable real
+implementations sharing one `if constexpr`-dispatched private
+`exchange<Axis>` helper, rather than X-only with throwing Y/Z stubs.
+
+**Evidence**: `tests/unit/test_cartesian_partition.cpp` (3D topology,
+no MPI needed); `tests/mpi/test_mpi_halo_exchange_3d.cpp` (2x2x2, np=8,
+bit-identical vs. single-process reference -- oracle confirmed to have
+teeth via the same deliberate-bug-then-revert check task 0004 used,
+this time sabotaging the Y axis specifically to validate the
+newly-generalized code, not just the already-proven X path);
+`tutorials/mpi_scalar_advection_3d_strong_scaling/` (full-solver strong
+scaling at 1/2/4/8 ranks, local + Bridges-2 -- see that tutorial's
+README for the actual numbers and their interpretation). Existing
+X-only `test_mpi_halo_exchange` (np=2/np=4) re-verified passing after
+the constructor refactor -- no regression.
+
 ## Revisit criteria
 
-- Revisit decomposition granularity when a 2D/3D block-decomposition
-  task begins (diagonal/corner-neighbor exchange).
+- ~~Revisit decomposition granularity when a 2D/3D block-decomposition
+  task begins (diagonal/corner-neighbor exchange).~~ Done above (task
+  0005) -- no diagonal/corner exchange was needed after all, for this
+  solver's axis-split stencil.
 - Revisit blocking-vs-overlap when a benchmark run on real target
   hardware (Bridges-2, multi-node) actually shows communication-bound
   (not latency-floor-bound at small scale) behavior at the rank counts

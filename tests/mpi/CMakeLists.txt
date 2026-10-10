@@ -16,3 +16,12 @@ foreach(np 2 4)
            COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np} ${MPIEXEC_PREFLAGS}
                    $<TARGET_FILE:cfe_test_mpi_halo_exchange> ${MPIEXEC_POSTFLAGS})
 endforeach()
+
+# Full 3D block-decomposition correctness test (task spec 0005): fixed
+# at a 2x2x2 process grid, so np=8 exactly.
+add_executable(cfe_test_mpi_halo_exchange_3d test_mpi_halo_exchange_3d.cpp)
+target_link_libraries(cfe_test_mpi_halo_exchange_3d PRIVATE cfe_core)
+
+add_test(NAME mpi_halo_exchange_3d_np8
+         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 8 ${MPIEXEC_PREFLAGS}
+                 $<TARGET_FILE:cfe_test_mpi_halo_exchange_3d> ${MPIEXEC_POSTFLAGS})

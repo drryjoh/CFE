@@ -143,12 +143,12 @@ std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartiti
   }
 
   cfe::ScalarAdvectionField<double, 1> field{cfe::Vector<double, 1>(kAdvectionSpeed)};
-  cfe::MpiHaloBoundary<double, 1> boundary_x{MPI_COMM_WORLD, partition};
+  cfe::MpiHaloBoundary<double, 1> boundary_x{MPI_COMM_WORLD, partition.left_rank, partition.right_rank};
   // BoundaryY/BoundaryZ explicitly set to PeriodicBoundary (not left at
   // their default, which would be BoundaryX = MpiHaloBoundary): that
   // default-member-initializes `boundary_y{}`/`boundary_z{}`, which
   // requires a default constructor MpiHaloBoundary deliberately does not
-  // have (it always needs a communicator + partition) -- this is
+  // have (it always needs a communicator + neighbor ranks) -- this is
   // required regardless of Field::dim, since FvmSolver's member
   // declarations are part of the class definition, not conditionally
   // instantiated by `if constexpr (y_active)`.
