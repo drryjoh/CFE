@@ -112,7 +112,16 @@ once `data/summary.csv` exists, `figures/strong_scaling_time.png` and
 
 ## Isosurface video
 
-<video src="figures/isosurface.mp4" controls width="600"></video>
+![Burgers isosurface deforming into a shock, split across 8 MPI ranks](figures/isosurface.gif)
+
+*(animated GIF for inline playback here -- GitHub strips raw `<video>`
+tags from committed README files, so a GIF is what actually autoplays
+in this view; the full-quality source is `figures/isosurface.mp4`,
+linked again below)*
+
+[**Download/view the full-quality MP4**](figures/isosurface.mp4) (the
+GIF above is a lower-quality copy made specifically so it autoplays
+inline on this page).
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate  # optional but recommended
@@ -120,12 +129,14 @@ pip install pyvista imageio imageio-ffmpeg
 python3 render_isosurface_video.py
 ```
 
-Writes `figures/isosurface.mp4` (the committed copy above is already
-this): every rank's VTK tile, every frame,
-stitched back into one full-domain grid, one isosurface extracted via
-VTK's marching-cubes filter (through PyVista) at a threshold held fixed
-across the whole run, viewed from a slowly-orbiting camera positioned
-outside the simulated cube. Watch for:
+Writes `figures/isosurface.mp4` (`ffmpeg -i figures/isosurface.mp4
+-vf "fps=10,scale=500:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];
+[s1][p]paletteuse" -loop 0 figures/isosurface.gif` makes the GIF copy
+above from it): every rank's VTK tile, every frame, stitched back into
+one full-domain grid, one isosurface extracted via VTK's marching-cubes
+filter (through PyVista) at a threshold held fixed across the whole
+run, viewed from a slowly-orbiting camera positioned outside the
+simulated cube. Watch for:
 
 - the surface visibly deforming from a sphere into faceted, then
   rounded-polyhedral shapes over the run -- the steepening/rarefaction
@@ -190,10 +201,14 @@ scheme's design.
 
 ## What is committed vs. regenerated
 
-`data/summary.csv`, all three PNGs, and `figures/isosurface.mp4` are
-all committed in full (the video is a few hundred KB -- small enough
-to commit directly, so it's viewable without anyone needing PyVista/
-ffmpeg or ParaView installed locally just to see it). Raw VTK frames
+`data/summary.csv`, all three PNGs, `figures/isosurface.mp4` (full
+quality), and `figures/isosurface.gif` (the lower-quality copy that
+actually autoplays inline in this README on GitHub -- raw `<video>`
+tags are stripped from committed README files, so a GIF is the only
+format that renders playing without an extra click) are all committed
+in full -- under a megabyte combined, small enough to commit directly
+so the videos are viewable without anyone needing PyVista/ffmpeg or
+ParaView installed locally just to see them. Raw VTK frames
 are **not** committed (regenerate by running the binary once) -- those
 are for interactive viewing in ParaView if you want to look around
 yourself, not for this README to embed.
