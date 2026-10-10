@@ -2564,3 +2564,75 @@ numbers in the tutorial README and presentation. After that: either the
 `MPI_Allreduce(MAX)` fix for Burgers, non-blocking communication/
 computation overlap, or continue Phase 2 breadth-first into the DG
 communication prototype / state-size-100 sweep / memory-layout study.
+
+## 2026-10-11 — Task 0005: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: run the
+strong-scaling tutorial and the new 3D correctness test for real on PSC
+Bridges-2, not just locally.
+
+What was done:
+Allocated an RM-shared CPU node (`rminteract` QOS, 8 cores, job
+`49005761`, node `r269` -- the first allocation attempt, job `49005759`,
+sat pending for several minutes on a transient "nodes reserved for
+higher-priority partitions" scheduling reason despite 876 idle CPUs
+being available cluster-wide at the time; cancelled and resubmitted
+fresh, which granted promptly -- noted as cluster scheduling noise, not
+a capacity problem, and not worth chasing further). Synced
+`cfe/development/phase_0004` (now at commit `a9f829c`) into the
+existing Bridges-2 scratch checkout, built with `-DCFE_ENABLE_MPI=ON`
+(gcc 13.3.1 + OpenMPI 5.0.8, same toolchain as task 0004's own Bridges-2
+run), connecting directly to the allocated node via `ssh <node>` rather
+than a nested `srun` job step (the known slot-detection problem ADR
+0009 already documents from task 0004 -- avoided from the start this
+time, not rediscovered).
+
+Scientific verification:
+All 4 registered `ctest` entries pass, including the new
+`mpi_halo_exchange_3d_np8` entry. Strong-scaling tutorial sweep (1/2/4/8
+ranks): 57.55 s / 29.26 s (1.97x) / 14.74 s (3.90x) / 7.56 s (7.61x) --
+**near-ideal strong scaling, 95-98% parallel efficiency at every rank
+count tested**, in clear contrast to the local laptop run's falloff
+past 4 ranks (committed in the prior entry: 8.70 s / 4.69 s / 3.33 s /
+3.84 s, the last one slower than 4 ranks). This confirms the prior
+entry's communication-overhead explanation directly rather than leaving
+it as a plausible-but-unconfirmed guess: on dedicated cluster cores
+(not sharing a memory bus and OS scheduler with everything else running
+on a laptop), the same fixed communication cost is a much smaller
+fraction of a much larger available compute budget, so the falloff the
+laptop showed past 4 ranks does not appear at these same rank counts on
+real hardware.
+
+Updated `data/summary.csv` and both regenerated PNGs in
+`tutorials/mpi_scalar_advection_3d_strong_scaling/` to the Bridges-2
+numbers (now the authoritative committed result, not the laptop's);
+both the tutorial's own README and `presentations/0005-...md` updated
+with a laptop-vs-Bridges-2 comparison table and the corrected
+interpretation, rather than silently swapping one dataset for another
+with no explanation of why they differ.
+
+Architecture decisions:
+None new -- ADR 0009's 2026-10-11 amendment already covered this task's
+design; this entry is verification only.
+
+Known limitations:
+Unchanged from the prior entry: `BurgersField` still not
+decomposition-safe; non-periodic true physical-boundary ranks still
+unsupported; non-blocking overlap still deferred; a true
+3-axis-decomposed communication-only benchmark sweep is still not
+built (only the tutorial exercises full 3D decomposition end-to-end so
+far).
+
+Next recommended task:
+Task 0005 is now fully closed out (code, tests, tutorial, and ADR all
+verified on real target hardware, both laptop and cluster numbers
+reported and reconciled). Next: either the `MPI_Allreduce(MAX)` fix for
+Burgers, non-blocking communication/computation overlap, a true
+3-axis communication-only benchmark sweep, or continue Phase 2
+breadth-first into the DG communication prototype / state-size-100
+sweep / memory-layout study -- recommend checking with the PI on which
+matters most.

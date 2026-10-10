@@ -89,23 +89,33 @@ log-log, against an ideal `T(1)/ranks` reference line) and
 | Machine | 1 rank | 2 ranks | 4 ranks | 8 ranks |
 |---|---|---|---|---|
 | This dev laptop (Apple Silicon, 10 cores, `mpirun --oversubscribe`) | 8.70 s | 4.69 s (1.85x) | 3.33 s (2.61x) | 3.84 s (2.26x) |
-| PSC Bridges-2 (RM-shared, real cores, see below) | *pending* | | | |
+| **PSC Bridges-2 (RM-shared, dedicated cores)** | **57.55 s** | **29.26 s (1.97x)** | **14.74 s (3.90x)** | **7.56 s (7.61x)** |
 
-**Scaling improves up to 4 ranks, then falls off (and even regresses
-slightly at 8) on this dev laptop.** This is expected, not a bug: as
-rank count grows, each rank's own local block shrinks (at 8 ranks, each
-owns only a 64^3 slice of the original 128^3 domain), so the fraction
-of total work spent on halo exchange (communication) relative to
-interior computation grows -- exactly the overhead
+The committed `data/summary.csv` and `figures/*.png` are the **Bridges-2
+numbers** -- the authoritative result. Bridges-2 shows **near-ideal
+strong scaling all the way to 8 ranks**: 97-98% parallel efficiency at
+2 and 4 ranks, still 95% at 8 (`speedup(N)/N`, where 100% would be
+perfect linear speedup). This is the textbook strong-scaling result
+this tutorial sets out to demonstrate.
+
+**The dev laptop's numbers tell a different, also-instructive story**:
+scaling improves up to 4 ranks, then falls off (and even regresses
+slightly at 8). This is expected, not a bug in either run: as rank
+count grows, each rank's own local block shrinks (at 8 ranks, each owns
+only a 64^3 slice of the original 128^3 domain), so the fraction of
+total work spent on halo exchange (communication) relative to interior
+computation grows -- exactly the overhead
 `benchmarks/mpi/bench_mpi_halo_exchange.cpp` (task 0004) already
-measured in isolation. A laptop's shared memory bus and non-uniform
-core types (performance vs. efficiency cores, on Apple Silicon) also
-make rank-to-rank timing less uniform than on dedicated cluster
-hardware. **The authoritative scaling curve needs real, demonstrably
-single-purpose cluster cores** -- see the row above, to be filled in
-from a PSC Bridges-2 run (same "local sanity check first, cluster
-numbers for the record" pattern every GPU benchmark in this repo
-already follows).
+measured in isolation. On Bridges-2's dedicated cores that overhead is
+still small relative to compute at these rank counts (hence the
+near-ideal curve); on a laptop sharing its memory bus and cores with
+everything else running on it (and, on Apple Silicon, a mix of
+performance and efficiency cores), that same overhead is relatively
+more significant and noisier -- a direct, measured illustration of why
+"verify locally, then confirm on dedicated hardware" (the pattern every
+GPU benchmark in this repo already follows) matters: the laptop curve
+alone would have suggested this solver stops scaling well past 4 ranks,
+which the real cluster data shows is not actually true.
 
 ## What is committed vs. regenerated
 
