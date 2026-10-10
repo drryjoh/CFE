@@ -2821,3 +2821,59 @@ that: 2D/3D Burgers decomposition re-verification, non-blocking
 overlap, a true 3-axis communication-only benchmark sweep, or continue
 Phase 2 breadth-first into the DG communication prototype /
 state-size-100 sweep / memory-layout study.
+
+## 2026-10-11 — Task 0007: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: ran the
+Burgers strong-scaling tutorial for real on PSC Bridges-2.
+
+What was done:
+Synced `cfe/development/phase_0004` (commit `c7a8995`) into the
+Bridges-2 scratch checkout, allocated an RM-shared CPU node
+(`rminteract` QOS, 8 cores, job `49006853`, node `r263`), built with
+`-DCFE_ENABLE_MPI=ON`, connected directly via `ssh r263` (no nested
+`srun` step). Full `ctest` suite (6 entries) passed first. Ran the
+1/2/4/8-rank strong-scaling sweep.
+
+Scientific verification:
+**Near-ideal strong scaling**: 252.14s / 125.81s (2.00x) / 64.24s
+(3.92x) / 34.39s (7.33x) -- 100% efficiency at 2 ranks, 98% at 4, 92%
+at 8. Confirms the same textbook result the sibling scalar-advection
+tutorial already found on this cluster, now for the equation that
+actually needed task 0006's collective-CFL fix to be decomposition-safe
+at all. One genuinely interesting side-finding, reported plainly rather
+than smoothed over: Bridges-2's single-rank (1-core) time (252.14s) was
+**~4x slower** than the laptop's own single-rank time (62.62s) for this
+identical workload -- the cluster's value here is many dependable,
+evenly-scaling cores, not a faster individual core; the comparison that
+actually matters is each machine's own speedup curve, not a
+cross-machine wall-clock race, and both READMEs/presentations now say
+so explicitly rather than letting a reader draw the wrong conclusion
+from the raw numbers alone. Updated `data/summary.csv`, both PNGs, the
+tutorial's own README, and `presentations/0007-...md` with these
+authoritative numbers (committed data now reflects Bridges-2, not the
+laptop).
+
+Architecture decisions:
+None new -- verification only.
+
+Known limitations:
+Unchanged -- only one process-grid shape tested per rank count (the
+auto-chosen "most cube-like" one); multi-node scaling beyond a single
+Bridges-2 node untested.
+
+Next recommended task:
+Task 0007 is now fully closed out (code, tutorial, and numbers verified
+on real target hardware, both laptop and cluster reported and
+reconciled, including the surprising per-core speed difference).
+PR #4 (covering tasks 0004-0007) is open and up to date. Next: 2D/3D
+Burgers decomposition re-verification, non-blocking communication/
+computation overlap, a true 3-axis communication-only benchmark sweep,
+or continue Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study -- recommend checking with
+the PI on which matters most, or getting PR #4 reviewed and merged
+before taking on more new scope.

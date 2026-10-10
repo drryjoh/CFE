@@ -57,6 +57,24 @@
 
 ## Slide: Does it scale?
 
+**On the real supercomputer, yes -- nearly perfectly:**
+
+| Computers used | Time to finish | Speedup |
+|---|---|---|
+| 1 | 252.1 s | 1.0x |
+| 2 | 125.8 s | 2.00x |
+| 4 | 64.2 s | 3.92x |
+| 8 | 34.4 s | 7.33x |
+
+Doubling the computers very nearly halves the time, every step up to
+8 -- 100% of the theoretical best-possible benefit realized at 2
+computers, still 92% at 8. The same excellent result the first scaling
+test (two PRs ago) found, now confirmed for the equation that actually
+needed the collective-agreement fix to be safe at all.
+
+**On a laptop (10 cores, shared with everything else running on it),
+the same familiar falloff from two PRs ago shows up again:**
+
 | Computers used | Time to finish (this laptop) |
 |---|---|
 | 1 | 62.6 s |
@@ -64,25 +82,34 @@
 | 4 | 18.8 s |
 | 8 | 24.8 s (slower than 4 again) |
 
-- Same shape as the very first scaling test two PRs ago: good up to 4,
-  then worse at 8 on this shared laptop -- expected, for the same
-  reason as before (talking-to-neighbors overhead growing relative to
-  shrinking individual workloads).
+- Good up to 4, then worse at 8 on this shared laptop -- expected, for
+  the same reason as before (talking-to-neighbors overhead growing
+  relative to shrinking individual workloads) -- and now directly
+  confirmed by the supercomputer numbers showing that same effect
+  barely registers on dedicated hardware.
 - This equation does more work per point than the simple one from two
   PRs ago (checking for a possible shock at every point, not just
   moving a number along), so every number here is bigger across the
-  board -- but the shape of the curve is the same story.
-- The real supercomputer numbers are pending the same way the first
-  scaling test's were, before they came back nearly perfect.
+  board on both machines -- but the shape of each machine's own curve
+  matches its counterpart from two PRs ago closely.
+- One side-note worth flagging plainly: the supercomputer's single
+  computer alone was actually SLOWER than the laptop's single computer
+  for this specific task (252s vs. 63s) -- a good reminder that a
+  supercomputer's value is having many dependable, evenly-matched
+  computers that scale predictably together, not necessarily having the
+  single fastest computer. What matters for this slide is each
+  machine's own speedup curve, not a cross-machine race.
 
 ---
 
 ## Slide: What this still doesn't do
 
-- Only proven in one direction of splitting so far for Burgers
-  specifically (the 3D version is what's shown here, but a dedicated
-  real-supercomputer run for this exact tutorial is still pending as
-  of this writing).
+- Both the laptop and real supercomputer numbers are now in (see
+  above) -- this result is complete, not a placeholder.
 - Doesn't add any new correctness proof beyond what the previous PR
   already established numerically -- this PR is the picture and the
   speed measurement, not a second proof.
+- Only proven for this one way of splitting the work into bricks (a
+  roughly cube-shaped arrangement, chosen automatically) -- other
+  arrangements, or a much larger number of computers across multiple
+  physical machines, remain untested.
