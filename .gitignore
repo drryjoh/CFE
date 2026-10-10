@@ -19,3 +19,4 @@ vtk_output/
 # tutorials/burgers_2d_diagonal_shock/ -- their READMEs suggest creating one
 # to install numpy/pandas/matplotlib, but it must never be committed).
 .venv/
+__pycache__/

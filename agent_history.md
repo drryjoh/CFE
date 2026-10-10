@@ -2210,3 +2210,805 @@ Bridges-2 (or any CUDA toolchain) is available, then this PR's
 documentation work is complete. Otherwise, unchanged from the prior
 entry (MPI decomposition prototype, or check with the PI on Phase 2
 priority).
+
+## 2026-10-09 — Phase 2: first MPI domain-decomposition prototype
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+PR #3 (Phase 2 first slice: Burgers equation) merged to `main` (squash
+commit `3436514`). Picked up the standing "MPI decomposition prototype"
+item, recommended as the next task across ~6 consecutive prior entries.
+Task spec `tasks/0004-phase2-mpi-decomposition.md`, branch
+`cfe/development/phase_0004` off `main`. Implemented 1D slab domain
+decomposition along X with blocking halo exchange, closing
+`ROADMAP.md` Phase 2's "first MPI decomposition prototype" +
+"communication benchmark" items. Followed the plug-in seam ADR 0004
+and `grid/ghost/ghost_fill.hpp`'s own header comment already named for
+this: zero changes to `FvmSolver`, `fill_ghost_cells`, `CartesianGrid`,
+or `ssp_rk2_step`.
+
+New production code:
+- `src/cfe/grid/partition/slab_partition.hpp` -- `SlabPartition` +
+  `make_slab_partition(global_nx, rank, size, periodic)`. Deliberately
+  zero MPI dependency (plain `int` rank/size), so it is unit-tested by
+  the ordinary single-process `cfe_unit_tests` binary with no
+  `CFE_ENABLE_MPI` gating at all.
+- `src/cfe/backend/mpi/mpi_environment.hpp` / `mpi_datatype.hpp` --
+  RAII `MPI_Init`/`MPI_Finalize` guard + rank/size helpers, `Scalar` ->
+  `MPI_Datatype` mapping. `CFE_ENABLE_MPI`-gated.
+- `src/cfe/grid/boundary/mpi_halo_boundary.hpp` -- `MpiHaloBoundary
+  <Scalar,N>`, same duck-typed `fill_x`/`fill_y`/`fill_z` shape every
+  other boundary type uses. `fill_y`/`fill_z` throw (X-axis-only by
+  design) but still had to be written and compile -- the same
+  `fill_ghost_cells`-instantiates-all-three-switch-cases gotcha
+  `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp`'s
+  `DiagonalShockExactBoundary` already ran into, rediscovered here the
+  hard way (first build attempt failed with "no member named fill_y").
+  Pack/unpack is one general strided loop (mirrors
+  `PeriodicBoundary::fill_x`'s own index decomposition), two blocking
+  `MPI_Sendrecv` calls per `fill_x` (one per direction), buffers sized
+  once per grid shape and never shrunk.
+- `CFE_ENABLE_MPI` CMake option in root `CMakeLists.txt`, mirroring the
+  existing `CFE_ENABLE_CUDA` auto-detect/gate pattern exactly via
+  `find_package(MPI COMPONENTS CXX)`.
+- `benchmarks/mpi/bench_mpi_halo_exchange.cpp` -- isolates just the
+  halo-exchange step (not a full timestep); three sweeps (rank count
+  1/2/4/8, problem size via a 2D/3D domain decomposed only along X since
+  a literal 1D problem's message size never changes with `nx`, ghost
+  depth 2/4/8).
+
+Tests added:
+- `tests/unit/test_slab_partition.cpp` -- 6 tests, pure math, no MPI
+  needed: even/uneven splits, periodic/non-periodic neighbor
+  assignment, single-rank edge case. 96/96 total unit tests passing,
+  zero regressions on the existing CPU-only suite.
+- `tests/mpi/test_mpi_halo_exchange.cpp` -- a separate executable
+  (needs `mpirun`), registered as `ctest` entries at `np=2`/`np=4` via
+  CMake's `MPIEXEC_*` variables (not a hardcoded `mpirun -n`). Decomposes
+  `ScalarAdvectionField` over a periodic domain and checks the result
+  is BIT-IDENTICAL (tolerance 0) to an independently-computed
+  single-rank reference run of the same global problem, not just
+  "close" to the analytic solution -- the reference needs no gather or
+  second binary: every process also simulates the full global domain
+  entirely locally (no MPI calls) and compares its own decomposed real
+  cells against the matching slice. Bit-identity is achievable because
+  `ssp_rk2_step`/`FvmSolver::residual` are fully per-cell-independent
+  (no reduction/atomics) and a halo-exchanged ghost value is a literal
+  byte copy -- the one care point (keeping `grid.origin_x == 0` on
+  every rank and deriving each cell's coordinate from its GLOBAL index
+  directly, the same single multiply-add `x_center()` performs when
+  `origin_x` is zero) avoids a real `(a+b)*dx` vs. `a*dx+b*dx` rounding
+  mismatch that would otherwise break bit-identity.
+
+Scientific verification:
+No MPI toolchain exists on this development machine by default (same
+situation Phase 0/1/2 had with CUDA) -- installed OpenMPI locally via
+Homebrew (user-approved) specifically so this could be built and run
+for real here, not just design-reviewed. CPU-only build
+(`CFE_ENABLE_MPI=OFF`, the default) fully unaffected: full existing
+`ctest` suite still green. With `CFE_ENABLE_MPI=ON`: `test_slab_partition`
+passes (part of the 96/96 total); `test_mpi_halo_exchange` passes
+bit-identically at 1, 2, 3, 4, 5, and 8 ranks, including the
+non-power-of-two counts (3, 5) that exercise the remainder-cell split
+under real communication, not just the pure-math unit test. Confirmed
+the oracle actually has teeth, not just a tautology: deliberately
+introduced a one-line off-by-one bug in the packed high-face real-cell
+index, rebuilt, reran at np=4 -- caught immediately (160/160 global
+cells mismatched, non-zero exit code) -- then reverted and reconfirmed
+passing. `bench_mpi_halo_exchange` ran locally at 1/2/4/8 ranks,
+producing well-formed CSV with sensible size/ghost-depth trends;
+committed as `benchmarks/results/phase2_mpi_halo_exchange_apple_m5.csv`
+-- explicitly a local sanity check, NOT the authoritative scaling
+result (an oversubscribed laptop is not representative hardware, and
+the real target is PSC Bridges-2, not yet reached for this task).
+
+Architecture decisions:
+`docs/adr/0009-mpi-domain-decomposition.md` -- three decisions: 1D slab
+decomposition along X (not full 2D/3D block decomposition, deferred),
+blocking `MPI_Sendrecv` (not non-blocking overlap, deferred per
+AGENTS.md #16's own "eventually"), `MpiHaloBoundary` living in
+`grid/boundary/` (not `backend/mpi/`, matching every other boundary
+type's existing precedent). Status Proposed, not Accepted, until
+Bridges-2 verification lands.
+
+Known limitations:
+Everything in task 0004's "Do not implement" list, most importantly:
+(1) `BurgersField` (or any state-dependent-CFL field) is NOT yet safe
+to decompose -- its `wave_speed()` is `max|u|` over the whole initial
+condition, and computing that per-rank over only a local slice could
+give different ranks different `dt` for the same timestep, a real
+correctness break needing an `MPI_Allreduce(MAX)` not yet built; this
+task's oracle deliberately uses `ScalarAdvectionField` instead, whose
+wave speed is a fixed constant. (2) A non-periodic domain's two true
+physical-boundary ranks get a no-op `Sendrecv` on their outward side --
+`MpiHaloBoundary` does not compose with a second boundary condition to
+give that edge a real value; only the periodic case is
+exercised/tested. (3) PSC Bridges-2 verification has not happened yet
+for this task -- local verification (via Homebrew OpenMPI) is thorough
+but is not the target hardware; module availability for an MPI
+implementation there (OpenMPI or Cray MPICH) has not been confirmed.
+
+Next recommended task:
+Run the np=2/np=4 correctness tests and the 1/2/4/8-rank benchmark
+sweep for real on PSC Bridges-2, then flip ADR 0009's status to
+Accepted. After that: either 2D/3D block decomposition (the
+structurally similar next step for this same feature), the
+`MPI_Allreduce(MAX)` fix that would make Burgers safe to decompose, or
+continue Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study -- recommend checking with
+the PI on which matters most.
+
+## 2026-10-10 — Task 0004: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: verify
+the MPI prototype for real on PSC Bridges-2, not just locally. User
+asked specifically whether the V100 GPU partition could provide 2-4
+GPUs for this; investigated and reported honestly that policy allows
+up to 8 (`gpuinteract` QOS cap), but the V100 pool was fully allocated
+cluster-wide at the time (every V100 node showed 0 free GPUs; two
+other users' jobs were also queued), so a multi-GPU request would
+queue rather than grant immediately. Pointed out this task's code is
+100% CPU-only (zero CUDA), so verifying it doesn't need a GPU at all --
+user agreed to verify on a plain CPU allocation (RM-shared partition,
+336 idle CPUs available immediately) instead of waiting in the GPU
+queue.
+
+What was done:
+Allocated an RM-shared CPU node (`rminteract` QOS, 8 cores, job
+`49005352`, node `r193`, 20-minute walltime). Checked out
+`cfe/development/phase_0004` into the existing Bridges-2 scratch
+checkout (`~/scratch_cfe/CFE`), loaded `gcc/13.3.1-p20240614` +
+`openmpi/5.0.8-gcc13.3.1`, configured with `-DCFE_ENABLE_MPI=ON`, built
+clean. Ran the full `ctest` suite (all 3 registered tests passing),
+a broader manual rank sweep of `test_mpi_halo_exchange` (1/2/3/4/8/16
+ranks, all bit-identical passes), and the full `bench_mpi_halo_exchange`
+rank-count/size/ghost-depth sweep at 1/2/4/8 real (non-oversubscribed)
+ranks -- committed as
+`benchmarks/results/phase2_mpi_halo_exchange_bridges2_rm_shared_cpu.csv`.
+Released the allocation (`scancel`) once done, to free the node for
+other users.
+
+Environment gotchas found and worked around (documented in ADR 0009,
+not previously known -- this project's first MPI work on this
+cluster): (1) wrapping `ctest`/`mpirun` in a nested `srun --jobid=...`
+job step restricted `mpirun`'s visible core count to 1 regardless of
+`--cpus-per-task`, causing spurious "not enough slots" errors --
+fixed by connecting directly to the allocated node (`ssh <node>`) and
+running `mpirun` there without a nested job-step wrapper; (2) this
+OpenMPI build's PMIx plugin fails to load under this cluster's Slurm
+PMIx version, so a bare `srun -n N ./binary` (no `mpirun`) silently
+launches `N` independent single-rank "singletons" instead of one
+coordinated job -- `mpirun` (not raw `srun`) is the correct launcher
+for this project's MPI code on this cluster.
+
+Scientific verification:
+100% pass rate on every test at every rank count tried, on real
+cluster hardware, with real inter-process communication (not
+`--oversubscribe`d onto a single core, except for the np=16 case on an
+8-core allocation, called out explicitly as such). Benchmark produced
+well-formed, monotonic-with-message-size data; measured bandwidth
+(~0.7-1.4 GB/s) is unremarkable for a CPU-only shared node without a
+dedicated HPC interconnect -- not a code regression, just the expected
+character of this particular partition, noted as such rather than
+investigated further.
+
+Also recovered from an environment issue, not a code bug: the
+`/private/tmp/CFE-phase1-doc` worktree's `.git` link had gone missing
+again between tool calls (same transient `/private/tmp` loss this
+project hit once before in an earlier session) -- confirmed via
+`git worktree list` and `git log` on the remote that nothing was lost
+(branch `cfe/development/phase_0004` was already fully pushed), then
+fixed with `git worktree prune` + `rm -rf` + fresh `git worktree add`
+from the remote branch. Zero data loss; purely a local worktree
+bookkeeping recovery.
+
+Architecture decisions:
+`docs/adr/0009-mpi-domain-decomposition.md` status flipped from
+Proposed to **Accepted**, with the Bridges-2 evidence and the two
+environment gotchas above appended to its Evidence section.
+
+Known limitations:
+Unchanged from the prior entry: `BurgersField` still not
+decomposition-safe (needs `MPI_Allreduce(MAX)`, not yet built); a
+non-periodic domain's true physical-boundary ranks still don't get a
+composed real value from `MpiHaloBoundary` alone; only a single-node
+(8-core) allocation was exercised -- multi-node Bridges-2 scaling
+remains explicit future work, same as before. The committed benchmark
+CSV is from a CPU-only RM-shared node, not a V100/GPU-partition node --
+flagged plainly in its filename and in ADR 0009, not presented as
+GPU-interconnect-representative.
+
+Next recommended task:
+Task 0004 is now fully closed out (code, tests, benchmark, and ADR all
+verified on real target hardware). Next: either 2D/3D block
+decomposition, the `MPI_Allreduce(MAX)` fix for Burgers, or continue
+Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study -- recommend checking with
+the PI on which matters most, same open question as before.
+
+## 2026-10-11 — Task 0005: full 3D MPI block decomposition + strong-scaling tutorial
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User asked whether any tutorial exercised task 0004's MPI work yet
+(confirmed: no -- only a unit test, a correctness test, and a
+communication-only benchmark) and asked for a 3D tutorial demonstrating
+strong scaling, which meant generalizing 1D-slab-along-X to full 3D
+block decomposition first. Task spec
+`tasks/0005-phase2-mpi-3d-block-decomposition.md`, continuing on the
+same `cfe/development/phase_0004` branch (task 0004 was never opened as
+a PR -- user confirmed continuing on it directly rather than branching
+fresh, since this is a direct generalization of the same MPI work).
+
+Key design discovery made while planning (verified by directly
+re-reading `fvm_solver.hpp`'s `residual()`/`axis_flux_difference`, not
+assumed): this solver's reconstruction is strictly axis-split -- no
+code path ever reads a ghost cell that is simultaneously a ghost on two
+axes at once (a "corner"). Full 3D block decomposition therefore only
+needs face-neighbor (6-direction) exchange, the same kind already built
+for X alone -- not the diagonal/corner communication originally assumed
+necessary. This simplified the task considerably; recorded as an
+amendment to ADR 0009 (same decision, new evidence, not a new ADR
+number).
+
+New/changed production code:
+- `src/cfe/grid/partition/cartesian_partition.hpp` -- `CartesianPartition`
+  + `make_cartesian_partition(...)`. Reuses `make_slab_partition` once
+  per axis for local extent/offset (not duplicated), computes 6
+  face-neighbor ranks via a 3D rank-coordinate unravel/flatten.
+  `px*py*pz` must equal the communicator size -- an always-on check
+  (not `assert`), since this depends on runtime launch configuration,
+  same reasoning `boundary_condition.hpp`'s existing ghost-depth check
+  uses. Zero MPI dependency, unit-tested without any toolchain.
+- `src/cfe/grid/boundary/mpi_halo_boundary.hpp` (refactored): the
+  constructor now takes `(MPI_Comm, int left_rank, int right_rank)`
+  directly instead of a whole `SlabPartition` -- axis-agnostic, so the
+  same type now serves `BoundaryX`/`BoundaryY`/`BoundaryZ`
+  simultaneously (three instances, one per axis, via explicit aggregate
+  construction into `FvmSolver` -- zero changes needed there, exactly
+  as ADR 0004's seam promised). `fill_x`/`fill_y`/`fill_z` are now all
+  real, genuinely-reachable implementations (task 0004's X-only
+  throwing Y/Z stubs are gone), sharing one `if constexpr`-dispatched
+  private `exchange<Axis>` helper -- mirrors
+  `detail::axis_flux_difference`'s own dispatch pattern, avoids
+  tripling the pack/exchange/unpack logic. Existing call sites
+  (`tests/mpi/test_mpi_halo_exchange.cpp`,
+  `benchmarks/mpi/bench_mpi_halo_exchange.cpp`) updated to pass
+  `partition.left_rank, partition.right_rank` instead of the whole
+  partition object.
+- `tutorials/mpi_scalar_advection_3d_strong_scaling/` -- the
+  full-solver strong-scaling demonstration task 0004 deferred: fixed
+  128^3 global problem (Gaussian bump, `velocity=(1,1,1)`), run at
+  1/2/4/8 ranks via a tutorial-local "most cube-like factorization"
+  helper picking `(px,py,pz)` from the rank count. Each rank writes
+  only its own local VTK block (reusing the existing, unchanged
+  `cfe::io::write_vtk_structured_points_cell_scalar` verbatim -- it
+  already writes `grid.origin_x/y/z` into the VTK `ORIGIN` field, so no
+  writer changes were needed for per-rank pieces to tile correctly).
+
+Tests added:
+- `tests/unit/test_cartesian_partition.cpp` -- 6 tests, pure math, no
+  MPI needed: single-rank 1x1x1, local extents/offsets at 2x2x2, face
+  neighbors at 2x2x2 (including the "2-wide periodic axis: left==right"
+  edge case), a non-cubic 4x2x1 shape, non-periodic edge ranks getting
+  `kNoNeighbor`, and mixed per-axis periodicity. 102/102 total unit
+  tests passing (96 prior + 6 new), zero regressions.
+- `tests/mpi/test_mpi_halo_exchange_3d.cpp` -- fixed 2x2x2 (np=8),
+  decomposes `ScalarAdvectionField<Scalar,3>`, same
+  bit-identical-vs.-independently-computed-reference oracle as the
+  existing 1D test, extended to all three axes. Existing X-only
+  `test_mpi_halo_exchange` (np=2/np=4) re-verified passing after the
+  constructor refactor -- confirmed the generalization is a pure
+  behavior-preserving refactor on the already-proven axis.
+
+Scientific verification:
+Installed-locally (Homebrew OpenMPI, same machine/setup as task 0004):
+full CPU-only build (`CFE_ENABLE_MPI=OFF`) unaffected, all 4 registered
+`ctest` entries pass (`cfe_unit_tests`, `mpi_halo_exchange_np2`,
+`mpi_halo_exchange_np4`, `mpi_halo_exchange_3d_np8`), manual sweep at
+1/2/3/4/5/8 ranks all bit-identical. Confirmed the 3D oracle has teeth
+specifically on the newly-generalized axes (not just reusing X's
+already-proven path): deliberately sabotaged the Y-axis pack formula
+with an off-by-one, rebuilt, reran at np=8 -- caught immediately
+(multiple mismatched cells reported across several ranks), reverted,
+reconfirmed passing. VTK tiling verified numerically (not just visually
+assumed): at 8 ranks, every piece's `ORIGIN`/`DIMENSIONS`/`SPACING`
+confirmed to exactly tile `[0,1]^3` with no gaps or overlaps.
+
+Strong-scaling tutorial run locally (Apple Silicon laptop, 10 cores,
+`mpirun --oversubscribe` not needed at these rank counts): 1 rank
+8.70s, 2 ranks 4.69s (1.85x), 4 ranks 3.33s (2.61x), 8 ranks 3.84s
+(2.26x -- *regressed* from 4 ranks). Interpreted honestly in the
+tutorial's own README, not hidden: as rank count grows, each rank's
+local block shrinks while halo-exchange overhead does not shrink
+proportionally, so the communication-to-computation ratio grows --
+exactly the effect task 0004's own `bench_mpi_halo_exchange` already
+measured in isolation. A laptop's shared memory bus/heterogeneous core
+types also make this noisier than dedicated cluster hardware would be.
+Flagged as a local sanity check pending the authoritative Bridges-2
+numbers (see immediately-following work, if present in this file, for
+whether that follow-up has landed yet).
+
+Architecture decisions:
+Amendment to `docs/adr/0009-mpi-domain-decomposition.md` (2026-10-11
+section) -- the corner-cell-not-needed finding and the decomposition-
+granularity decision's extension from 1D to full 3D, both decided
+against actual re-derived evidence from this solver's real stencil
+shape, not carried over by assumption from the original ADR text.
+
+Known limitations:
+Carried forward unchanged from task 0004: `BurgersField` still not
+decomposition-safe (`MPI_Allreduce(MAX)` not yet built); non-periodic
+true physical-boundary ranks still don't get a composed real value
+from `MpiHaloBoundary` alone; non-blocking overlap still deferred.
+New: the strong-scaling tutorial's local numbers are not the
+authoritative result (same "verify locally, confirm on Bridges-2"
+pattern every GPU benchmark in this project already follows) --
+pending as of this entry; a true 3-axis-decomposed communication-only
+benchmark sweep (task 0004's benchmark still only varies the Y/Z
+cross-section size, not actual 3-axis decomposition) is explicit future
+work, not built in this task.
+
+Next recommended task:
+Run the strong-scaling tutorial's 1/2/4/8-rank sweep for real on PSC
+Bridges-2 (same workflow task 0004 used), fill in the authoritative
+numbers in the tutorial README and presentation. After that: either the
+`MPI_Allreduce(MAX)` fix for Burgers, non-blocking communication/
+computation overlap, or continue Phase 2 breadth-first into the DG
+communication prototype / state-size-100 sweep / memory-layout study.
+
+## 2026-10-11 — Task 0005: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: run the
+strong-scaling tutorial and the new 3D correctness test for real on PSC
+Bridges-2, not just locally.
+
+What was done:
+Allocated an RM-shared CPU node (`rminteract` QOS, 8 cores, job
+`49005761`, node `r269` -- the first allocation attempt, job `49005759`,
+sat pending for several minutes on a transient "nodes reserved for
+higher-priority partitions" scheduling reason despite 876 idle CPUs
+being available cluster-wide at the time; cancelled and resubmitted
+fresh, which granted promptly -- noted as cluster scheduling noise, not
+a capacity problem, and not worth chasing further). Synced
+`cfe/development/phase_0004` (now at commit `a9f829c`) into the
+existing Bridges-2 scratch checkout, built with `-DCFE_ENABLE_MPI=ON`
+(gcc 13.3.1 + OpenMPI 5.0.8, same toolchain as task 0004's own Bridges-2
+run), connecting directly to the allocated node via `ssh <node>` rather
+than a nested `srun` job step (the known slot-detection problem ADR
+0009 already documents from task 0004 -- avoided from the start this
+time, not rediscovered).
+
+Scientific verification:
+All 4 registered `ctest` entries pass, including the new
+`mpi_halo_exchange_3d_np8` entry. Strong-scaling tutorial sweep (1/2/4/8
+ranks): 57.55 s / 29.26 s (1.97x) / 14.74 s (3.90x) / 7.56 s (7.61x) --
+**near-ideal strong scaling, 95-98% parallel efficiency at every rank
+count tested**, in clear contrast to the local laptop run's falloff
+past 4 ranks (committed in the prior entry: 8.70 s / 4.69 s / 3.33 s /
+3.84 s, the last one slower than 4 ranks). This confirms the prior
+entry's communication-overhead explanation directly rather than leaving
+it as a plausible-but-unconfirmed guess: on dedicated cluster cores
+(not sharing a memory bus and OS scheduler with everything else running
+on a laptop), the same fixed communication cost is a much smaller
+fraction of a much larger available compute budget, so the falloff the
+laptop showed past 4 ranks does not appear at these same rank counts on
+real hardware.
+
+Updated `data/summary.csv` and both regenerated PNGs in
+`tutorials/mpi_scalar_advection_3d_strong_scaling/` to the Bridges-2
+numbers (now the authoritative committed result, not the laptop's);
+both the tutorial's own README and `presentations/0005-...md` updated
+with a laptop-vs-Bridges-2 comparison table and the corrected
+interpretation, rather than silently swapping one dataset for another
+with no explanation of why they differ.
+
+Architecture decisions:
+None new -- ADR 0009's 2026-10-11 amendment already covered this task's
+design; this entry is verification only.
+
+Known limitations:
+Unchanged from the prior entry: `BurgersField` still not
+decomposition-safe; non-periodic true physical-boundary ranks still
+unsupported; non-blocking overlap still deferred; a true
+3-axis-decomposed communication-only benchmark sweep is still not
+built (only the tutorial exercises full 3D decomposition end-to-end so
+far).
+
+Next recommended task:
+Task 0005 is now fully closed out (code, tests, tutorial, and ADR all
+verified on real target hardware, both laptop and cluster numbers
+reported and reconciled). Next: either the `MPI_Allreduce(MAX)` fix for
+Burgers, non-blocking communication/computation overlap, a true
+3-axis communication-only benchmark sweep, or continue Phase 2
+breadth-first into the DG communication prototype / state-size-100
+sweep / memory-layout study -- recommend checking with the PI on which
+matters most.
+
+## 2026-10-11 — Task 0006: MPI-safe Burgers via collective CFL (`MPI_Allreduce(MAX)`)
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User asked directly "so we can't run burgers yet in MPI?" after PR #4
+was opened -- confirmed correctly (BurgersField's `max|u|`-based `dt`
+was computed per-rank over only a local IC slice, not synchronized),
+then asked to implement the fix and get "the whole mechanism" in,
+closing the one correctness gap named (and deliberately deferred) in
+both tasks 0004 and 0005. Task spec
+`tasks/0006-phase2-mpi-burgers-cfl-allreduce.md`, continuing on the
+same `cfe/development/phase_0004` branch (PR #4 already open against
+it, not yet merged).
+
+New production code:
+- `src/cfe/backend/mpi/mpi_reduce.hpp` -- `allreduce_max<Scalar>
+  (local_value, comm=MPI_COMM_WORLD)`, a thin wrapper over
+  `MPI_Allreduce(..., MPI_MAX, ...)` reusing `mpi_datatype_for`. No
+  other production code changed -- the fix is entirely at the call
+  site that already computes `max_abs_u0` in every existing
+  single-rank Burgers test/tutorial/benchmark; this is the MPI version
+  of that exact same line.
+
+Tests added:
+`tests/mpi/test_mpi_burgers_steepening.cpp` (np=2, np=4) -- decomposes
+the periodic sinusoidal-steepening-into-shock case
+(`tutorials/burgers_1d_shock_and_steepening/`'s own Case B IC/
+parameters), run past the analytic breaking time so a genuine shock
+exists. Deliberately a non-uniform-amplitude IC (sine peaks at x=0.25,
+troughs at x=0.75) chosen so that at 4 ranks, two of them see a local
+maximum ~33% smaller than the true global one -- large enough to
+matter, not rounding noise. Same bit-identical-vs-independently-
+computed-reference oracle as the existing MPI correctness tests.
+
+Scientific verification:
+Passes bit-identically at np=1/2/4/8 locally (Homebrew OpenMPI). Full
+`ctest` suite (6 entries with `CFE_ENABLE_MPI=ON`) green; CPU-only
+build unaffected. Confirmed the oracle has teeth with a notably
+stronger result than expected: sabotaged the fix (skipped
+`allreduce_max`, used the rank-local maximum directly), rebuilt, reran
+at np=4 -- **the job hung rather than just producing a wrong answer**.
+Root cause: `n_steps` is also derived from `max|u|`, so ranks with
+different (now-wrong) local maxima computed different step counts for
+the same nominal final time, desynchronizing their blocking `Sendrecv`
+calls mid-run (one rank's loop exits while its neighbor is still
+blocked waiting for a partner call that will never come). Killed the
+hung process, reverted the sabotage, rebuilt, reconfirmed passing at
+np=1/2/4/8. This is a stronger, more convincing argument for the fix
+than a silent-wrong-answer failure mode would have been, and is
+recorded in ADR 0009's amendment so a future state-dependent-CFL field
+(Euler, Phase 3) doesn't have to rediscover it.
+
+Architecture decisions:
+Amendment to `docs/adr/0009-mpi-domain-decomposition.md` (continuing
+its 2026-10-11 entry, not a new ADR number) -- the fix itself, the
+evidence, and the hang-not-just-wrong-answer finding. Also updated that
+ADR's original "Future constraint" paragraph (written when this gap was
+first identified) to point forward to the new amendment rather than
+leaving it reading as still-open.
+
+Known limitations:
+Only verified in 1D (the existing periodic steepening case) -- 2D/3D
+Burgers decomposition should work with the identical fix but is not
+re-verified here. Non-periodic domain composition and GPU-aware MPI
+remain out of scope, unchanged from tasks 0004/0005. PSC Bridges-2
+verification for this specific task is the next step (not yet run as
+of this entry).
+
+Next recommended task:
+Run `test_mpi_burgers_steepening` (np=2/np=4) for real on PSC Bridges-2,
+then this task is fully closed out. After that: 2D/3D Burgers
+decomposition re-verification, non-blocking communication/computation
+overlap, a true 3-axis communication-only benchmark sweep, or continue
+Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study.
+
+## 2026-10-11 — Task 0006: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: ran
+`test_mpi_burgers_steepening` for real on PSC Bridges-2.
+
+What was done:
+Synced `cfe/development/phase_0004` (now at commit `79158cb`) into the
+existing Bridges-2 scratch checkout, allocated an RM-shared CPU node
+(`rminteract` QOS, 8 cores, job `49006772`, node `r193` -- granted
+promptly this time, no scheduling-reason noise), built with
+`-DCFE_ENABLE_MPI=ON` (gcc 13.3.1 + OpenMPI 5.0.8), connecting directly
+to the node via `ssh r193` (not a nested `srun` job step, per the
+already-documented workaround).
+
+Scientific verification:
+All 6 registered `ctest` entries pass, including both new
+`mpi_burgers_steepening_np2`/`np4` entries. No separate Bridges-2
+sabotage-then-revert re-check was done for this task -- the hang/wrong-
+answer failure mode already confirmed locally is a property of the
+code logic (mismatched step counts desynchronizing blocking
+`Sendrecv` calls), not of the specific hardware it runs on, so
+re-demonstrating it on the cluster would not add new evidence.
+
+Architecture decisions:
+None new -- ADR 0009's Burgers-fix amendment already covered this
+task's design; this entry is verification only.
+
+Known limitations:
+Unchanged from the prior entry: only verified in 1D; non-periodic
+domain composition and GPU-aware MPI remain out of scope.
+
+Next recommended task:
+Task 0006 is now fully closed out (code, test, and ADR all verified on
+real target hardware). PR #4 (covering tasks 0004/0005/0006) is open
+and up to date. Next: 2D/3D Burgers decomposition re-verification,
+non-blocking communication/computation overlap, a true 3-axis
+communication-only benchmark sweep, or continue Phase 2 breadth-first
+into the DG communication prototype / state-size-100 sweep /
+memory-layout study -- recommend checking with the PI on which matters
+most, or simply getting PR #4 reviewed and merged before taking on
+more new scope.
+
+## 2026-10-11 — Task 0007: 3D MPI Burgers strong-scaling tutorial
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User asked, after confirming PR #4 looked ready for review: "do you
+have scaling for burgers?" -- answer was no (only `ScalarAdvectionField`
+had a strong-scaling tutorial so far; task 0006 only added a
+correctness test for decomposed Burgers, not a scaling demonstration).
+User asked to build it. Task spec
+`tasks/0007-phase2-mpi-burgers-strong-scaling-tutorial.md`, continuing
+on `cfe/development/phase_0004` (PR #4 still open, not yet merged).
+
+New tutorial:
+`tutorials/mpi_burgers_3d_strong_scaling/` -- direct sibling of
+`tutorials/mpi_scalar_advection_3d_strong_scaling/` (same
+`CartesianPartition`/`MpiHaloBoundary`/auto-factored-`(px,py,pz)`/
+per-rank-VTK/`MPI_Barrier`-timed structure), but `BurgersField<Scalar,3>`
++ `MusclMinmodReconstruction` + `RusanovFlux` with the same Gaussian-
+bump IC/constants `tutorials/burgers_3d_visualization/` already uses,
+and task 0006's `cfe::backend::mpi::allreduce_max` synchronizing the
+CFL-driving `max|u|` before computing `dt`. Zero new production code --
+purely an application of already-built, already-verified machinery to a
+new tutorial.
+
+Scientific verification:
+Confirmed task 0006's fix is genuinely exercised here, not just invoked
+for show: the bump's true global peak is ~1.49921, but most individual
+ranks' own local maxima (checked directly from the running IC loop)
+only reach ~1.15-1.23 at an 8-rank decomposition -- a meaningful,
+non-contrived gap, exactly the scenario the fix exists for. TVD
+boundedness checked across **every** committed frame and **every**
+rank (not spot-checked): `state` stays in exactly `[1.0, 1.49921]`
+throughout the run, matching the initial condition's own bounds with
+no overshoot. VTK per-rank tiling re-verified numerically (8 pieces at
+a 2x2x2 decomposition exactly cover the unit cube, no gaps/overlaps).
+Local laptop strong-scaling sweep: 1 rank 62.62s, 2 ranks 32.36s
+(1.94x), 4 ranks 18.83s (3.33x), 8 ranks 24.80s (2.53x, same
+falloff-past-4-ranks pattern the sibling tutorial's laptop numbers
+already showed, for the same reason -- communication overhead growing
+relative to shrinking per-rank work on shared, non-dedicated cores).
+
+Architecture decisions:
+None -- no new design decisions, purely an application of tasks
+0004/0005/0006's already-decided machinery.
+
+Known limitations:
+PSC Bridges-2 verification for this specific tutorial is the next step
+(not yet run as of this entry, pending in a follow-up commit per this
+project's standing "local sanity check, then cluster numbers for the
+record" pattern).
+
+Next recommended task:
+Run the strong-scaling sweep for real on PSC Bridges-2, fill in the
+authoritative numbers (same workflow every prior MPI task used). After
+that: 2D/3D Burgers decomposition re-verification, non-blocking
+overlap, a true 3-axis communication-only benchmark sweep, or continue
+Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study.
+
+## 2026-10-11 — Task 0007: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: ran the
+Burgers strong-scaling tutorial for real on PSC Bridges-2.
+
+What was done:
+Synced `cfe/development/phase_0004` (commit `c7a8995`) into the
+Bridges-2 scratch checkout, allocated an RM-shared CPU node
+(`rminteract` QOS, 8 cores, job `49006853`, node `r263`), built with
+`-DCFE_ENABLE_MPI=ON`, connected directly via `ssh r263` (no nested
+`srun` step). Full `ctest` suite (6 entries) passed first. Ran the
+1/2/4/8-rank strong-scaling sweep.
+
+Scientific verification:
+**Near-ideal strong scaling**: 252.14s / 125.81s (2.00x) / 64.24s
+(3.92x) / 34.39s (7.33x) -- 100% efficiency at 2 ranks, 98% at 4, 92%
+at 8. Confirms the same textbook result the sibling scalar-advection
+tutorial already found on this cluster, now for the equation that
+actually needed task 0006's collective-CFL fix to be decomposition-safe
+at all. One genuinely interesting side-finding, reported plainly rather
+than smoothed over: Bridges-2's single-rank (1-core) time (252.14s) was
+**~4x slower** than the laptop's own single-rank time (62.62s) for this
+identical workload -- the cluster's value here is many dependable,
+evenly-scaling cores, not a faster individual core; the comparison that
+actually matters is each machine's own speedup curve, not a
+cross-machine wall-clock race, and both READMEs/presentations now say
+so explicitly rather than letting a reader draw the wrong conclusion
+from the raw numbers alone. Updated `data/summary.csv`, both PNGs, the
+tutorial's own README, and `presentations/0007-...md` with these
+authoritative numbers (committed data now reflects Bridges-2, not the
+laptop).
+
+Architecture decisions:
+None new -- verification only.
+
+Known limitations:
+Unchanged -- only one process-grid shape tested per rank count (the
+auto-chosen "most cube-like" one); multi-node scaling beyond a single
+Bridges-2 node untested.
+
+Next recommended task:
+Task 0007 is now fully closed out (code, tutorial, and numbers verified
+on real target hardware, both laptop and cluster reported and
+reconciled, including the surprising per-core speed difference).
+PR #4 (covering tasks 0004-0007) is open and up to date. Next: 2D/3D
+Burgers decomposition re-verification, non-blocking communication/
+computation overlap, a true 3-axis communication-only benchmark sweep,
+or continue Phase 2 breadth-first into the DG communication prototype /
+state-size-100 sweep / memory-layout study -- recommend checking with
+the PI on which matters most, or getting PR #4 reviewed and merged
+before taking on more new scope.
+
+## 2026-10-11 — Task 0008: 3D MPI isosurface videos + Burgers run-duration tuning
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User said post-processing the two 3D MPI tutorials' VTK output by hand
+in ParaView each time was tedious, and asked for an automated isosurface
+MP4 for both (viewed from outside the box, camera showing the surface
+move), plus a longer Burgers run specifically so its steepening is more
+dramatic to watch. Clarified scope via AskUserQuestion first: both MPI
+strong-scaling tutorials (not the original single-rank visualization
+ones), PyVista + ffmpeg (user approved), commit the MP4s (user approved,
+not left regenerate-only like raw VTK frames).
+
+New tooling:
+`tutorials/mpi_burgers_3d_strong_scaling/render_isosurface_video.py`
+and `tutorials/mpi_scalar_advection_3d_strong_scaling/
+render_isosurface_video.py` (independently self-contained, same
+convention as `plot_results.py` in each). Each stitches every rank's
+own VTK tile for one frame into a single full-domain `pv.ImageData` by
+merging raw cell data BEFORE any cell-to-point averaging (averaging
+independently per piece first would leave a visible seam at rank
+boundaries -- confirmed by reasoning through the math, not just
+assumed), extracts one isosurface per frame at a threshold held FIXED
+across the whole run (not re-centered on each frame's own decaying
+peak, which was tried first and produced a less consistent-looking
+sequence -- same feature tracked throughout, not a different slice of
+structure each frame), and renders from a slowly-orbiting
+(75° total) camera outside the domain via PyVista (a Python wrapper
+around VTK's own marching-cubes filter) + `imageio-ffmpeg` (no system
+ffmpeg install needed, though one was also already present locally).
+
+Burgers duration change:
+`mpi_burgers_3d.cpp`'s `kFinalTime` increased `0.521 -> 1.2`
+(`kOutputFrames` `20 -> 40`), after computing the IC's analytic
+shock-formation time (`t_s = sigma/(amplitude*exp(-1/2)) ~= 0.396` for
+this Gaussian bump) and confirming the old final time only just cleared
+it -- a barely-formed shock, not the clearly-developed one a
+demonstration video should show. Re-verified TVD boundedness holds at
+the new duration too (not assumed): `state` stays in exactly
+`[1.0, 1.49921]` across every frame/rank, unchanged from the shorter
+run.
+
+Scientific verification:
+Both videos visually confirmed before finalizing (not just "the script
+ran without error"): scalar-advection isosurface stays a sphere of
+consistent size throughout (~2700 isosurface points every frame,
+confirming zero deformation, as linear advection should show),
+translating diagonally and wrapping at the periodic boundary; Burgers
+isosurface visibly deforms (sphere -> faceted/star shape -> rounded
+polyhedron over the run, matching an exploratory frame-by-frame PNG
+comparison done before committing to the final fixed isovalue of 1.2)
+with real periodic-wrap fragments appearing at box corners as the
+self-advecting background drifts -- explained in both the tutorial's
+README and the presentation as accurate physics, not a rendering bug.
+Re-ran the full local 1/2/4/8-rank strong-scaling sweep for Burgers at
+the new `t=1.2` duration (139.93s/77.31s/47.05s/53.00s locally, same
+qualitative falloff-past-4-ranks shape as before); Bridges-2
+re-verification at this new duration is the next step.
+
+Architecture decisions:
+None -- no production code changed, no new design decisions.
+
+Known limitations:
+Bridges-2 verification at the new Burgers duration is pending as of
+this entry (the previously-committed Bridges-2 numbers were for the
+old, shorter `t=0.521` run and are being replaced, not left stale and
+uncorrected). The two isosurface-video scripts are intentionally
+duplicated rather than shared, consistent with this repo's existing
+"every tutorial is independently self-contained" convention.
+
+Next recommended task:
+Run the Burgers strong-scaling sweep for real on PSC Bridges-2 at the
+new `t=1.2` duration, update the tutorial's README/committed data with
+the authoritative numbers (replacing the now-stale `t=0.521`-era ones),
+then this task is fully closed out. After that: 2D/3D Burgers
+decomposition re-verification, non-blocking overlap, a true 3-axis
+communication-only benchmark sweep, or continue Phase 2 breadth-first
+into the DG communication prototype / state-size-100 sweep /
+memory-layout study.
+
+## 2026-10-11 — Task 0008: PSC Bridges-2 verification at the new duration
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: re-ran the
+Burgers strong-scaling sweep for real on PSC Bridges-2 at the new,
+longer `t=1.2` duration.
+
+What was done:
+Synced `cfe/development/phase_0004` (commit `abeaa30`) into the
+Bridges-2 scratch checkout, allocated an RM-shared CPU node
+(`rminteract` QOS, 8 cores, job `49007639`, node `r361`), built with
+`-DCFE_ENABLE_MPI=ON`. Full `ctest` suite (6 entries) passed first,
+confirming the Burgers duration change didn't disturb the correctness
+test (which has its own, separate, shorter `kFinalTime` constant,
+unaffected by the tutorial's). Ran the 1/2/4/8-rank sweep as a
+background task since the longer duration meant a multi-minute-per-run
+sweep (np=1 alone took ~9.6 minutes).
+
+Scientific verification:
+**Near-ideal strong scaling again**: 575.16s / 287.96s (2.00x) /
+149.61s (3.84x) / 76.64s (7.50x) -- 100% efficiency at 2 ranks, 96% at
+4, 94% at 8, essentially unchanged from (if anything marginally better
+than) this same tutorial's prior `t=0.521`-era measurement, exactly as
+expected since lengthening the run changes the total amount of work,
+not how well it parallelizes. Cross-checked the earlier "~4x slower
+per-core on Bridges-2" finding: at this new duration the ratio is
+~4.11x (575.16s/139.93s), consistent with the shorter run's ~4.03x
+(252.14s/62.62s from task 0007) -- confirms that finding was a genuine,
+repeatable per-core hardware/workload characteristic, not measurement
+noise from a single run. Updated `data/summary.csv`, both PNGs, and did
+a full cleanup pass on the tutorial's README removing every "pending
+re-run" placeholder and filling in these final numbers.
+
+Architecture decisions:
+None new -- verification only.
+
+Known limitations:
+Unchanged from the prior entry.
+
+Next recommended task:
+Task 0008 is now fully closed out (code, both tutorials' videos, and
+the Burgers duration re-verification all confirmed on real target
+hardware). PR #4 (covering tasks 0004-0008) is open and up to date.
+Next: 2D/3D Burgers decomposition re-verification, non-blocking
+communication/computation overlap, a true 3-axis communication-only
+benchmark sweep, or continue Phase 2 breadth-first into the DG
+communication prototype / state-size-100 sweep / memory-layout study
+-- recommend checking with the PI on which matters most, or getting
+PR #4 reviewed and merged before taking on more new scope.
