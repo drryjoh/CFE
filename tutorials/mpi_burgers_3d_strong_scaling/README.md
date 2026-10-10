@@ -17,14 +17,26 @@ strong-vs-weak-scaling background this README doesn't repeat.
 
 A Gaussian bump (`state = 1.0 + 0.5*exp(-r^2/(2*0.12^2))`, identical IC
 and constants to `tutorials/burgers_3d_visualization/`) is simulated on
-a periodic 128^3 grid to the same physical final time that single-rank
-tutorial reaches in 500 steps at its own (lower) resolution, decomposed
-across however many MPI ranks the binary is launched with via
-`CartesianPartition` + `MpiHaloBoundary` (task 0005). Unlike the linear
-scalar-advection sibling tutorial, Burgers' characteristic speed is the
-local state itself, so the bump does not just translate: its leading
-faces steepen into a shock, its trailing faces spread into a smooth
-rarefaction fan -- independently along all three axes at once.
+a periodic 128^3 grid, decomposed across however many MPI ranks the
+binary is launched with via `CartesianPartition` + `MpiHaloBoundary`
+(task 0005). Unlike the linear scalar-advection sibling tutorial,
+Burgers' characteristic speed is the local state itself, so the bump
+does not just translate: its leading faces steepen into a shock, its
+trailing faces spread into a smooth rarefaction fan -- independently
+along all three axes at once.
+
+Run to `t=1.2` -- about 3x the analytic shock-formation time for this
+IC (`t_s = sigma / (amplitude*exp(-1/2)) ~= 0.396`, where a 1D slice's
+steepest downhill gradient first reaches it). `tutorials/
+burgers_3d_visualization/`'s own final time (`t~=0.521`) only just
+clears that threshold, so its shock is barely formed; this tutorial
+runs further past it specifically so the isosurface video below (and
+the strong-scaling measurement) both see a clearly, fully-developed
+front, not a borderline one. One side effect worth naming plainly: the
+background state (`1.0`) self-advects too (Burgers' characteristic
+speed is never zero here), so the *entire* domain drifts and wraps
+around the periodic box by this final time -- see the video section
+below for what that looks like and why it's correct, not a bug.
 
 **This is also where task 0006's fix is directly exercised, not just
 invoked for show**: the bump's peak sits inside only one (or a few, at
@@ -98,31 +110,59 @@ needed -- see the sibling tutorial's README for what it means), plus,
 once `data/summary.csv` exists, `figures/strong_scaling_time.png` and
 `figures/strong_scaling_speedup.png`.
 
+## Isosurface video
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate  # optional but recommended
+pip install pyvista imageio imageio-ffmpeg
+python3 render_isosurface_video.py
+```
+
+Writes `figures/isosurface.mp4`: every rank's VTK tile, every frame,
+stitched back into one full-domain grid, one isosurface extracted via
+VTK's marching-cubes filter (through PyVista) at a threshold held fixed
+across the whole run, viewed from a slowly-orbiting camera positioned
+outside the simulated cube. Watch for:
+
+- the surface visibly deforming from a sphere into faceted, then
+  rounded-polyhedral shapes over the run -- the steepening/rarefaction
+  this tutorial exists to demonstrate, not just assert in prose;
+- smaller fragments appearing and growing at some of the box's corners
+  as the run progresses -- these are **real**, not a rendering bug: the
+  whole domain's background drifts under Burgers' own self-advection
+  and wraps around the periodic box, the same correctness property
+  `tests/mpi/test_mpi_burgers_steepening.cpp` verifies numerically at
+  rank boundaries, now visible happening at the domain's own periodic
+  boundary too.
+
+Requires `vtk_output/` to exist first (run the binary -- any rank count
+works, the result is bit-identical regardless per task 0005/0006's own
+correctness tests).
+
 ## What the numbers show
 
 | Machine | 1 rank | 2 ranks | 4 ranks | 8 ranks |
 |---|---|---|---|---|
-| This dev laptop (Apple Silicon, 10 cores, `mpirun --oversubscribe`) | 62.62 s | 32.36 s (1.94x) | 18.83 s (3.33x) | 24.80 s (2.53x) |
-| **PSC Bridges-2 (RM-shared, dedicated cores)** | **252.14 s** | **125.81 s (2.00x)** | **64.24 s (3.92x)** | **34.39 s (7.33x)** |
+| This dev laptop (Apple Silicon, 10 cores, `mpirun --oversubscribe`) | 139.93 s | 77.31 s (1.81x) | 47.05 s (2.97x) | 53.00 s (2.64x) |
+| **PSC Bridges-2 (RM-shared, dedicated cores)** | *pending re-run at the longer t=1.2* | | | |
 
-The committed `data/summary.csv` and `figures/*.png` are the
-**Bridges-2 numbers** -- the authoritative result, and it is
-**near-ideal**: 100% efficiency at 2 ranks, 98% at 4, still 92% at 8.
-This is the same textbook strong-scaling result the sibling
-scalar-advection tutorial found on the same cluster, now confirmed for
-the equation that actually needed task 0006's fix to be safe to
-decompose at all.
+The committed `data/summary.csv` and `figures/*.png` reflect the
+`t=1.2` run (updated from an earlier, shorter `t=0.521` version once
+the final time was lengthened for a more clearly-developed shock in
+the isosurface video above -- the Bridges-2 numbers below are being
+re-measured at this same longer duration).
 
-The dev laptop's numbers tell the same instructive, different story as
-the sibling tutorial: good scaling up to 4 ranks, then falling off at
-8 as communication overhead becomes a larger fraction of each rank's
+The dev laptop's numbers show the same qualitative story the sibling
+tutorial's laptop run did: good scaling up to 4 ranks, then falling off
+at 8 as communication overhead becomes a larger fraction of each rank's
 shrinking local workload (a shared, non-dedicated machine, not a
-dedicated cluster node) -- expected, not a bug, and directly confirmed
-by the cluster numbers above showing that same effect is far smaller
-on real dedicated hardware. Burgers does more per-cell work than
-scalar advection (minmod slope limiting, a nonlinear flux, Rusanov
-dissipation), so the absolute times are larger at every rank count on
-both machines, but the qualitative scaling shape matches.
+dedicated cluster node) -- expected, not a bug. Burgers does more
+per-cell work than scalar advection (minmod slope limiting, a nonlinear
+flux, Rusanov dissipation), so the absolute times are larger at every
+rank count, but the qualitative scaling shape matches. The Bridges-2
+row above is pending re-measurement at this tutorial's new, longer
+final time -- see the sibling tutorial's own README for what the
+dedicated-hardware comparison looked like there.
 
 Bridges-2's per-core single-threaded speed for this workload was
 notably slower than the laptop's (the 1-rank time is ~4x the laptop's,
@@ -141,10 +181,13 @@ scheme's design.
 
 ## What is committed vs. regenerated
 
-`data/summary.csv` and all three PNGs under `figures/` are committed in
-full. VTK frames are **not** committed (regenerate by running the
-binary once) -- for interactive viewing in ParaView, not for this
-README to embed.
+`data/summary.csv`, all three PNGs, and `figures/isosurface.mp4` are
+all committed in full (the video is a few hundred KB -- small enough
+to commit directly, so it's viewable without anyone needing PyVista/
+ffmpeg or ParaView installed locally just to see it). Raw VTK frames
+are **not** committed (regenerate by running the binary once) -- those
+are for interactive viewing in ParaView if you want to look around
+yourself, not for this README to embed.
 
 ## Where to go next
 

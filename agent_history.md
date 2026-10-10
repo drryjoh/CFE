@@ -2877,3 +2877,85 @@ or continue Phase 2 breadth-first into the DG communication prototype /
 state-size-100 sweep / memory-layout study -- recommend checking with
 the PI on which matters most, or getting PR #4 reviewed and merged
 before taking on more new scope.
+
+## 2026-10-11 — Task 0008: 3D MPI isosurface videos + Burgers run-duration tuning
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+User said post-processing the two 3D MPI tutorials' VTK output by hand
+in ParaView each time was tedious, and asked for an automated isosurface
+MP4 for both (viewed from outside the box, camera showing the surface
+move), plus a longer Burgers run specifically so its steepening is more
+dramatic to watch. Clarified scope via AskUserQuestion first: both MPI
+strong-scaling tutorials (not the original single-rank visualization
+ones), PyVista + ffmpeg (user approved), commit the MP4s (user approved,
+not left regenerate-only like raw VTK frames).
+
+New tooling:
+`tutorials/mpi_burgers_3d_strong_scaling/render_isosurface_video.py`
+and `tutorials/mpi_scalar_advection_3d_strong_scaling/
+render_isosurface_video.py` (independently self-contained, same
+convention as `plot_results.py` in each). Each stitches every rank's
+own VTK tile for one frame into a single full-domain `pv.ImageData` by
+merging raw cell data BEFORE any cell-to-point averaging (averaging
+independently per piece first would leave a visible seam at rank
+boundaries -- confirmed by reasoning through the math, not just
+assumed), extracts one isosurface per frame at a threshold held FIXED
+across the whole run (not re-centered on each frame's own decaying
+peak, which was tried first and produced a less consistent-looking
+sequence -- same feature tracked throughout, not a different slice of
+structure each frame), and renders from a slowly-orbiting
+(75° total) camera outside the domain via PyVista (a Python wrapper
+around VTK's own marching-cubes filter) + `imageio-ffmpeg` (no system
+ffmpeg install needed, though one was also already present locally).
+
+Burgers duration change:
+`mpi_burgers_3d.cpp`'s `kFinalTime` increased `0.521 -> 1.2`
+(`kOutputFrames` `20 -> 40`), after computing the IC's analytic
+shock-formation time (`t_s = sigma/(amplitude*exp(-1/2)) ~= 0.396` for
+this Gaussian bump) and confirming the old final time only just cleared
+it -- a barely-formed shock, not the clearly-developed one a
+demonstration video should show. Re-verified TVD boundedness holds at
+the new duration too (not assumed): `state` stays in exactly
+`[1.0, 1.49921]` across every frame/rank, unchanged from the shorter
+run.
+
+Scientific verification:
+Both videos visually confirmed before finalizing (not just "the script
+ran without error"): scalar-advection isosurface stays a sphere of
+consistent size throughout (~2700 isosurface points every frame,
+confirming zero deformation, as linear advection should show),
+translating diagonally and wrapping at the periodic boundary; Burgers
+isosurface visibly deforms (sphere -> faceted/star shape -> rounded
+polyhedron over the run, matching an exploratory frame-by-frame PNG
+comparison done before committing to the final fixed isovalue of 1.2)
+with real periodic-wrap fragments appearing at box corners as the
+self-advecting background drifts -- explained in both the tutorial's
+README and the presentation as accurate physics, not a rendering bug.
+Re-ran the full local 1/2/4/8-rank strong-scaling sweep for Burgers at
+the new `t=1.2` duration (139.93s/77.31s/47.05s/53.00s locally, same
+qualitative falloff-past-4-ranks shape as before); Bridges-2
+re-verification at this new duration is the next step.
+
+Architecture decisions:
+None -- no production code changed, no new design decisions.
+
+Known limitations:
+Bridges-2 verification at the new Burgers duration is pending as of
+this entry (the previously-committed Bridges-2 numbers were for the
+old, shorter `t=0.521` run and are being replaced, not left stale and
+uncorrected). The two isosurface-video scripts are intentionally
+duplicated rather than shared, consistent with this repo's existing
+"every tutorial is independently self-contained" convention.
+
+Next recommended task:
+Run the Burgers strong-scaling sweep for real on PSC Bridges-2 at the
+new `t=1.2` duration, update the tutorial's README/committed data with
+the authoritative numbers (replacing the now-stale `t=0.521`-era ones),
+then this task is fully closed out. After that: 2D/3D Burgers
+decomposition re-verification, non-blocking overlap, a true 3-axis
+communication-only benchmark sweep, or continue Phase 2 breadth-first
+into the DG communication prototype / state-size-100 sweep /
+memory-layout study.

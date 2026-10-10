@@ -55,12 +55,16 @@ using Scalar = double;
 
 constexpr std::size_t kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
 constexpr Scalar kCfl = 0.3;           // matches tutorials/burgers_3d_visualization/'s own choice
-// Matches tutorials/burgers_3d_visualization/'s final physical time
-// (500 steps at its own N=64/CFL=0.3 reach t~=0.521) -- same amount of
-// physical steepening/rarefaction to look at, just at higher
-// resolution and split across ranks here.
-constexpr Scalar kFinalTime = 0.521;
-constexpr int kOutputFrames = 20;
+// Run well past the analytic breaking time (t_s = sigma/(amplitude*
+// exp(-1/2)) ~= 0.396 for this Gaussian bump -- the x where a 1D slice's
+// slope is most negative is one sigma off-peak, giving min(du0/dx) =
+// -amplitude/sigma*exp(-1/2)) -- tutorials/burgers_3d_visualization/'s
+// own final time (t~=0.521) only just clears that threshold, so its
+// shock is barely formed; this tutorial runs to ~3x the breaking time
+// so the isosurface video (see render_isosurface_video.py) shows a
+// clearly steepened, fully-developed front, not a borderline one.
+constexpr Scalar kFinalTime = 1.2;
+constexpr int kOutputFrames = 40;  // smoother video than the visual-sanity-check default of 20
 constexpr Scalar kBumpCenter = 0.5;
 constexpr Scalar kBumpSigma = 0.12;
 constexpr Scalar kBackground = 1.0;
