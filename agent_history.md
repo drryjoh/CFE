@@ -2714,3 +2714,49 @@ decomposition re-verification, non-blocking communication/computation
 overlap, a true 3-axis communication-only benchmark sweep, or continue
 Phase 2 breadth-first into the DG communication prototype /
 state-size-100 sweep / memory-layout study.
+
+## 2026-10-11 — Task 0006: PSC Bridges-2 verification
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: ran
+`test_mpi_burgers_steepening` for real on PSC Bridges-2.
+
+What was done:
+Synced `cfe/development/phase_0004` (now at commit `79158cb`) into the
+existing Bridges-2 scratch checkout, allocated an RM-shared CPU node
+(`rminteract` QOS, 8 cores, job `49006772`, node `r193` -- granted
+promptly this time, no scheduling-reason noise), built with
+`-DCFE_ENABLE_MPI=ON` (gcc 13.3.1 + OpenMPI 5.0.8), connecting directly
+to the node via `ssh r193` (not a nested `srun` job step, per the
+already-documented workaround).
+
+Scientific verification:
+All 6 registered `ctest` entries pass, including both new
+`mpi_burgers_steepening_np2`/`np4` entries. No separate Bridges-2
+sabotage-then-revert re-check was done for this task -- the hang/wrong-
+answer failure mode already confirmed locally is a property of the
+code logic (mismatched step counts desynchronizing blocking
+`Sendrecv` calls), not of the specific hardware it runs on, so
+re-demonstrating it on the cluster would not add new evidence.
+
+Architecture decisions:
+None new -- ADR 0009's Burgers-fix amendment already covered this
+task's design; this entry is verification only.
+
+Known limitations:
+Unchanged from the prior entry: only verified in 1D; non-periodic
+domain composition and GPU-aware MPI remain out of scope.
+
+Next recommended task:
+Task 0006 is now fully closed out (code, test, and ADR all verified on
+real target hardware). PR #4 (covering tasks 0004/0005/0006) is open
+and up to date. Next: 2D/3D Burgers decomposition re-verification,
+non-blocking communication/computation overlap, a true 3-axis
+communication-only benchmark sweep, or continue Phase 2 breadth-first
+into the DG communication prototype / state-size-100 sweep /
+memory-layout study -- recommend checking with the PI on which matters
+most, or simply getting PR #4 reviewed and merged before taking on
+more new scope.
