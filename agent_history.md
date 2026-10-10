@@ -2959,3 +2959,56 @@ decomposition re-verification, non-blocking overlap, a true 3-axis
 communication-only benchmark sweep, or continue Phase 2 breadth-first
 into the DG communication prototype / state-size-100 sweep /
 memory-layout study.
+
+## 2026-10-11 — Task 0008: PSC Bridges-2 verification at the new duration
+
+Agent: Claude Code
+Model: Sonnet 5
+
+Objective:
+Closed out the one item the prior entry flagged as pending: re-ran the
+Burgers strong-scaling sweep for real on PSC Bridges-2 at the new,
+longer `t=1.2` duration.
+
+What was done:
+Synced `cfe/development/phase_0004` (commit `abeaa30`) into the
+Bridges-2 scratch checkout, allocated an RM-shared CPU node
+(`rminteract` QOS, 8 cores, job `49007639`, node `r361`), built with
+`-DCFE_ENABLE_MPI=ON`. Full `ctest` suite (6 entries) passed first,
+confirming the Burgers duration change didn't disturb the correctness
+test (which has its own, separate, shorter `kFinalTime` constant,
+unaffected by the tutorial's). Ran the 1/2/4/8-rank sweep as a
+background task since the longer duration meant a multi-minute-per-run
+sweep (np=1 alone took ~9.6 minutes).
+
+Scientific verification:
+**Near-ideal strong scaling again**: 575.16s / 287.96s (2.00x) /
+149.61s (3.84x) / 76.64s (7.50x) -- 100% efficiency at 2 ranks, 96% at
+4, 94% at 8, essentially unchanged from (if anything marginally better
+than) this same tutorial's prior `t=0.521`-era measurement, exactly as
+expected since lengthening the run changes the total amount of work,
+not how well it parallelizes. Cross-checked the earlier "~4x slower
+per-core on Bridges-2" finding: at this new duration the ratio is
+~4.11x (575.16s/139.93s), consistent with the shorter run's ~4.03x
+(252.14s/62.62s from task 0007) -- confirms that finding was a genuine,
+repeatable per-core hardware/workload characteristic, not measurement
+noise from a single run. Updated `data/summary.csv`, both PNGs, and did
+a full cleanup pass on the tutorial's README removing every "pending
+re-run" placeholder and filling in these final numbers.
+
+Architecture decisions:
+None new -- verification only.
+
+Known limitations:
+Unchanged from the prior entry.
+
+Next recommended task:
+Task 0008 is now fully closed out (code, both tutorials' videos, and
+the Burgers duration re-verification all confirmed on real target
+hardware). PR #4 (covering tasks 0004-0008) is open and up to date.
+Next: 2D/3D Burgers decomposition re-verification, non-blocking
+communication/computation overlap, a true 3-axis communication-only
+benchmark sweep, or continue Phase 2 breadth-first into the DG
+communication prototype / state-size-100 sweep / memory-layout study
+-- recommend checking with the PI on which matters most, or getting
+PR #4 reviewed and merged before taking on more new scope.

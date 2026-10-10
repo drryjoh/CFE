@@ -144,33 +144,39 @@ correctness tests).
 | Machine | 1 rank | 2 ranks | 4 ranks | 8 ranks |
 |---|---|---|---|---|
 | This dev laptop (Apple Silicon, 10 cores, `mpirun --oversubscribe`) | 139.93 s | 77.31 s (1.81x) | 47.05 s (2.97x) | 53.00 s (2.64x) |
-| **PSC Bridges-2 (RM-shared, dedicated cores)** | *pending re-run at the longer t=1.2* | | | |
+| **PSC Bridges-2 (RM-shared, dedicated cores)** | **575.16 s** | **287.96 s (2.00x)** | **149.61 s (3.84x)** | **76.64 s (7.50x)** |
 
-The committed `data/summary.csv` and `figures/*.png` reflect the
-`t=1.2` run (updated from an earlier, shorter `t=0.521` version once
-the final time was lengthened for a more clearly-developed shock in
-the isosurface video above -- the Bridges-2 numbers below are being
-re-measured at this same longer duration).
+The committed `data/summary.csv` and `figures/*.png` are the
+**Bridges-2 numbers at this tutorial's `t=1.2` duration** (replacing an
+earlier, shorter `t=0.521` version measured before the final time was
+lengthened for a more clearly-developed shock in the isosurface video
+above). Scaling is again **near-ideal**: 100% efficiency at 2 ranks,
+96% at 4, still 94% at 8 -- consistent with (and if anything slightly
+better than) this same tutorial's own `t=0.521`-era measurement, as
+expected since lengthening the run changes how much total work there
+is, not how well it parallelizes.
 
 The dev laptop's numbers show the same qualitative story the sibling
 tutorial's laptop run did: good scaling up to 4 ranks, then falling off
 at 8 as communication overhead becomes a larger fraction of each rank's
 shrinking local workload (a shared, non-dedicated machine, not a
-dedicated cluster node) -- expected, not a bug. Burgers does more
-per-cell work than scalar advection (minmod slope limiting, a nonlinear
-flux, Rusanov dissipation), so the absolute times are larger at every
-rank count, but the qualitative scaling shape matches. The Bridges-2
-row above is pending re-measurement at this tutorial's new, longer
-final time -- see the sibling tutorial's own README for what the
-dedicated-hardware comparison looked like there.
+dedicated cluster node) -- expected, not a bug, and directly confirmed
+by the cluster numbers above showing that same effect is far smaller on
+real dedicated hardware. Burgers does more per-cell work than scalar
+advection (minmod slope limiting, a nonlinear flux, Rusanov
+dissipation), so the absolute times are larger at every rank count on
+both machines, but the qualitative scaling shape matches.
 
-Bridges-2's per-core single-threaded speed for this workload was
-notably slower than the laptop's (the 1-rank time is ~4x the laptop's,
-not faster as might be naively expected from "it's a supercomputer") --
-a reminder that a cluster's value is in dedicated, numerous, reliably-
-scaling cores, not necessarily a faster single core; the comparison
-that matters is each machine's own speedup curve (the parenthesized
-multipliers above), not raw wall-clock time across different hardware.
+Bridges-2's per-core single-threaded speed for this workload was again
+notably slower than the laptop's (1-rank time ~4.1x the laptop's --
+consistent with the ~4x already observed at the shorter `t=0.521`
+duration, a useful cross-check that this is a genuine, repeatable
+per-core characteristic of this specific workload/hardware pairing, not
+a one-off measurement fluke) -- a reminder that a cluster's value is in
+dedicated, numerous, reliably-scaling cores, not necessarily a faster
+single core; the comparison that matters is each machine's own speedup
+curve (the parenthesized multipliers above), not raw wall-clock time
+across different hardware.
 
 **TVD/boundedness check** (same guarantee every single-rank Burgers
 test in this repo already verifies numerically): the state never
