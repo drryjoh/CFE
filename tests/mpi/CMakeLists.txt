@@ -39,3 +39,15 @@ foreach(np 2 4)
            COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${np} ${MPIEXEC_PREFLAGS}
                    $<TARGET_FILE:cfe_test_mpi_burgers_steepening> ${MPIEXEC_POSTFLAGS})
 endforeach()
+
+# Regression test for the MPI_PROC_NULL ghost-preservation review finding
+# (PR #4): physical-edge ghost cells must survive an exchange untouched,
+# while the neighbor-facing side still updates correctly. Also exercises
+# float precision and multicomponent (N=3) AoS/SoA fields directly, since
+# the physics solver (FvmSolver) only ever instantiates N=1 double fields.
+add_executable(cfe_test_mpi_halo_boundary_physical_edges test_mpi_halo_boundary_physical_edges.cpp)
+target_link_libraries(cfe_test_mpi_halo_boundary_physical_edges PRIVATE cfe_core)
+
+add_test(NAME mpi_halo_boundary_physical_edges_np2
+         COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+                 $<TARGET_FILE:cfe_test_mpi_halo_boundary_physical_edges> ${MPIEXEC_POSTFLAGS})

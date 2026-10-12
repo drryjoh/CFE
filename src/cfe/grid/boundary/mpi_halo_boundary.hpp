@@ -41,11 +41,13 @@
 //   "eventual", not required for a first prototype).
 // - A non-periodic partition's true physical-boundary ranks get a
 //   genuine no-op Sendrecv on that one side -- their corresponding
-//   ghost cells are simply never written by this type and stay at
-//   whatever they were previously (zero, the first time). This type
-//   does not compose with a second boundary condition to give a true
-//   physical edge a real value; only the fully periodic case is
-//   exercised/tested so far.
+//   ghost cells are deliberately left UNWRITTEN by this type on that
+//   side (whatever value was already there -- zero-initialized Field
+//   storage the first time, or a caller-prefilled physical-BC value --
+//   is preserved exactly, never overwritten with stale/zero receive-
+//   buffer contents). This type does not compose with a second boundary
+//   condition to give a true physical edge a real value itself; only
+//   the fully periodic case is exercised/tested so far.
 //
 // Lives in grid/boundary/ (not backend/mpi/), matching every other
 // boundary type's location: the actual MPI plumbing (communicator
@@ -214,6 +216,22 @@ class MpiHaloBoundary
     // Unpack: recv_low_ -> this rank's low ghost cells on axis A
     // (nearest-face-first, matching the pack order above); recv_high_
     // -> this rank's high ghost cells.
+    //
+    // A side with no neighbor (MPI_PROC_NULL, a true non-periodic
+    // physical boundary) makes the corresponding MPI_Sendrecv's receive
+    // a no-op -- recv_low_/recv_high_ on that side is left holding
+    // whatever it held before (zero-initialized the first time, stale
+    // on any later call), never the neighbor's real data. Unconditionally
+    // writing it into the ghost cells would therefore clobber a genuine
+    // physical-boundary value with that stale/zero garbage. Skip the
+    // write entirely on a no-neighbor side instead, so this type leaves
+    // physical ghost cells exactly as whatever filled them before this
+    // call (consistent with this type's own documented "does not compose
+    // with a second boundary condition" limitation above -- it now
+    // genuinely does nothing on that side, rather than actively
+    // overwriting it).
+    const bool skip_low = (left_rank_ == MPI_PROC_NULL);
+    const bool skip_high = (right_rank_ == MPI_PROC_NULL);
     const Scalar* recv_low = recv_low_.data();
     const Scalar* recv_high = recv_high_.data();
     Backend::run(slab_cells, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
@@ -234,9 +252,15 @@ class MpiHaloBoundary
         high_ghost = grid.flat_index(o1, o2, ng + ax_n + g);
       }
 
-      for (std::size_t c = 0; c < N; ++c) {
-        field(low_ghost, c) = recv_low[idx * N + c];
-        field(high_ghost, c) = recv_high[idx * N + c];
+      if (!skip_low) {
+        for (std::size_t c = 0; c < N; ++c) {
+          field(low_ghost, c) = recv_low[idx * N + c];
+        }
+      }
+      if (!skip_high) {
+        for (std::size_t c = 0; c < N; ++c) {
+          field(high_ghost, c) = recv_high[idx * N + c];
+        }
       }
     });
   }

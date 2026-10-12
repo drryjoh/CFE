@@ -16,19 +16,51 @@
 
 #include <mpi.h>
 
+#include <stdexcept>
+#include <string>
+
 namespace cfe {
 namespace backend {
 namespace mpi {
 
-// Calls MPI_Init in its constructor and MPI_Finalize in its destructor.
-// One instance per process, constructed at the top of main() before any
-// other MPI call and destructed (by going out of scope) after the last
-// one -- the standard MPI RAII-bootstrap idiom, so a thrown exception or
-// an early return still finalizes cleanly.
+// Calls MPI_Init_thread in its constructor and MPI_Finalize in its
+// destructor. One instance per process, constructed at the top of
+// main() before any other MPI call and destructed (by going out of
+// scope) after the last one -- the standard MPI RAII-bootstrap idiom, so
+// a thrown exception or an early return still finalizes cleanly.
+//
+// Requests MPI_THREAD_FUNNELED, not plain MPI_Init (whose thread-safety
+// level is implementation-defined and, per the MPI standard, may be as
+// low as MPI_THREAD_SINGLE): this project's CPU backend can be built
+// threaded (`CFE_DEFAULT_BACKEND=threaded`, backend/parallel_for.hpp),
+// in which case `MpiHaloBoundary::exchange`'s own pack/unpack
+// `Backend::run` calls spawn worker threads for the per-cell kernel
+// while this same function's `MPI_Sendrecv` calls are issued directly
+// from the thread that is running `exchange()` itself -- i.e. exactly
+// one thread ever calls into MPI, the same thread that called
+// MPI_Init_thread here, and no MPI call is ever made concurrently with
+// another from a different thread. MPI_THREAD_FUNNELED is the precise,
+// minimal level that describes and permits that usage (not
+// MPI_THREAD_SERIALIZED/MPI_THREAD_MULTIPLE, which would ask for more
+// than this codebase ever needs). If the local MPI implementation
+// cannot provide at least that level, failing loudly here is far
+// preferable to a silent, intermittent data race deep inside a later
+// halo exchange.
 class Environment
 {
  public:
-  Environment(int* argc, char*** argv) { MPI_Init(argc, argv); }
+  Environment(int* argc, char*** argv)
+  {
+    int provided = MPI_THREAD_SINGLE;
+    MPI_Init_thread(argc, argv, MPI_THREAD_FUNNELED, &provided);
+    if (provided < MPI_THREAD_FUNNELED) {
+      throw std::runtime_error(
+          "cfe::backend::mpi::Environment: this MPI implementation only provides thread support level " +
+          std::to_string(provided) + ", but MPI_THREAD_FUNNELED (" + std::to_string(MPI_THREAD_FUNNELED) +
+          ") is required -- CFE's threaded CPU backend relies on being able to call MPI from the "
+          "initializing thread while other threads run per-cell kernels.");
+    }
+  }
 
   Environment(const Environment&) = delete;
   Environment& operator=(const Environment&) = delete;

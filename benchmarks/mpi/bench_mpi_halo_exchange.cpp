@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "cfe/backend/mpi/mpi_environment.hpp"
+#include "cfe/backend/mpi/mpi_reduce.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/boundary/mpi_halo_boundary.hpp"
 #include "cfe/grid/partition/slab_partition.hpp"
@@ -44,11 +45,24 @@ constexpr int kRepetitions = 20;
 
 // Times `kRepetitions` calls to `boundary.fill_x(...)` (after one
 // untimed warm-up call) and returns the median wall-clock time, in
-// seconds, as measured on THIS rank. Each timed call is preceded by an
-// MPI_Barrier so every rank starts together -- a ring of blocking
-// Sendrecv calls' wall time on the slowest rank is what actually matters
-// for scaling, and starting synchronized is what makes repeated
-// measurements comparable across repetitions.
+// seconds. Each timed call is preceded by an MPI_Barrier so every rank
+// starts together -- comparable repeated measurements need a
+// synchronized start.
+//
+// A blocking Sendrecv-based exchange's true cost, as an event every
+// rank must wait through before any of them can move on, is bounded by
+// the SLOWEST participating rank, not by whichever rank happens to be
+// printing the result (rank 0). Measuring only rank 0's own local
+// elapsed time silently reports an optimistic number whenever some
+// other rank is the straggler (a real risk on a shared machine or a
+// busy cluster node) -- so each repetition's elapsed time is
+// MPI_MAX-reduced across every rank BEFORE it is pushed into `seconds`;
+// the reduction itself happens after `t1` is captured, i.e. strictly
+// outside the timed region, so it never inflates the measurement it is
+// correcting. Every rank ends up with the identical (global-max)
+// per-repetition value, so the subsequent median and the bandwidth
+// calculation that uses it are already the cross-rank-correct number on
+// every rank, not just rank 0.
 double time_one_fill_x_median(const cfe::MpiHaloBoundary<Scalar, 1>& boundary, cfe::Field<Scalar, 1>& state,
                                const cfe::CartesianGrid<Scalar>& grid)
 {
@@ -63,7 +77,8 @@ double time_one_fill_x_median(const cfe::MpiHaloBoundary<Scalar, 1>& boundary, c
     const auto t0 = std::chrono::steady_clock::now();
     one_call();
     const auto t1 = std::chrono::steady_clock::now();
-    seconds.push_back(std::chrono::duration<double>(t1 - t0).count());
+    const double local_s = std::chrono::duration<double>(t1 - t0).count();
+    seconds.push_back(cfe::backend::mpi::allreduce_max(local_s));
   }
   std::sort(seconds.begin(), seconds.end());
   return seconds[seconds.size() / 2];

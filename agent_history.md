@@ -3012,3 +3012,151 @@ benchmark sweep, or continue Phase 2 breadth-first into the DG
 communication prototype / state-size-100 sweep / memory-layout study
 -- recommend checking with the PI on which matters most, or getting
 PR #4 reviewed and merged before taking on more new scope.
+
+---
+
+## 2026-10-12 — PR #4 review response: ghost-cell preservation, MPI_Init_thread, benchmark methodology
+
+Agent: Claude Code
+Model: Claude Sonnet 5
+
+Objective:
+Review of PR #4 (commit `9d4162b`, covering tasks 0004-0008) found
+three fixes plus a request to extend MPI correctness coverage. All
+inspected directly against the latest branch before fixing (the branch
+was unchanged since `9d4162b`, matching the reviewed commit exactly),
+fixed, and re-verified with a real local MPI toolchain (Homebrew
+OpenMPI 5.0.11) -- unlike a prior review pass on this PR, which could
+not execute MPI tests at all.
+
+Files changed:
+- `src/cfe/grid/boundary/mpi_halo_boundary.hpp` -- `exchange()`'s unpack
+  step now skips writing a side's ghost cells when that side's neighbor
+  rank is `MPI_PROC_NULL` (a non-periodic domain's true physical edge),
+  instead of unconditionally overwriting them with whatever stale/zero
+  data happened to be sitting in the corresponding (never actually
+  received-into) buffer. Both the file's own header comment and ADR
+  0009 already *described* this no-write behavior as the design intent;
+  the code just didn't implement it. See ADR 0009's new amendment for
+  the full before/after.
+- `src/cfe/backend/mpi/mpi_environment.hpp` -- `Environment` now calls
+  `MPI_Init_thread(argc, argv, MPI_THREAD_FUNNELED, &provided)` instead
+  of plain `MPI_Init`, throwing `std::runtime_error` if `provided <
+  MPI_THREAD_FUNNELED`. Matches this codebase's actual MPI usage (every
+  `MPI_Sendrecv` call happens on the thread that called
+  `MPI_Init_thread`, never a `Backend::run`-spawned worker thread) --
+  not a reaction to an observed failure, a closed gap against an
+  implementation-defined `MPI_Init` thread-safety level that happened
+  not to have bitten yet.
+- `benchmarks/mpi/bench_mpi_halo_exchange.cpp` -- `time_one_fill_x_median`
+  now `MPI_MAX`-reduces each repetition's elapsed time across every rank
+  (reusing `backend::mpi::allreduce_max`, task 0006's own helper)
+  immediately after the timed region closes, before pushing it into the
+  vector the median is taken from -- previously only rank 0's own local
+  time was measured and printed, silently assuming rank 0 is never the
+  slowest participant in a blocking exchange.
+- `tests/mpi/test_mpi_halo_boundary_physical_edges.cpp` (new) --
+  regression test for the ghost-preservation fix: np=2, non-periodic,
+  one axis decomposed at a time (X/Y/Z all covered), every cell
+  prefilled with a distinct sentinel then real cells overwritten with
+  distinct rank/position/component-dependent values; checks the
+  no-neighbor side stays exactly the untouched sentinel while the
+  has-a-neighbor side gets exactly the expected value copied from the
+  neighbor. Also doubles as the "direct halo-value check" coverage for
+  float precision and multicomponent (N=1 and N=3) AoS/SoA fields the
+  review separately asked for, since `FvmSolver` only ever instantiates
+  N=1 double fields and there is no other way to exercise N=3 through a
+  real physics solver -- 24 combinations total
+  ({double,float}x{N=1,N=3}x{AoS,SoA}x{X,Y,Z}) in one binary.
+- `tests/mpi/test_mpi_halo_exchange_3d.cpp` -- extended (not replaced)
+  to also run its existing bit-identical-vs-reference oracle at
+  `kGlobalNUneven=15` (not divisible by 2) at the same 2x2x2 process
+  grid, alongside the original `kGlobalN=16` case, exercising
+  `make_slab_partition`'s remainder-to-the-first-ranks rule under real
+  MPI communication (an uneven 3D partition) rather than only in
+  `test_cartesian_partition.cpp`'s pure-math unit tests.
+- `tests/mpi/CMakeLists.txt` -- registers the new test as
+  `mpi_halo_boundary_physical_edges_np2`.
+- `docs/adr/0009-mpi-domain-decomposition.md` -- new amendment
+  (2026-10-12) documenting all three fixes and their evidence.
+- `docs/type-reference.md` -- updated the `Environment` and
+  `MpiHaloBoundary` entries to describe the corrected behavior.
+- `benchmarks/results/phase2_mpi_halo_exchange_apple_m5.csv` --
+  regenerated at 1/2/4/8 ranks with the corrected (MPI_MAX-reduced)
+  timing methodology.
+
+Tests added:
+1 new regression-test binary (24 combinations in one np=2 run) + 1
+extended existing binary (now 2 global-size cases per np=8 run, was 1)
+-- 7 MPI ctest entries total (up from 6), all passing, plus 102/102 CPU
+unit tests unchanged.
+
+Benchmarks run:
+Full local 1/2/4/8-rank sweep re-run with the corrected benchmark
+(Apple Silicon, Homebrew OpenMPI, `--oversubscribe`) -- CSV regenerated
+and committed. PSC Bridges-2's committed CSV was **not** re-measured
+(no active allocation this round) and still reflects the pre-fix
+rank-0-only methodology; flagged explicitly in the ADR amendment and
+here as a known gap, not silently left looking current.
+
+Performance change:
+N/A for production code (the Burgers/scalar-advection tutorials'
+scaling numbers are unaffected -- `MpiHaloBoundary`'s per-cell behavior
+on the has-a-neighbor side, the only side either tutorial's periodic
+domains ever use, did not change). The halo-exchange benchmark's
+*reported* numbers did change, substantially, at the 2-rank `ranks`
+sweep (21.9us -> 42.3us local): not a regression, a correction -- this
+laptop shares cores across everything else running on it, so "rank 0
+is never the straggler" was a measurably wrong assumption here, not
+just a theoretical one.
+
+Scientific verification:
+Confirmed each of the three fixes has teeth before trusting it:
+(1) sabotage-then-revert on the ghost-preservation fix -- reverted
+`mpi_halo_boundary.hpp` alone via `git stash`, rebuilt, and watched the
+new regression test fail with 192 mismatches (`got=0` where a sentinel
+should have survived) across every axis/precision/N/layout combination
+it covers, then restored the fix and reconfirmed it passing; (2) the
+`MPI_Init_thread` fix was checked against what the local MPI
+implementation actually provides (`provided == MPI_THREAD_FUNNELED`
+exactly, via a standalone one-off probe, not assumed) and the full
+suite was run under *both* `CFE_DEFAULT_BACKEND=serial` and
+`=threaded` with `CFE_ENABLE_MPI=ON` in each -- same 7/7 MPI tests and
+102/102 unit tests pass in both configurations, confirming the switch
+from `MPI_Init` to `MPI_Init_thread(MPI_THREAD_FUNNELED)` changed
+nothing observable (as expected, since no MPI call site moved) while
+now failing loudly instead of silently on an insufficient
+implementation; (3) the benchmark fix's effect was directly observed
+(the ~2x jump in the 2-rank `ranks`-sweep number above), not merely
+asserted to be "more correct" in the abstract. Explicitly executed
+(not merely inspected) in this round: the full CPU unit suite (102/102,
+in three separate build directories -- default non-MPI, MPI+serial,
+MPI+threaded); all 7 MPI ctest entries, at both their registered rank
+counts and the new/extended ones (np=2 for the new regression test,
+np=8 for both global sizes in the extended 3D test); the regenerated
+local benchmark sweep. Not executed (would require a fresh PSC
+Bridges-2 allocation, not available this round): the benchmark's
+Bridges-2 re-measurement, and GPU/CUDA configurations (unchanged from
+every prior entry on this PR -- still explicitly out of scope, see the
+PR body's own warning).
+
+Architecture decisions:
+None new -- all three fixes are corrections to already-decided designs
+(see ADR 0009's new amendment for the detailed before/after of each).
+
+Known limitations:
+Bridges-2's committed benchmark CSV still reflects the pre-fix
+methodology (see "Benchmarks run" above) -- regenerate it next time a
+Bridges-2 allocation is available. Everything else from PR #4's own
+"Known limitations" section (no GPU/CUDA testing, Burgers' bit-identical
+oracle is 1D-only, non-periodic composition still undesigned,
+non-blocking overlap still deferred, no true 3-axis communication-only
+benchmark sweep) is unchanged by this round.
+
+Next recommended task:
+Push these fixes to `cfe/development/phase_0004` and let the reviewer
+re-check. If accepted: a Bridges-2 re-measurement of the corrected
+benchmark, 2D/3D Burgers decomposition re-verification, or continue
+Phase 2 breadth-first (DG communication prototype, state-size-100
+sweep, memory-layout study) -- same options this PR's prior entries
+already named, still open.

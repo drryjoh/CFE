@@ -320,6 +320,109 @@ argument for the fix than a silent-wrong-answer failure mode would have
 been, and is recorded here so a future state-dependent-CFL field (e.g.
 Euler, Phase 3) does not have to rediscover it.
 
+## Amendment 2026-10-12: PR #4 review fixes (ghost preservation, thread support, benchmark methodology)
+
+Three correctness/robustness gaps found during review of PR #4 (the PR
+covering tasks 0004-0008), all fixed on the same branch rather than as
+follow-up tasks since none changed this ADR's actual decisions, only
+tightened their implementation:
+
+**1. `MpiHaloBoundary` was corrupting physical ghost cells, not leaving
+them alone.** This ADR's own "Harder" consequence above, and
+`grid/boundary/mpi_halo_boundary.hpp`'s own header comment even more
+explicitly, describe a non-periodic partition's true physical-boundary
+side as getting "a genuine no-op `Sendrecv`" whose ghost cells are
+"simply never written... and stay at whatever they were previously" --
+that was the *intended* behavior, but the code did not actually
+implement it: the
+unpack step wrote both `recv_low_`/`recv_high_` into the field
+unconditionally, even on a side whose neighbor rank is `MPI_PROC_NULL`.
+A null-source/null-destination `MPI_Sendrecv` leaves its receive buffer
+untouched (not zeroed, not an error -- just stale, whatever that buffer
+held before), so the unconditional write was silently overwriting a
+physical ghost cell with that stale/zero data instead of preserving it.
+Fixed by skipping the write entirely on a no-neighbor side (`exchange()`
+now checks `left_rank_ == MPI_PROC_NULL` / `right_rank_ == MPI_PROC_NULL`
+before each side's unpack loop). The documented limitation itself is
+unchanged (this type still does not compose with a second boundary
+condition to give a physical edge a real value) -- only the
+*implementation* now actually matches what was always documented.
+
+New regression test: `tests/mpi/test_mpi_halo_boundary_physical_edges.cpp`
+(np=2, non-periodic, one axis decomposed at a time, X/Y/Z all covered).
+Prefills every cell (real and ghost) with a distinct sentinel, then real
+cells with distinct rank/position/component-dependent values, and checks
+directly: the no-neighbor side's ghost cells are exactly the untouched
+sentinel; the has-a-neighbor side's ghost cells exactly match the
+neighbor's real data. Confirmed via sabotage-then-revert (reverting the
+fix locally and re-running) that this test fails -- loudly, 192
+mismatches across every axis/precision/N/layout combination it covers --
+against the pre-fix code, then passes again once the fix is restored.
+
+**2. `Environment` used plain `MPI_Init`, unsafe to pair with the
+threaded CPU backend.** `MPI_Init`'s thread-safety level is
+implementation-defined by the MPI standard and can be as low as
+`MPI_THREAD_SINGLE`. This project's CPU backend can be built threaded
+(`CFE_DEFAULT_BACKEND=threaded`), in which case `MpiHaloBoundary::
+exchange`'s pack/unpack `Backend::run` calls spawn worker threads for
+the per-cell kernel while the same function's `MPI_Sendrecv` calls are
+issued directly from whichever thread is running `exchange()` itself --
+always the one thread that called `MPI_Init`/`MPI_Init_thread`, never a
+worker thread. `MpiHaloBoundary` never made an MPI call from a worker
+thread to begin with, so this was not an active bug reproduced by any
+test here, but relying on an unspecified thread-safety level to happen
+to be sufficient was the real risk being closed, not a symptom being
+chased. Fixed: `Environment` now calls `MPI_Init_thread(argc, argv,
+MPI_THREAD_FUNNELED, &provided)`, and throws `std::runtime_error` if
+`provided < MPI_THREAD_FUNNELED`. `MPI_THREAD_FUNNELED` (not
+`SERIALIZED`/`MULTIPLE`) is the precise, minimal level matching this
+codebase's actual usage -- asking for more would be requesting a
+guarantee nothing here needs.
+
+**Evidence**: the full `ctest` suite (102/102 CPU unit tests plus all 7
+MPI tests, including the new regression test above) passes unchanged
+under both `CFE_DEFAULT_BACKEND=serial` and `=threaded`, `CFE_ENABLE_MPI=
+ON` in both cases -- confirming `MPI_Init_thread(MPI_THREAD_FUNNELED)`
+does not change observed behavior (as expected, since no MPI call
+location changed) while now failing loudly instead of silently if a
+future MPI implementation could not provide it. Separately confirmed
+(ad hoc, not part of the committed suite) that the local Homebrew
+OpenMPI 5.0.11 build used for all of this repo's local MPI verification
+provides *exactly* `MPI_THREAD_FUNNELED` when asked -- the precise
+minimum this fix requires, not more.
+
+**3. The halo-exchange benchmark measured rank 0's own local time, not
+the slowest rank's.** `benchmarks/mpi/bench_mpi_halo_exchange.cpp`'s
+`time_one_fill_x_median` looped over `kRepetitions` timed calls,
+pushing each rank's *own* elapsed time into a local `std::vector`, then
+took the median of that -- but only rank 0's own vector was ever
+printed. A blocking `Sendrecv`-based exchange cannot finish, from any
+rank's point of view, before its slowest partner does; reporting
+rank 0's own time silently assumes rank 0 is never the straggler, which
+is not generally true (a shared/oversubscribed machine, or an uneven
+cluster node, can make any rank the slow one on a given repetition).
+Fixed by reducing each repetition's elapsed time across all ranks with
+`MPI_MAX` (reusing `backend::mpi::allreduce_max`, the same helper task
+0006 added for Burgers' CFL fix) immediately after the timed region
+closes -- so the reduction call itself is never included in what it is
+measuring -- before pushing the (now identical-on-every-rank) value into
+the vector the median is taken from. The bandwidth calculation, which
+already used `median_s`, is corrected for free.
+
+**Evidence**: re-ran the full local (Apple Silicon, Homebrew OpenMPI,
+`--oversubscribe`) 1/2/4/8-rank sweep with the corrected benchmark
+(`benchmarks/results/phase2_mpi_halo_exchange_apple_m5.csv`, replacing
+the pre-fix numbers). The correction is not cosmetic: at 2 ranks, the
+`ranks` sweep's reported exchange time roughly doubled (21.9us -> 42.3us)
+-- this laptop shares cores across everything else running on it, so
+rank-0-never-the-straggler was a measurably wrong assumption here, not
+just a theoretical one. The committed Bridges-2 CSV
+(`phase2_mpi_halo_exchange_bridges2_rm_shared_cpu.csv`) was **not**
+re-measured in this round (no active Bridges-2 allocation at review
+time) and still reflects the pre-fix rank-0-only methodology -- flagged
+as a known gap until that hardware is available again, not silently
+left looking current.
+
 ## Revisit criteria
 
 - ~~Revisit decomposition granularity when a 2D/3D block-decomposition
