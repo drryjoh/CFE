@@ -210,6 +210,11 @@ Acceptance:
 - lightweight Cartesian AMR;
 - implicit source integration;
 - broader MPI scaling;
+- dynamic load balancing / partition redistribution (follow-on to
+  lightweight Cartesian AMR + broader MPI scaling above -- AMR creates
+  per-rank work imbalance that the current static, geometry-only
+  decomposition (`SlabPartition`/`CartesianPartition`, chosen once at
+  launch and never revisited) has no mechanism to correct);
 - ML inference experiments;
 - machine-configuration abstraction: a per-cluster `cfe_machine.yaml`
   (compiler paths, module names/versions, GPU architecture flags) read at

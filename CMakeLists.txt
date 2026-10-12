@@ -57,6 +57,29 @@ if(CFE_ENABLE_CUDA)
   endif()
 endif()
 
+# MPI is opt-in but auto-detected, same shape as CUDA above (see ADR 0009):
+# a plain CPU-only build must not fail just because no MPI implementation
+# happens to be installed.
+option(CFE_ENABLE_MPI "Build the MPI domain-decomposition backend" OFF)
+
+find_package(MPI COMPONENTS CXX)
+if(NOT MPI_FOUND)
+  if(CFE_ENABLE_MPI)
+    # CFE_ENABLE_MPI was explicitly requested, not left at its default OFF
+    # -- silently downgrading that to a non-MPI build would hide a real
+    # configuration problem (missing/broken MPI installation) behind a
+    # build that looks successful but is missing the backend the user
+    # asked for.
+    message(FATAL_ERROR
+      "CFE_ENABLE_MPI=ON was explicitly requested but find_package(MPI) did "
+      "not find an MPI installation (no mpicc/mpicxx discoverable). "
+      "Install/configure an MPI implementation (OpenMPI, MPICH, Cray MPICH) "
+      "so it is on PATH, or omit -DCFE_ENABLE_MPI=ON to build without the "
+      "MPI backend.")
+  endif()
+  set(CFE_ENABLE_MPI OFF CACHE BOOL "Build the MPI domain-decomposition backend" FORCE)
+endif()
+
 find_package(Threads REQUIRED)
 
 # --- Core library (header-only) ---------------------------------------------
@@ -81,6 +104,11 @@ endif()
 
 if(CFE_ENABLE_CUDA)
   target_compile_definitions(cfe_core INTERFACE CFE_ENABLE_CUDA)
+endif()
+
+if(CFE_ENABLE_MPI)
+  target_compile_definitions(cfe_core INTERFACE CFE_ENABLE_MPI)
+  target_link_libraries(cfe_core INTERFACE MPI::MPI_CXX)
 endif()
 
 # Reasonable warnings-as-signal (not warnings-as-errors: Phase 0 favors fast
