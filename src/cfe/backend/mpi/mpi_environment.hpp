@@ -27,7 +27,12 @@ namespace mpi {
 // destructor. One instance per process, constructed at the top of
 // main() before any other MPI call and destructed (by going out of
 // scope) after the last one -- the standard MPI RAII-bootstrap idiom, so
-// a thrown exception or an early return still finalizes cleanly.
+// an exception thrown AFTER construction succeeds, or an early return,
+// still finalizes cleanly via the destructor. A failure detected inside
+// the constructor itself is a separate case the destructor cannot cover
+// (a throwing constructor means the object never finishes construction,
+// so its destructor never runs) -- see the explicit MPI_Finalize() call
+// on the insufficient-thread-support path below.
 //
 // Requests MPI_THREAD_FUNNELED, not plain MPI_Init (whose thread-safety
 // level is implementation-defined and, per the MPI standard, may be as
@@ -54,6 +59,16 @@ class Environment
     int provided = MPI_THREAD_SINGLE;
     MPI_Init_thread(argc, argv, MPI_THREAD_FUNNELED, &provided);
     if (provided < MPI_THREAD_FUNNELED) {
+      // A constructor that throws never finishes construction, so
+      // ~Environment() -- which is what would normally call
+      // MPI_Finalize() -- never runs for this object. MPI_Init_thread
+      // above already succeeded (just with an insufficient thread
+      // level), so without this explicit call MPI would be left
+      // permanently initialized-but-unfinalized on the way out, which
+      // most MPI implementations treat as an error on process exit
+      // (e.g. a hang or an abort message) regardless of whether this
+      // exception is ever caught.
+      MPI_Finalize();
       throw std::runtime_error(
           "cfe::backend::mpi::Environment: this MPI implementation only provides thread support level " +
           std::to_string(provided) + ", but MPI_THREAD_FUNNELED (" + std::to_string(MPI_THREAD_FUNNELED) +

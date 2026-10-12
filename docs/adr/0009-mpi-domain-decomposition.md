@@ -379,6 +379,22 @@ MPI_THREAD_FUNNELED, &provided)`, and throws `std::runtime_error` if
 codebase's actual usage -- asking for more would be requesting a
 guarantee nothing here needs.
 
+**Follow-up fix (same day, caught in review of this amendment):** the
+first version of this fix threw its `std::runtime_error` without first
+calling `MPI_Finalize()`. A constructor that throws never finishes
+construction, so `~Environment()` -- the only place `MPI_Finalize()`
+was otherwise called -- never runs for that object; `MPI_Init_thread`
+above had already succeeded (just with an insufficient level), so the
+process would have exited with MPI permanently initialized-but-
+unfinalized, which most MPI implementations treat as an error on exit
+regardless of whether the exception is ever caught. Fixed by calling
+`MPI_Finalize()` explicitly, immediately before the `throw`, on that one
+path. Verified directly: a standalone harness reproducing the exact
+init-then-finalize-then-throw sequence confirms `MPI_Finalized()`
+returns true once the exception is caught, proving finalize genuinely
+runs before the throw unwinds (not merely asserted from reading the
+code).
+
 **Evidence**: the full `ctest` suite (102/102 CPU unit tests plus all 7
 MPI tests, including the new regression test above) passes unchanged
 under both `CFE_DEFAULT_BACKEND=serial` and `=threaded`, `CFE_ENABLE_MPI=
@@ -389,7 +405,10 @@ future MPI implementation could not provide it. Separately confirmed
 (ad hoc, not part of the committed suite) that the local Homebrew
 OpenMPI 5.0.11 build used for all of this repo's local MPI verification
 provides *exactly* `MPI_THREAD_FUNNELED` when asked -- the precise
-minimum this fix requires, not more.
+minimum this fix requires, not more -- so the insufficient-support
+throw path itself could not be exercised through the real `Environment`
+type locally; it was verified in isolation instead (see the follow-up
+fix above).
 
 **3. The halo-exchange benchmark measured rank 0's own local time, not
 the slowest rank's.** `benchmarks/mpi/bench_mpi_halo_exchange.cpp`'s

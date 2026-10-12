@@ -3160,3 +3160,23 @@ benchmark, 2D/3D Burgers decomposition re-verification, or continue
 Phase 2 breadth-first (DG communication prototype, state-size-100
 sweep, memory-layout study) -- same options this PR's prior entries
 already named, still open.
+
+**Follow-up (same day): `Environment`'s failure path leaked an
+unfinalized MPI.** Caught after pushing the above: the insufficient-
+thread-support `throw` ran without first calling `MPI_Finalize()`. A
+throwing constructor never finishes construction, so `~Environment()`
+-- the only place `MPI_Finalize()` was otherwise called -- never runs
+for that object; `MPI_Init_thread` had already succeeded by that point
+(just with an insufficient level), so the process would exit with MPI
+permanently initialized-but-unfinalized, which most MPI implementations
+treat as an error on exit regardless of whether the exception is caught.
+Fixed by calling `MPI_Finalize()` explicitly, immediately before the
+`throw`, on that one path (`src/cfe/backend/mpi/mpi_environment.hpp`).
+Verified directly, not just read as obviously correct: a standalone
+harness reproducing the same init-then-finalize-then-throw sequence
+confirms `MPI_Finalized()` returns true once the exception is caught.
+Full `ctest` suite (102/102 unit + 7/7 MPI) re-run and still green
+(this path isn't exercised by any committed test -- the local OpenMPI
+build provides exactly `MPI_THREAD_FUNNELED`, never less -- so the
+standalone harness is this fix's only direct verification). ADR 0009's
+amendment updated with the same detail.
