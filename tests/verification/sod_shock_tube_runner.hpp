@@ -14,6 +14,14 @@
 // test runs it at a fixed `double` for oracle-comparison precision --
 // the same split every other dual-precision-aware file in this codebase
 // uses.
+//
+// Also templated on `NumericalFlux` (default `cfe::RusanovFlux`, every
+// existing call site unaffected) so task 0011's HLLC re-verification
+// (tests/verification/test_euler_sod_shock_tube_hllc.cpp) reuses this
+// SAME driver with `cfe::HllcFlux` instead of a second, duplicated
+// simulation setup -- the same "one driver, shared by every caller"
+// shape this file's own header already established between the test and
+// the tutorial.
 #pragma once
 
 #include <array>
@@ -46,6 +54,31 @@ struct SodProfile
   double total_mass_final, total_momentum_final, total_energy_final;
 };
 
+// Number of cells spanned crossing from 5% to 95% of the density jump
+// across a known discontinuity location (typically the contact) --
+// shared (Snorlax review finding: originally duplicated verbatim between
+// test_euler_sod_shock_tube_hllc.cpp and the tutorial) by every caller
+// wanting to quantify how much a scheme has numerically smeared a
+// discontinuity, given the discontinuity's own exact location and the
+// exact plateau densities on either side of it.
+template <class Scalar>
+std::size_t contact_width_cells(const SodProfile<Scalar>& profile, double x_contact, double rho_plateau_left,
+                                 double rho_plateau_right)
+{
+  const double dx = static_cast<double>(profile.x[1]) - static_cast<double>(profile.x[0]);
+  const std::size_t center =
+      static_cast<std::size_t>(std::lround((x_contact - static_cast<double>(profile.x[0])) / dx));
+
+  const double lo = rho_plateau_right + 0.05 * (rho_plateau_left - rho_plateau_right);
+  const double hi = rho_plateau_right + 0.95 * (rho_plateau_left - rho_plateau_right);
+
+  std::size_t left_edge = center;
+  while (left_edge > 0 && static_cast<double>(profile.rho[left_edge]) < hi) --left_edge;
+  std::size_t right_edge = center;
+  while (right_edge + 1 < profile.rho.size() && static_cast<double>(profile.rho[right_edge]) > lo) ++right_edge;
+  return right_edge - left_edge;
+}
+
 // Runs the Sod tube (classic diaphragm-at-x0 setup) on an `nx`-cell
 // grid from `t=0` to `t_final`, with both ends held at their own
 // far-field primitive state (`StaticBoundary`) -- valid whenever
@@ -56,7 +89,7 @@ struct SodProfile
 // timestep recomputed every step from the CURRENT field's own max wave
 // speed (not a fixed a priori bound), since the maximum signal speed
 // changes as the shock/rarefaction form.
-template <class Scalar>
+template <class Scalar, class NumericalFlux = cfe::RusanovFlux>
 SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const PrimitiveState& left,
                                        const PrimitiveState& right, Scalar x0, Scalar t_final, Scalar cfl)
 {
@@ -86,7 +119,7 @@ SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const Primit
   cfe::StaticBoundary<Scalar, 3> boundary{left_q, right_q};
   cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::EulerField<Scalar, 1>, cfe::StaticBoundary<Scalar, 3>,
                  cfe::StaticBoundary<Scalar, 3>, cfe::StaticBoundary<Scalar, 3>,
-                 cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>
+                 cfe::fvm::MusclMinmodReconstruction, NumericalFlux>
       solver{grid, field, boundary};
   auto residual = [&](cfe::FieldView<Scalar, 3> in, cfe::FieldView<Scalar, 3> out) {
     solver.residual(in, out);

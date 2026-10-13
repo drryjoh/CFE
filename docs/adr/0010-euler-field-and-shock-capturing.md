@@ -276,22 +276,16 @@ N>1 branches -- a reader needs to know which applies to the Field they
 care about (mitigated by the branches being clearly separated and
 individually simple).
 
-**Future constraint:** HLLC (or AUSM-family) remains open against
-ROADMAP.md Phase 3's "Rusanov and/or HLLC" acceptance text -- Rusanov
-alone satisfies the user's own task description ("Rusanov and/or
-HLLC") for this slice, but a sharper contact-resolving flux is still
-worth adding before the forward-step follow-on, whose own benchmark
-depends on a trailing contact discontinuity's behavior (Woodward &
-Colella's own "mild KH waviness at finer resolution" qualitative check).
-Characteristic reconstruction remains open per Decision 1's revisit
-criterion. The characteristic-based subsonic partial-specification
-inflow/outflow BC (ARCHITECTURE.md #11 case (a)) remains unimplemented.
+**Future constraint:** HLLC has since been added (task 0011, ADR 0012)
+-- ROADMAP.md Phase 3's "Rusanov and/or HLLC" acceptance text is now
+satisfied by both, not Rusanov alone. Characteristic reconstruction
+remains open per Decision 1's revisit criterion. The characteristic-based
+subsonic partial-specification inflow/outflow BC (ARCHITECTURE.md #11
+case (a)) remains unimplemented.
 
 ## Revisit criteria
 
 - A canonical case showing componentwise reconstruction producing
   visible spurious oscillation at a strong multi-wave interaction.
-- A case needing a sharper contact discontinuity than Rusanov can
-  provide (motivates HLLC).
 - A case needing a genuinely subsonic boundary (motivates the
   characteristic-based partial-specification BC).

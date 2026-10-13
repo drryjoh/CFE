@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Renders figures for the forward-facing-step benchmark (task 0010)
-from the VTK snapshots `forward_step_2d` writes under data/res*/.
+from the VTK snapshots `forward_step_2d` writes under data/res*_<flux>/.
 
 Usage:
     python3 -m venv .venv && source .venv/bin/activate
@@ -9,15 +9,29 @@ Usage:
 
 Writes figures/ under this directory:
   - density_t{0,1,2,4}.png     : density field at several times, finest
-                                 resolution (res80) -- bow shock, growing
-                                 Mach stem, trailing contact.
+                                 resolution (res80, Rusanov) -- bow
+                                 shock, growing Mach stem, trailing
+                                 contact.
   - schlieren_t{1,2,4}.png     : |grad(density)| proxy ("numerical
-                                 schlieren"), finest resolution -- makes
-                                 the shock/contact structure much more
-                                 visible than raw density alone.
-  - resolution_comparison.png : density at t~4 across all three
-                                 resolutions, for the convergence-
-                                 illustration qualitative check.
+                                 schlieren"), finest resolution
+                                 (Rusanov) -- makes the shock/contact
+                                 structure much more visible than raw
+                                 density alone.
+  - resolution_comparison.png : density at t~4 across all seven
+                                 resolutions (Rusanov), for the
+                                 convergence-illustration qualitative
+                                 check.
+  - contact_kh_detail.png     : zoomed trailing-contact schlieren,
+                                 Rusanov, res80 vs res288.
+
+Task 0011 (docs/adr/0012-hllc-numerical-flux.md) re-ran the whole sweep
+with HLLC (data/res*_hllc/) specifically to check for the paper's
+"mild waviness" Kelvin-Helmholtz signature on the trailing contact,
+which Rusanov showed no trace of at any resolution -- adds:
+  - contact_kh_rusanov_vs_hllc.png : zoomed trailing-contact schlieren,
+                                 Rusanov vs HLLC, at res80 AND res288 --
+                                 the direct comparison this task exists
+                                 to produce.
 """
 import glob
 import os
@@ -152,8 +166,12 @@ def frame_times(res_dir, snapshot_dt=0.1):
     return n_frames, [i * snapshot_dt for i in range(n_frames)]
 
 
+def res_dir_for(res, flux):
+    return os.path.join(DATA, f"res{res}_{flux}")
+
+
 def main():
-    res_dir_80 = os.path.join(DATA, "res80")
+    res_dir_80 = res_dir_for(80, "rusanov")
     n_frames, times = frame_times(res_dir_80)
     print(f"res80: {n_frames} frames, t up to {times[-1]:.2f}")
 
@@ -190,7 +208,7 @@ def main():
     resolutions = [20, 40, 80, 96, 144, 216, 288]
     fig, axes = plt.subplots(len(resolutions), 1, figsize=(9, 13), sharex=True)
     for ax, res in zip(axes, resolutions):
-        res_dir = os.path.join(DATA, f"res{res}")
+        res_dir = res_dir_for(res, "rusanov")
         nf, ts = frame_times(res_dir)
         idx = nf - 1
         b1, b2 = load_frame(res_dir, idx, "density")
@@ -208,9 +226,11 @@ def main():
     # Specifically looking for Kelvin-Helmholtz rollup on the slip line,
     # which the README describes as only "mild waviness, not dramatic
     # rollup" at res80 -- check whether finer resolution reveals more.
+    # Rusanov only (original task 0010 figure, unchanged) -- see the
+    # Rusanov-vs-HLLC comparison figure below for task 0011's own check.
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
     for ax, res in zip(axes, [80, 288]):
-        res_dir = os.path.join(DATA, f"res{res}")
+        res_dir = res_dir_for(res, "rusanov")
         nf, ts = frame_times(res_dir)
         idx = nf - 1
         (f1, o1, s1), (f2, o2, s2) = load_frame(res_dir, idx, "density")
@@ -221,10 +241,43 @@ def main():
         ax.set_title(f"res{res}")
         ax.set_xlabel("x")
     axes[0].set_ylabel("y")
-    fig.suptitle(f"Trailing contact discontinuity, zoomed, t={ts[idx]:.2f} -- res80 vs res288")
+    fig.suptitle(f"Trailing contact discontinuity, zoomed, t={ts[idx]:.2f} -- res80 vs res288 (Rusanov)")
     fig.savefig(os.path.join(FIGURES, "contact_kh_detail.png"), dpi=140, bbox_inches="tight")
     plt.close(fig)
     print("wrote figures/contact_kh_detail.png")
+
+    # --- Rusanov vs. HLLC, same zoom, same resolutions (task 0011) ---------
+    # The direct comparison this task exists to produce: does switching to
+    # HLLC (sharper contact resolution, per the Sod-tube evidence) reveal
+    # the paper's "mild waviness... visible at times 2.5 and 3" that
+    # Rusanov shows no trace of at any resolution?
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
+    vmax_global = None
+    panels = []
+    for row, flux in enumerate(["rusanov", "hllc"]):
+        for col, res in enumerate([80, 288]):
+            res_dir = res_dir_for(res, flux)
+            nf, ts = frame_times(res_dir)
+            idx = nf - 1
+            (f1, o1, s1), (f2, o2, s2) = load_frame(res_dir, idx, "density")
+            g1, g2 = schlieren_proxy_two_blocks((f1, o1, s1), (f2, o2, s2))
+            panels.append((row, col, flux, res, (g1, o1, s1), (g2, o2, s2), ts[idx]))
+            if vmax_global is None:
+                vmax_global = np.percentile(g1, 99)
+    for row, col, flux, res, b1g, b2g, t_last in panels:
+        ax = axes[row, col]
+        im = plot_two_blocks(ax, b1g, b2g, cmap="gray_r", vmin=0, vmax=vmax_global)
+        ax.set_xlim(1.0, 2.2)
+        ax.set_ylim(0.1, 0.7)
+        ax.set_title(f"{flux}, res{res}")
+        if row == 1:
+            ax.set_xlabel("x")
+        if col == 0:
+            ax.set_ylabel("y")
+    fig.suptitle(f"Trailing contact discontinuity: Rusanov vs. HLLC, t={t_last:.2f} (task 0011)")
+    fig.savefig(os.path.join(FIGURES, "contact_kh_rusanov_vs_hllc.png"), dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote figures/contact_kh_rusanov_vs_hllc.png")
 
 
 if __name__ == "__main__":

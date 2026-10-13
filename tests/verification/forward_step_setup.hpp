@@ -87,7 +87,13 @@
 
 namespace cfe_verification {
 
-template <class Scalar, std::size_t Dim>
+// Templated on `NumericalFlux` (default `cfe::RusanovFlux`, every
+// existing call site unaffected) so task 0011's forward-step Kelvin-
+// Helmholtz re-check with HLLC (tutorials/euler_2d_forward_step/) reuses
+// this SAME two-block driver with `cfe::HllcFlux` instead of a second,
+// duplicated assembly -- the same reasoning sod_shock_tube_runner.hpp's
+// own `NumericalFlux` template parameter follows.
+template <class Scalar, std::size_t Dim, class NumericalFlux = cfe::RusanovFlux>
 struct ForwardStepBlocks
 {
   using Field = cfe::EulerField<Scalar, Dim>;
@@ -115,9 +121,9 @@ struct ForwardStepBlocks
   using BoundaryX2 = cfe::BlockInterfaceBoundary<Scalar, Field, cfe::Side::Low>;
 
   using Solver1 = cfe::FvmSolver<Scalar, cfe::AoSLayout, Field, BoundaryX1, BoundaryY, BoundaryZ,
-                                  cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>;
+                                  cfe::fvm::MusclMinmodReconstruction, NumericalFlux>;
   using Solver2 = cfe::FvmSolver<Scalar, cfe::AoSLayout, Field, BoundaryX2, BoundaryY, BoundaryZ,
-                                  cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>;
+                                  cfe::fvm::MusclMinmodReconstruction, NumericalFlux>;
 
   static constexpr Scalar kGamma = Scalar(1.4);
   static constexpr Scalar kTunnelHeight = Scalar(1.0);
