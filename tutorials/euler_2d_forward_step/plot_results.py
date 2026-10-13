@@ -251,6 +251,12 @@ def main():
     # HLLC (sharper contact resolution, per the Sod-tube evidence) reveal
     # the paper's "mild waviness... visible at times 2.5 and 3" that
     # Rusanov shows no trace of at any resolution?
+    #
+    # vmax is computed from BLOCK 2's own gradient at a moderate (75th)
+    # percentile, not the original figure's `np.percentile(g1, 99)` --
+    # the bow shock (always the single largest gradient in the domain)
+    # otherwise dominates the color scale and washes out the much
+    # weaker trailing-contact structure this figure exists to show.
     fig, axes = plt.subplots(2, 2, figsize=(12, 10), sharex=True, sharey=True)
     vmax_global = None
     panels = []
@@ -263,12 +269,12 @@ def main():
             g1, g2 = schlieren_proxy_two_blocks((f1, o1, s1), (f2, o2, s2))
             panels.append((row, col, flux, res, (g1, o1, s1), (g2, o2, s2), ts[idx]))
             if vmax_global is None:
-                vmax_global = np.percentile(g1, 99)
+                vmax_global = np.percentile(g2, 90)
     for row, col, flux, res, b1g, b2g, t_last in panels:
         ax = axes[row, col]
         im = plot_two_blocks(ax, b1g, b2g, cmap="gray_r", vmin=0, vmax=vmax_global)
-        ax.set_xlim(1.0, 2.2)
-        ax.set_ylim(0.1, 0.7)
+        ax.set_xlim(0.9, 2.4)
+        ax.set_ylim(0.15, 0.45)
         ax.set_title(f"{flux}, res{res}")
         if row == 1:
             ax.set_xlabel("x")
@@ -278,6 +284,35 @@ def main():
     fig.savefig(os.path.join(FIGURES, "contact_kh_rusanov_vs_hllc.png"), dpi=140, bbox_inches="tight")
     plt.close(fig)
     print("wrote figures/contact_kh_rusanov_vs_hllc.png")
+
+    # --- HLLC time evolution at the paper's own named times -----------------
+    # Woodward & Colella report the mild KH "water-wave" instability
+    # "visible at times 2.5 and 3" -- show the HLLC trailing-contact
+    # region at exactly those times (plus 1.5/2.0 for before/onset
+    # context and 4.0 for the final state), at the finest resolution
+    # (res288), to let a reader see the SAME growth-over-time signature
+    # directly rather than only a single final-time snapshot.
+    res_dir_288_hllc = res_dir_for(288, "hllc")
+    nf288, ts288 = frame_times(res_dir_288_hllc)
+    target_times = [1.5, 2.0, 2.5, 3.0, 4.0]
+    fig, axes = plt.subplots(len(target_times), 1, figsize=(12, 15), sharex=True)
+    vmax_time = None
+    for ax, tt in zip(axes, target_times):
+        idx = min(range(nf288), key=lambda i: abs(ts288[i] - tt))
+        (f1, o1, s1), (f2, o2, s2) = load_frame(res_dir_288_hllc, idx, "density")
+        g1, g2 = schlieren_proxy_two_blocks((f1, o1, s1), (f2, o2, s2))
+        if vmax_time is None:
+            vmax_time = np.percentile(g2, 90)
+        im = plot_two_blocks(ax, (g1, o1, s1), (g2, o2, s2), cmap="gray_r", vmin=0, vmax=vmax_time)
+        ax.set_xlim(0.9, 2.4)
+        ax.set_ylim(0.15, 0.45)
+        ax.set_title(f"HLLC res288, t={ts288[idx]:.2f}")
+        ax.set_ylabel("y")
+    axes[-1].set_xlabel("x")
+    fig.suptitle("HLLC trailing-contact instability: growth over time (res288)")
+    fig.savefig(os.path.join(FIGURES, "contact_kh_hllc_time_evolution.png"), dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote figures/contact_kh_hllc_time_evolution.png")
 
 
 if __name__ == "__main__":

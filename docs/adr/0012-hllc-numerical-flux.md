@@ -365,6 +365,49 @@ introduced was NOT sufficient to catch it; the new regression test
 closes that specific gap but does not guarantee no OTHER 2D/3D-only
 failure mode remains uncaught.
 
+## Decision 4: the forward-step Kelvin-Helmholtz result, and a confirmed componentwise-reconstruction artifact
+
+With Decisions 2/2b/2c's robustness fixes in place, the full
+forward-step resolution sweep (20-288 cells-per-unit-height) was re-run
+with HLLC and compared directly against the existing Rusanov dataset at
+every resolution, same grid, same IC/BCs, same MUSCL reconstruction.
+Full qualitative result and figures: `tutorials/euler_2d_forward_step/
+README.md`'s "Looking for Kelvin-Helmholtz rollup" section. Summary:
+
+- **HLLC's trailing contact line develops a wavy, repeatedly-crossing
+  structure that Rusanov never shows at any resolution tested**,
+  growing in complexity over time with onset timing (visible by
+  t=2.5-3) matching Woodward & Colella's own reported timing for the
+  "mild Kelvin-Helmholtz instability ('water-wave'/'flag-waving')"
+  almost exactly. This is a genuine, reproduced positive result for the
+  user's original motivating question -- the first task in this
+  session's forward-step work to show ANY trace of this feature.
+- **A second, separate, confirmed finding (not the KH result itself):**
+  at the bow-shock/Mach-stem triple point specifically -- a strong 2D
+  multi-wave interaction -- HLLC's combination of low dissipation with
+  componentwise (not characteristic) MUSCL reconstruction produces a
+  real, bounded density overshoot (measured at res80: HLLC peak density
+  ~7.1 vs. Rusanov's own ~6.3 at the same place/time; HLLC's minimum
+  also undershoots Rusanov's). Finite, not NaN, and not conservation-
+  violating (`final_mass` stays close to Rusanov's own at every
+  resolution) -- but a real, visible local artifact distinct from the
+  physical shock structure. This is **ADR 0010 Decision 1's own named
+  revisit criterion, now directly confirmed by reproducible evidence**
+  ("a future canonical case... showing componentwise reconstruction
+  producing visible spurious oscillation at a strong multi-wave
+  interaction would justify adding characteristic reconstruction") --
+  not fixed in this task (characteristic reconstruction is explicitly
+  out of scope here; see that ADR's own Decision 1).
+
+**These two findings are logically separate, not the same phenomenon
+wearing two names** -- the overshoot sits at the triple point itself;
+the KH waviness is observed on the trailing contact line downstream of
+it, growing over time rather than being a static artifact. Both stem
+from the same root enabler (HLLC's lower dissipation relative to
+Rusanov), but one is a wanted result (the KH finding) and the other is
+an unwanted, already-anticipated side effect (the overshoot) -- reported
+together here for completeness, not conflated.
+
 ## Revisit criteria
 
 - A future case whose strongest shock exceeds what 5 Newton iterations
@@ -399,10 +442,12 @@ failure mode remains uncaught.
   (pressure ratio 10/100/1000/10000, iterations-to-double-precision from
   the ANRS seed) would turn this into a characterized margin rather than
   "5 worked for the one case found so far."
-- The forward-step Kelvin-Helmholtz result itself (see that tutorial's
-  README.md): if HLLC alone does not reproduce the paper's mild
-  waviness, this motivates pulling PPM forward per Amelia's own
-  conditional recommendation (`tasks/0011-...md`).
+- **Resolved, not open:** the forward-step Kelvin-Helmholtz question
+  that motivated pulling PPM forward conditionally (Amelia's
+  recommendation, `tasks/0011-...md`) is now answered -- HLLC alone DID
+  reproduce the paper's mild waviness (Decision 4), so that specific
+  trigger for pulling PPM forward does not fire. PPM remains properly
+  scoped to Phase 5 unless a DIFFERENT, new need arises.
 - Real CUDA hardware access to complete the still-outstanding 3D
   CUDA-correctness/at-scale-benchmark requirement for `HllcFlux`
   specifically (tracked in `agent_history.md`).
