@@ -54,30 +54,57 @@ struct IdentityIndexMap
   std::size_t operator()(std::size_t r) const { return r; }
 };
 
-// `stage1` and `residual_scratch` are caller-provided scratch storage,
-// the same (full, padded if applicable) shape as `state`, reused across
-// calls -- never allocated here (AGENTS.md #10: no allocation inside a
-// per-timestep hot path). `n_active` is how many cells `index_map`
-// actually names (e.g. `grid.nx*grid.ny*grid.nz` for a Cartesian grid,
-// `state.n_cells()` for a plain no-ghost caller).
-template <class Scalar, class FieldViewT, class Residual, class Backend = CpuParallelFor,
-          class IndexMap = IdentityIndexMap>
-void ssp_rk2_step(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
-                   Residual residual, std::size_t n_active, IndexMap index_map = IndexMap{})
+// The two combine steps below are each pulled out as their own public,
+// Backend-generic functions -- not just inlined inside `ssp_rk2_step` --
+// specifically so a caller that cannot use `ssp_rk2_step` directly can
+// still reuse this exact, tested formula instead of re-deriving/
+// duplicating it. This is a real need, not speculative: a same-process
+// MULTI-solver coupling (e.g. two `CartesianGrid` blocks joined by a
+// cross-block `BoundaryCondition`, see
+// `grid/boundary/block_interface_boundary.hpp` and
+// `tests/verification/forward_step_setup.hpp`) must re-point each
+// solver's cross-block ghost read at the OTHER solver's stage-1 buffer
+// in between stage 1 and stage 2 -- something that has to happen
+// between `ssp_rk2_step`'s own two internal `residual()` calls, which
+// its own signature has no hook for. `tests/verification/
+// forward_step_setup.hpp`'s `ForwardStepBlocks::step()` calls these two
+// functions directly, once per block, interleaved with that
+// re-pointing, instead of duplicating their formulas itself.
+//
+// `stage1`/`residual_scratch` are caller-provided scratch storage, the
+// same (full, padded if applicable) shape as `state`, reused across
+// calls -- never allocated here (AGENTS.md #10). `n_active`/`index_map`
+// are the same "r-th active cell -> storage index" pair `ssp_rk2_step`
+// itself takes.
+
+// Stage 1: `stage1 := state + dt * residual_scratch` (the caller must
+// have already computed `residual_scratch := residual(state)` itself --
+// unlike `ssp_rk2_step`, this function does not call `residual` at all,
+// so a multi-solver caller can compute every solver's own residual
+// first, then every solver's own stage-1 combine, in whatever order its
+// coupling needs).
+template <class Scalar, class FieldViewT, class Backend = CpuParallelFor, class IndexMap = IdentityIndexMap>
+void ssp_rk2_combine_stage1(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
+                            std::size_t n_active, IndexMap index_map = IndexMap{})
 {
   constexpr std::size_t n_components = FieldViewT::n_components();
-
-  // Stage 1: stage1 = state + dt * residual(state)
-  residual(state, residual_scratch);
   Backend::run(n_active, [=] CFE_HOST_DEVICE(std::size_t r) mutable {
     const std::size_t cell = index_map(r);
     for (std::size_t c = 0; c < n_components; ++c) {
       stage1(cell, c) = state(cell, c) + dt * residual_scratch(cell, c);
     }
   });
+}
 
-  // Stage 2: state = 0.5*state + 0.5*(stage1 + dt*residual(stage1))
-  residual(stage1, residual_scratch);
+// Stage 2: `state := 0.5*state + 0.5*(stage1 + dt*residual_scratch)`
+// (the caller must have already computed
+// `residual_scratch := residual(stage1)` itself, same reasoning as
+// `ssp_rk2_combine_stage1` above).
+template <class Scalar, class FieldViewT, class Backend = CpuParallelFor, class IndexMap = IdentityIndexMap>
+void ssp_rk2_combine_stage2(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
+                            std::size_t n_active, IndexMap index_map = IndexMap{})
+{
+  constexpr std::size_t n_components = FieldViewT::n_components();
   Backend::run(n_active, [=] CFE_HOST_DEVICE(std::size_t r) mutable {
     const std::size_t cell = index_map(r);
     for (std::size_t c = 0; c < n_components; ++c) {
@@ -85,6 +112,26 @@ void ssp_rk2_step(FieldViewT state, FieldViewT stage1, FieldViewT residual_scrat
           Scalar(0.5) * state(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * residual_scratch(cell, c));
     }
   });
+}
+
+// `stage1` and `residual_scratch` are caller-provided scratch storage,
+// the same (full, padded if applicable) shape as `state`, reused across
+// calls -- never allocated here (AGENTS.md #10: no allocation inside a
+// per-timestep hot path). `n_active` is how many cells `index_map`
+// actually names (e.g. `grid.nx*grid.ny*grid.nz` for a Cartesian grid,
+// `state.n_cells()` for a plain no-ghost caller). A thin wrapper over
+// the two combine functions above, for the single-solver case that
+// needs no hook between stages.
+template <class Scalar, class FieldViewT, class Residual, class Backend = CpuParallelFor,
+          class IndexMap = IdentityIndexMap>
+void ssp_rk2_step(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
+                   Residual residual, std::size_t n_active, IndexMap index_map = IndexMap{})
+{
+  residual(state, residual_scratch);
+  ssp_rk2_combine_stage1<Scalar, FieldViewT, Backend>(state, stage1, residual_scratch, dt, n_active, index_map);
+
+  residual(stage1, residual_scratch);
+  ssp_rk2_combine_stage2<Scalar, FieldViewT, Backend>(state, stage1, residual_scratch, dt, n_active, index_map);
 }
 
 }  // namespace cfe

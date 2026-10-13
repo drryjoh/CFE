@@ -3603,3 +3603,234 @@ resolved):
 
 Next recommended task: unchanged --
 `tasks/0010-phase4-forward-step-multiblock.md`.
+
+## 2026-10-12 — Task 0010: Phase 4 (pulled forward) — forward-facing-step multi-block benchmark
+
+Implemented the Woodward & Colella (1984, JCP 54, 115-173, Sec. IV.b)
+Mach 3 forward-facing-step wind tunnel -- CFE's first multi-block case,
+per the design direction already agreed with Amelia and recorded in
+`tasks/0010-phase4-forward-step-multiblock.md` before this session
+started (two `CartesianGrid` blocks joined by a new same-process
+cross-block `BoundaryCondition`, not one masked grid).
+
+**Files added/changed:**
+- `src/cfe/grid/boundary/block_interface_boundary.hpp` (new):
+  `BlockInterfaceBoundary<Scalar, Field, Side, Layout>` -- same-process
+  cross-block ghost read (the MPI-free analogue of
+  `grid/boundary/mpi_halo_boundary.hpp`'s cross-partition read), with a
+  local slip-wall-style fallback for the step's riser face.
+- `docs/adr/0011-forward-step-block-interface.md` (new): the
+  architectural decision record for this mechanism, kept separate from
+  ADR 0010 (which stayed scoped to task 0009's single-block Euler work)
+  per CLAUDE.md.
+- `tests/verification/forward_step_setup.hpp` (new): shared two-block
+  assembly/stepping driver (`ForwardStepBlocks`), used by both tests and
+  both tutorials -- includes a hand-interleaved SSP-RK2 stage coupling
+  (`step()`) and a shared `run_and_report()` step/snapshot/progress loop.
+- `src/cfe/solver/time_integration/ssp_rk2.hpp` (changed): `ssp_rk2_step`
+  is now a thin wrapper around two newly-public functions,
+  `ssp_rk2_combine_stage1`/`ssp_rk2_combine_stage2` -- added specifically
+  so `ForwardStepBlocks::step()` has a tested, reusable, `Backend`-generic
+  building block to call instead of duplicating the combine formula
+  locally (added during the review cycle below, not in the first draft).
+- `tests/unit/test_block_interface_boundary.cpp` (new): ghost-fill
+  correctness for both `Side::High`/`Side::Low`, including a synthetic
+  test forcing the otherwise-unreachable `Side::Low` riser-face fallback
+  branch (added during review, see below).
+- `tests/verification/test_forward_step_interface_conservation.cpp`
+  (new): the task's required direct conservation check (bit-exact flux
+  agreement from each side of the interface) plus a dynamic mass-balance
+  check through the real interleaved driver (added during review).
+- `tests/unit/test_forward_step_sanity.cpp` (new): short end-to-end
+  sanity runs at `Dim=2` and `Dim=3`.
+- `tutorials/euler_2d_forward_step/` (new): primary 2D deliverable --
+  three reference resolutions (20x60/40x120/80x240-equivalent) to t=4,
+  VTK output, `plot_results.py`, README with the qualitative writeup.
+- `tutorials/euler_3d_forward_step_extrusion/` (new): the 3D CPU
+  "see it work" extrusion.
+- `docs/type-reference.md`, `presentations/0010-phase4-forward-step-
+  multiblock.md`: updated/added per AGENTS.md #26/#27.
+
+**Review trail:** Violet, Snorlax, Sally, and Enzo reviewed the new
+mechanism, the shared driver, the tests, and the benchmark evidence (in
+parallel, each given the task/ADR for context, not a summary of the
+others' findings). No numerical-correctness or architectural defects
+were found anywhere -- Violet independently re-derived the cross-block
+index arithmetic from scratch and confirmed it correct in both
+directions; Enzo confirmed the production boundary-condition code has no
+hidden allocations and correct `CFE_HOST_DEVICE`/`Backend` usage. Real
+findings, all resolved before Ilia/Amelia's sign-off:
+
+- **Blocking (Snorlax):** `tutorials/euler_2d_forward_step/CMakeLists.txt`'s
+  comment falsely claimed the interface-conservation test reused the
+  shared driver -- it builds its own minimal scaffold instead (needs to
+  reach inside the reconstruction/flux pipeline in a way
+  `FvmSolver::residual()` doesn't expose). Fixed.
+- **Blocking (Sally):** the 2D tutorial's README claimed the Mach-stem
+  triple point moves *downstream* with specific x-values. Checked
+  directly against the committed VTK output: it moves *upstream*
+  (x~0.975 at t=1 down to x~0.637 at t=4) -- matching Woodward &
+  Colella's own text ("a Mach stem forms at about time 1.5 and moves
+  very slowly upstream along the upper wall") exactly. The simulation
+  had the physics right; only the prose had the direction backwards.
+  Fixed with the real measured numbers (also corrected in the
+  presentation file).
+- **Blocking (Sally):** `forward_step_setup.hpp`'s `j_offset_to_neighbor`
+  comment pointed at a derivation that didn't actually exist in this
+  file's header. Added the real derivation inline at the point of use.
+- **Blocking (Enzo):** the ADR and 3D README cited an `agent_history.md`
+  completion entry that didn't exist yet. This entry is that fix.
+- **Blocking (Enzo):** the 3D README's "8x the 2D run" timing claim
+  didn't reproduce -- a non-repeated single 2D measurement had been a
+  fast outlier. Re-measured both tutorials with repeats (2D res40:
+  0.85-0.89s across 4 runs; 3D: 11.49-11.56s across 4 runs) -- real ratio
+  is ~13x, explained honestly (per-step overhead that doesn't scale with
+  `nz_cells` is a larger fraction of the cost once each Z-column is
+  cheap) rather than asserted to match a naive 8x guess. Committed CSVs
+  and README updated to the repeated, reproducible numbers.
+- **Optional, taken (Violet):** added the dynamic mass-balance check
+  above (run the real driver for a short, analytically-tractable window,
+  compare against the exact inlet/outlet flux balance -- matches to
+  `~2e-14`).
+- **Optional, taken (Violet):** added the synthetic `Side::Low`
+  riser-face-fallback test (that branch is correct-by-construction but
+  unreachable in the real geometry, where the downstream block's full
+  height always lies inside the upstream block's).
+- **Optional, taken (Violet):** added a `neighbor_grid.nx >= grid.ngx`
+  runtime check to `BlockInterfaceBoundary`'s existing
+  `require_matching_block_resolution` validation.
+- **Optional, taken (Snorlax + Enzo):** refactored
+  `solver/time_integration/ssp_rk2.hpp` to expose
+  `ssp_rk2_combine_stage1`/`ssp_rk2_combine_stage2` as public,
+  `Backend`-generic, `CFE_HOST_DEVICE`-tagged functions (`ssp_rk2_step`
+  becomes a thin wrapper around them), removing `forward_step_setup.hpp`'s
+  own local, non-`Backend`-generic duplicate of the same two formulas.
+  Confirmed zero behavior change for every existing `ssp_rk2_step` caller
+  (full suite re-run, identical pass count, identical numbers).
+- **Optional, taken (Sally):** switched every `BlockInterfaceBoundary`
+  aggregate-initialization call site (two in `forward_step_setup.hpp`,
+  three in `test_block_interface_boundary.cpp`, two in the conservation
+  test) to C++20 designated initializers, removing the six-same-typed-
+  positional-argument transposition risk Sally flagged.
+- **Optional, taken (Snorlax):** factored the two tutorials' near-
+  identical `main()` step/snapshot/progress-report loops into a shared
+  `cfe_verification::run_and_report()` helper in `forward_step_setup.hpp`.
+  Re-ran both tutorials after the refactor: bit-identical output (same
+  final densities/masses/z-momentum, `0.000e+00` max difference against
+  the pre-refactor data) -- confirms the refactor changed no numerics.
+
+During this same investigation (not a reviewer finding, caught directly
+while first generating the benchmark evidence): the original
+`ForwardStepBlocks`'s `total_mass()` reported resolution-dependent
+values for the identical IC (e.g. `0.1764` at res20 vs `0.0441` at
+res80, a clean `1/res` scaling) -- traced to `grid.dz` being left at
+`dx`'s value instead of the `CartesianGrid` default `1` for the 2D case
+(an extra, spurious factor of `dx` in the cell-volume product). Fixed in
+`forward_step_setup.hpp::make_grid1`/`make_grid2` before any of the
+above reviews ran; all reported numbers in this entry and the tutorials'
+own output already reflect the fix.
+
+**2D qualitative evidence** (`tutorials/euler_2d_forward_step/README.md`,
+figures under that tutorial's `figures/`): at all three reference
+resolutions, run to t=4 -- a bow shock peels off the step corner from the
+first frame onward; a classic Mach-reflection triple point forms where it
+meets the top wall and moves upstream over time (measured: x~0.975 at
+t=1 -> x~0.637 at t=4, matching the source paper's own description); a
+fainter trailing contact/slip line is visible in the numerical-schlieren
+view, showing mild waviness at the finest resolution; the step corner's
+own known singular-point artifact is visible as a small, localized
+feature right at the corner in the schlieren view, observed and
+documented, not fixed (matching the task's explicit scope). Resolution
+comparison at t=4 shows the expected sharpening (blurry at res20,
+cleanly separated triple point and trailing line at res80) -- a
+qualitative illustration, not a formal convergence-order claim, per the
+task's own "qualitative checks, not a convergence table" framing.
+
+**Cross-block interface conservation result:** the required direct check
+(`test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides`)
+passes: the Rusanov flux computed at the shared interface face, from
+each block's own reconstruction, agrees to `1e-13` (effectively bit-exact)
+at every shared row of a smooth, genuinely non-uniform test state --
+not just a degenerate uniform-flow case. The dynamic mass-balance
+companion check (added during review) independently confirms the same
+property through the real time-stepping driver, to `~2e-14`.
+
+**3D CPU run evidence**
+(`tutorials/euler_3d_forward_step_extrusion/README.md`): cells-per-unit-
+height=40, 8 Z-cells, periodic Z, run to t=4 in ~11.5s (repeatable across
+4 runs, 11.49-11.56s). Confirmed to stay exactly 2D: solver's own
+`max|momentum_z|` is exactly `0.0` throughout, and a mid-span Z-slice of
+the final-time density field is bit-identical (`0.000e+00` max
+difference) to the 2D run at the same resolution. **This is explicitly
+NOT the standing separate requirement** that every PR adding a Field/
+scheme include a 3D CUDA correctness test + at-scale benchmark on real
+CUDA hardware (as task 0009 delivered for single-block `EulerField` on
+PSC Bridges-2, see `docs/performance/0007-phase3-euler-cuda-results.md`)
+-- this machine has no CUDA, and that work remains genuinely outstanding
+for this multi-block mechanism specifically, named here rather than
+silently dropped.
+
+**Ilia's independent final review and Amelia's alignment check:** both
+run after the fixes above, each starting from the task file and ADR
+directly (not a summary of Violet/Snorlax/Sally/Enzo's findings), and
+both actually completed before this paragraph was written -- what
+follows is their real, post-hoc findings, not an advance assertion of
+the outcome.
+
+- **Amelia:** on target with the design direction she recommended
+  before implementation -- no drift (two blocks, geometry kept entirely
+  inside the `BoundaryCondition`, never the solver's hot loop, confirmed
+  by checking that `fvm_solver.hpp`/`ghost_fill.hpp` are untouched in
+  this diff). `BlockInterfaceBoundary`'s generality (one type, a `Side`
+  parameter, paired fixed/extrapolated domain-edge behavior) judged
+  appropriately scoped, not over- or under-built, against both the
+  immediate need and `ROADMAP.md`'s near-term items. The `ssp_rk2.hpp`
+  refactor judged a reasonable, low-risk, non-speculative change to
+  shared infrastructure. No blocking findings. One optional item: the
+  task file's header still read "Status: not started" despite the work
+  being substantially complete -- fixed (`tasks/0010-...md`'s status
+  line now points at this entry and ADR 0011).
+- **Ilia:** rebuilt the project from scratch and re-ran the full suite
+  himself rather than trusting a reported pass count; hand-verified the
+  cross-block index arithmetic independently; independently re-derived
+  the "3D extrusion equals the 2D run exactly" claim by parsing the raw
+  committed VTK bytes himself (not by reusing `plot_results.py`); read
+  the qualitative-benchmark figures directly and confirmed the prose
+  claims (bow shock, Mach-stem direction/numbers, trailing contact,
+  corner artifact) are actually supported by what the images show. No
+  implementation defects found anywhere; scope discipline (AGENTS.md #6)
+  confirmed clean -- nothing required by the task file was silently
+  dropped, nothing unrequested was added. One blocking (trivial) finding:
+  `docs/adr/0011-...md`'s own Evidence section still said "121/121"
+  (the pre-review-cycle count) instead of the actual current "123/123"
+  (121 pre-existing plus the 2 tests added during Violet's optional
+  findings above) -- fixed. A few additional optional/informational
+  observations were also noted and considered; none were blocking.
+
+**Known limitations (named, not silently dropped):**
+- MUSCL+Rusanov (not PPM), componentwise (not characteristic)
+  reconstruction -- carried over from ADR 0010, unchanged.
+- The step-corner singular-point artifact is observed, not fixed (task's
+  explicit scope).
+- `BlockInterfaceBoundary` assumes exactly two blocks sharing one axis's
+  worth of overlap; three-or-more-block or multi-axis-joined domains are
+  not covered.
+- A same-process multi-block solve still cannot call `ssp_rk2_step`
+  directly per block -- any future multi-block case needs its own
+  interleaved-stage driver, now with `ssp_rk2_combine_stage1`/`stage2` as
+  a reusable building block rather than needing to duplicate the combine
+  formula itself.
+- CPU-only. The CUDA 3D-correctness/at-scale benchmark requirement for
+  this multi-block mechanism remains outstanding, tracked here and in
+  `docs/adr/0011-...md`, not dropped.
+- The rest of Phase 4 (`ROADMAP.md`: moving-frame/grid-recycling
+  prototype, 1D propagating shock demonstration, feature tracking/
+  propagation-speed estimate) is still open -- this task addressed only
+  the forward-facing-step piece, pulled forward from Phase 4 per the
+  task file's own framing.
+
+Next recommended task: real CUDA hardware access (PSC Bridges-2, as
+prior phases used) to close the still-outstanding 3D CUDA-correctness/
+at-scale-benchmark requirement for `BlockInterfaceBoundary` specifically;
+otherwise, the remaining Phase 4 items (moving-frame/grid-recycling
+prototype, 1D propagating shock demonstration) per `ROADMAP.md`.

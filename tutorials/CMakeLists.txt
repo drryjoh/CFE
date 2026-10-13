@@ -49,6 +49,19 @@ add_subdirectory(burgers_2d_diagonal_shock)
 # cut-cell/characteristics formula). CPU-only.
 add_subdirectory(euler_1d_sod_shock_tube)
 
+# Phase 4 (pulled forward), task 0010: Woodward & Colella (1984) Mach 3
+# forward-facing-step wind tunnel -- CFE's first multi-block case, two
+# CartesianGrid blocks joined by the new BlockInterfaceBoundary
+# (grid/boundary/block_interface_boundary.hpp). 2D is the primary
+# deliverable (three reference resolutions, t~4, qualitative bow-shock/
+# Mach-stem/contact checks); the 3D sibling is a CPU-only spanwise
+# extrusion "see it work" demonstration, explicitly not a substitute for
+# a future CUDA 3D-correctness/at-scale requirement (see that
+# tutorial's own file header and docs/adr/0011-forward-step-block-
+# interface.md). CPU-only, both.
+add_subdirectory(euler_2d_forward_step)
+add_subdirectory(euler_3d_forward_step_extrusion)
+
 # 3D MPI strong-scaling demonstration (task spec 0005, follow-up to task
 # 0004's MPI domain-decomposition prototype): the full solver, not just
 # the halo exchange, run at a fixed global resolution across an

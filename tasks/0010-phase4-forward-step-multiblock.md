@@ -1,12 +1,15 @@
 # Task 0010: Phase 4 (pulled forward) — Forward-Facing-Step Multi-Block Benchmark
 
-**Status: not started.** Split out of the user's original request for
-task 0009 (see that task file and `docs/adr/0010-euler-field-and-shock-capturing.md`'s
-Decision 4) on Amelia's explicit recommendation, to avoid bundling a
-brand-new architectural mechanism with brand-new physics in one slice.
-This file records the scope and the design direction already agreed on,
-so the next session can pick it up without re-litigating the design
-question.
+**Status: done** (2026-10-12) -- see `docs/adr/0011-forward-step-block-interface.md`
+for the implemented mechanism's full reasoning and `agent_history.md`'s
+"Task 0010" entry (same date) for the complete completion report,
+review trail, and known limitations/next steps. Originally split out of
+the user's original request for task 0009 (see that task file and
+`docs/adr/0010-euler-field-and-shock-capturing.md`'s Decision 4) on
+Amelia's explicit recommendation, to avoid bundling a brand-new
+architectural mechanism with brand-new physics in one slice. This file's
+own scope/design-direction record below is unchanged from how it was
+originally written and should still be read as-is for that history.
 
 Read and follow `AGENTS.md`, `ARCHITECTURE.md`, `ROADMAP.md` (Phase 4),
 `agent_history.md`, and `docs/adr/0010-euler-field-and-shock-capturing.md`

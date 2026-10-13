@@ -31,7 +31,10 @@ add_executable(cfe_unit_tests
   unit/test_euler_flux.cpp
   unit/test_slip_wall_boundary.cpp
   unit/test_euler_3d_sanity.cpp
+  unit/test_block_interface_boundary.cpp
+  unit/test_forward_step_sanity.cpp
   verification/test_euler_sod_shock_tube.cpp
+  verification/test_forward_step_interface_conservation.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
