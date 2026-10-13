@@ -168,8 +168,14 @@ struct ForwardStepBlocks
     grid.ngz = kDim3 ? 2 : 0;
     grid.dx = dxy;
     grid.dy = dxy;
-    // See make_grid1's comment above: left at the CartesianGrid default
-    // (Scalar(1)) for 2D, overwritten by the constructor for Dim==3.
+    // Nominal values -- the constructor overwrites both `origin_x` and
+    // `origin_y` right after this returns, to the real-space extent
+    // `grid1` actually rounded to, which can differ from these nominal
+    // constants by a sub-cell amount at a resolution that doesn't divide
+    // the geometry evenly (see the constructor's own comment at that
+    // assignment for why). `dz` likewise left at the CartesianGrid
+    // default (Scalar(1)) for 2D, overwritten by the constructor for
+    // Dim==3, same as make_grid1's comment above.
     grid.origin_x = kStepPosition;
     grid.origin_y = kStepHeight;
     grid.origin_z = Scalar(0);
@@ -199,6 +205,28 @@ struct ForwardStepBlocks
     }
 
     const std::size_t step_rows = grid1.ny - grid2.ny;
+
+    // `make_grid1`/`make_grid2` each independently round their own cell
+    // count from the nominal geometry constants (`kStepPosition`,
+    // `kStepHeight`) via `std::lround`, since `cells_per_unit_height`
+    // doesn't evenly divide them at every resolution (e.g. at 96,
+    // `0.6 * 96 = 57.6` rounds to 58 cells, not 57.6). `make_grid2` then
+    // set its own `origin_x`/`origin_y` directly to those SAME nominal
+    // constants rather than to `grid1`'s actual (rounded) real extent --
+    // harmless for the solve itself (`BlockInterfaceBoundary` matches
+    // the two blocks by cell INDEX, never by real-space coordinate, so
+    // this never affected any computed result), but it leaves a
+    // sub-cell-width gap/overlap between where block1's real cells
+    // actually end and where block2's real cells claim to begin,
+    // reproducible in `plot_results.py`'s combined view as a thin stray
+    // line exactly at the interface for any resolution that doesn't
+    // divide the geometry evenly (first seen at cells-per-unit-height=96
+    // when the resolution sweep was extended past 20/40/80). Correcting
+    // it here, once, right after `step_rows` is derived, keeps the two
+    // blocks' real-space extents exactly consistent regardless of
+    // rounding at any resolution.
+    grid2.origin_x = grid1.origin_x + static_cast<Scalar>(grid1.nx) * grid1.dx;
+    grid2.origin_y = grid1.origin_y + static_cast<Scalar>(step_rows) * grid1.dy;
 
     // Uniform Mach-3 initial condition everywhere in both blocks --
     // "continually fed from the left" (task spec): the inlet BC holds

@@ -22,11 +22,13 @@ output for.
 - Every tunnel-wall/step-top face: reflecting slip wall
   (`SlipWallBoundary<EulerField<Scalar,2>>`).
 - MUSCL (minmod) + Rusanov, SSP-RK2, adaptive CFL=0.4.
-- Three resolutions, matching the paper's own reference grids: cells-
-  per-unit-height 20/40/80 (equivalently "20x60"/"40x120"/"80x240" for the
-  full 1x3 bounding box) -- PPM itself is not required/used here (the
-  paper's own "essentially converged" grid is for PPM specifically; this
-  tutorial uses MUSCL+Rusanov throughout, per the task's own scope).
+- Five resolutions: cells-per-unit-height 20/40/80 (the paper's own
+  reference grids, equivalently "20x60"/"40x120"/"80x240" for the full
+  1x3 bounding box -- PPM itself is not required/used here, since the
+  paper's own "essentially converged" grid is for PPM specifically and
+  this tutorial uses MUSCL+Rusanov throughout, per the task's own scope),
+  plus 96 and 144 (=96*1.5) extending the sweep further for a finer
+  convergence illustration than the paper's three points alone give.
 - Run to t=4 (unsteady until roughly this time, per the paper and this
   task's own spec).
 
@@ -38,13 +40,46 @@ cmake --build build --target cfe_euler_2d_forward_step -j
 cd tutorials/euler_2d_forward_step && ../../build/tutorials/euler_2d_forward_step/cfe_euler_2d_forward_step
 ```
 
-Writes `data/res{20,40,80}/frame_NNNN_{density,pressure}_block{1,2}.vtk`
+Writes `data/res{20,40,80,96,144}/frame_NNNN_{density,pressure}_block{1,2}.vtk`
 (ASCII legacy VTK, one pair of files per block per snapshot, every
-`dt=0.1`) plus `data/res{20,40,80}/summary.csv` (step count, wall-clock
-time, final total mass). All three resolutions together take well under
-ten seconds on a single core of this development machine (Apple Silicon)
--- this case is cheap enough that there was no need to run it as a
-background job, unlike the longer MPI strong-scaling tutorials.
+`dt=0.1`) plus `data/res{20,40,80,96,144}/summary.csv` (step count,
+wall-clock time, final total mass).
+
+Measured wall-clock time per resolution (single core, this development
+machine, Apple Silicon M5; from `data/res<N>/summary.csv`, written by
+the run itself -- not estimated):
+
+| cells-per-unit-height | block1 cells | block2 cells | steps | wall-clock |
+|---:|---:|---:|---:|---:|
+| 20  | 240    | 768    | 821   | 0.13s |
+| 40  | 960    | 3,072  | 1,645 | 0.84s |
+| 80  | 3,840  | 12,288 | 3,302 | 6.27s |
+| 96  | 5,568  | 17,710 | 3,966 | 11.03s |
+| 144 | 12,384 | 39,790 | 5,972 | 36.44s |
+
+(96 and 144 don't divide the step position/height evenly the way
+20/40/80 do -- e.g. 0.6*96=57.6 -- so their per-block cell counts come
+from rounding in `make_grid1`/`make_grid2`, not a clean closed form;
+taken directly from each run's own VTK output above rather than
+computed by hand. This rounding also used to leave block2's real-space
+origin at a sub-cell-width offset from block1's actual extent at these
+two resolutions specifically -- visible as a thin stray line at the
+interface in an earlier version of `resolution_comparison.png` -- fixed
+by deriving block2's origin from block1's actual rounded extent instead
+of independently re-rounding the nominal step position/height; see
+`forward_step_setup.hpp`'s constructor for the full explanation. Purely
+a visualization/metadata fix -- confirmed to change none of the
+simulated physics, since `BlockInterfaceBoundary` matches the two
+blocks by cell index, never by real-space coordinate; every resolution
+reproduced the exact same `final_mass` before and after.)
+
+Cost grows roughly like cells-per-unit-height cubed (cell count scales
+as N^2, step count as N, for a fixed CFL and final time): N=144 is 1.5x
+N=96, and the measured cost ratio is 36.44/11.03 = 3.30x, close to
+1.5^3 = 3.375x. The original three-resolution sweep (20/40/80) took
+well under ten seconds; the full five-resolution sweep now takes
+roughly a minute -- still cheap enough to run interactively, not worth
+backgrounding the way the longer MPI strong-scaling tutorials are.
 
 ## Regenerating the figures
 
@@ -118,11 +153,17 @@ from the surrounding smear. res40 sharpens this considerably -- the
 triple point and both shock legs are clearly separated, and a faint
 trailing line is visible behind it. res80 sharpens further still -- a
 distinctly thinner shock front, a cleanly separated triple point, and a
-visibly longer/better-defined trailing contact line. This is the
-expected qualitative refinement behavior for MUSCL+Rusanov on a genuine
-shock-and-contact flow, not a formal convergence-order claim (none is
-made here, matching the task's own "qualitative checks, not a
-convergence table" framing).
+visibly longer/better-defined trailing contact line. res96 and res144
+(added when this sweep was extended past the paper's own three
+reference grids) continue the same trend -- a progressively thinner
+shock front and a trailing contact line that extends further before
+losing definition -- with no new qualitative behavior appearing beyond
+res80, consistent with the solution having already visually settled
+onto a stable shape rather than still changing character grid-to-grid.
+This is the expected qualitative refinement behavior for MUSCL+Rusanov
+on a genuine shock-and-contact flow, not a formal convergence-order
+claim (none is made here, matching the task's own "qualitative checks,
+not a convergence table" framing).
 
 ## Known limitations
 

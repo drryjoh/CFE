@@ -79,7 +79,11 @@ void run_resolution(std::size_t cells_per_unit_height)
 
 int main()
 {
-  for (std::size_t res : {std::size_t(20), std::size_t(40), std::size_t(80)}) {
+  // 20/40/80 are the paper's own reference grids (see this file's header
+  // comment); 96/144 extend the sweep further (144 = 96*1.5) to give a
+  // finer convergence illustration than the paper's own three points
+  // alone provide.
+  for (std::size_t res : {std::size_t(20), std::size_t(40), std::size_t(80), std::size_t(96), std::size_t(144)}) {
     run_resolution(res);
   }
   return 0;

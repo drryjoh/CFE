@@ -85,52 +85,6 @@ def schlieren_proxy(field, spacing):
     return np.sqrt(gx ** 2 + gy ** 2)
 
 
-def schlieren_proxy_two_blocks(b1, b2):
-    """Like `schlieren_proxy`, but for the two-block forward-step case:
-    `np.gradient` called separately on each block's own array (as a naive
-    per-block `schlieren_proxy(f1, s1)` / `schlieren_proxy(f2, s2)` would
-    do) falls back to a one-sided difference at the two columns adjacent
-    to the shared block interface, since each block's array has no
-    knowledge of the other's real cells there. That one-sided estimate is
-    measurably worse than a centered difference using the true neighbor
-    value (which is exactly what the real simulation's own
-    `BlockInterfaceBoundary` ghost-fill provides to the solver) --
-    verified by comparison: at one case this produced schlieren values of
-    106.6/32.0 at the two edge columns where the properly-stitched
-    centered difference gives 70.9/34.8, a large enough discrepancy to
-    show up as a spurious second line next to the real shock in the
-    rendered image. The underlying density field is NOT discontinuous
-    there; this was purely an artifact of computing each block's gradient
-    in isolation. Fixes it by correcting just the two edge columns to use
-    a true cross-block centered difference wherever the two blocks share
-    height (the forward step's own riser-face region, where block2 does
-    not exist at that height, is unaffected -- there is no neighbor to
-    stitch in, and the existing one-sided estimate there is the best
-    available short of also replicating `BlockInterfaceBoundary`'s own
-    slip-wall mirror, which is a separate, much smaller effect not
-    addressed here)."""
-    (f1, origin1, spacing1), (f2, origin2, spacing2) = b1, b2
-    dx1, dy1 = spacing1[0], spacing1[1]
-    dx2, dy2 = spacing2[0], spacing2[1]
-    g1y, g1x = np.gradient(f1, dy1, dx1)
-    g2y, g2x = np.gradient(f2, dy2, dx2)
-
-    step_rows = int(round((origin2[1] - origin1[1]) / dy1))
-    ny2 = f2.shape[0]
-    # Row j2 (block2's local row) shares height with block1's local row
-    # j2 + step_rows -- same relationship `forward_step_setup.hpp`'s
-    # `j_offset_to_neighbor` encodes for the real simulation's ghost fill,
-    # re-derived here independently for the plotting script.
-    j1 = np.arange(ny2) + step_rows
-    j2 = np.arange(ny2)
-    g1x[j1, -1] = (f2[j2, 0] - f1[j1, -2]) / (2.0 * dx1)
-    g2x[j2, 0] = (f2[j2, 1] - f1[j1, -1]) / (2.0 * dx2)
-
-    schlieren1 = np.sqrt(g1x ** 2 + g1y ** 2)
-    schlieren2 = np.sqrt(g2x ** 2 + g2y ** 2)
-    return schlieren1, schlieren2
-
-
 def frame_times(res_dir, snapshot_dt=0.1):
     n_frames = len(glob.glob(os.path.join(res_dir, "frame_*_density_block1.vtk")))
     return n_frames, [i * snapshot_dt for i in range(n_frames)]
@@ -161,7 +115,8 @@ def main():
     for ax, tt in zip(axes, [1.0, 2.0, times[-1]]):
         idx = min(range(n_frames), key=lambda i: abs(times[i] - tt))
         (f1, o1, s1), (f2, o2, s2) = load_frame(res_dir_80, idx, "density")
-        g1, g2 = schlieren_proxy_two_blocks((f1, o1, s1), (f2, o2, s2))
+        g1 = schlieren_proxy(f1, s1)
+        g2 = schlieren_proxy(f2, s2)
         im = plot_two_blocks(ax, (g1, o1, s1), (g2, o2, s2), cmap="gray_r", vmin=0, vmax=np.percentile(g1, 99))
         ax.set_title(f"|grad(density)| (numerical schlieren), t={times[idx]:.2f} (res80)")
         ax.set_ylabel("y")
@@ -171,8 +126,9 @@ def main():
     print("wrote figures/schlieren_time_series.png")
 
     # --- resolution comparison at final time --------------------------------
-    fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
-    for ax, res in zip(axes, [20, 40, 80]):
+    resolutions = [20, 40, 80, 96, 144]
+    fig, axes = plt.subplots(len(resolutions), 1, figsize=(9, 13), sharex=True)
+    for ax, res in zip(axes, resolutions):
         res_dir = os.path.join(DATA, f"res{res}")
         nf, ts = frame_times(res_dir)
         idx = nf - 1

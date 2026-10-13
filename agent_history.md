@@ -3834,3 +3834,90 @@ prior phases used) to close the still-outstanding 3D CUDA-correctness/
 at-scale-benchmark requirement for `BlockInterfaceBoundary` specifically;
 otherwise, the remaining Phase 4 items (moving-frame/grid-recycling
 prototype, 1D propagating shock demonstration) per `ROADMAP.md`.
+
+## 2026-10-13 — Task 0010 follow-up: two 2D refinements (user-requested)
+
+User-requested, after reviewing PR #6: (1) fix a spurious double-line
+artifact noticed in the schlieren figure at the block interface, and
+(2) extend the 2D forward-step resolution sweep past the paper's three
+reference grids (20/40/80) to 96 and 144 (=96*1.5) for a finer
+convergence illustration, with the per-resolution timing documented.
+
+What was done:
+
+1. **Schlieren double-line artifact (plotting bug, not a simulation
+   bug).** `plot_results.py`'s `schlieren_proxy` called `np.gradient`
+   separately on each block's density array, so the two columns
+   adjacent to the shared interface fell back to one-sided differences
+   with no knowledge of the true neighbor value -- fabricating a
+   spurious second line next to the real bow shock. Verified this was
+   plotting-only by comparing against the raw VTK data directly: the
+   underlying density field is smooth across the interface away from
+   the step corner, and the one-sided estimate diverged substantially
+   from a properly stitched centered difference at the affected columns
+   (e.g. 106.6 vs. 70.9 at one sample point). Added
+   `schlieren_proxy_two_blocks`, which corrects just the two edge
+   columns using the same row-offset relationship
+   `forward_step_setup.hpp`'s `j_offset_to_neighbor` already encodes for
+   the real ghost-fill. Density plots were unaffected (no derivative
+   involved). Fixed and pushed as a standalone commit (`eeea040`)
+   before the resolution-sweep work below.
+
+2. **Extended resolution sweep to 96/144, with real timing documented.**
+   `forward_step_2d.cpp` now runs five resolutions
+   (20/40/80/96/144) instead of three; `plot_results.py`'s
+   `resolution_comparison.png` panel count extended to match.
+   `README.md`'s timing table and convergence-illustration paragraph
+   updated with the actual measured numbers (not estimated) from each
+   run's own `summary.csv`.
+
+   **Found and fixed a second, independent bug while verifying the new
+   resolutions' figures**: 96 and 144 don't divide the step
+   position/height evenly (e.g. `0.6*96=57.6`), so `make_grid1`'s and
+   `make_grid2`'s independent `std::lround`-based cell counts are each
+   individually correct, but `make_grid2`'s `origin_x`/`origin_y` were
+   set directly to the *nominal* geometry constants (`kStepPosition`,
+   `kStepHeight`) rather than derived from `grid1`'s actual rounded
+   extent -- leaving a sub-cell-width mismatch between where block1's
+   real cells end and where block2's claimed to begin. Purely a
+   real-space-coordinate/metadata issue (`BlockInterfaceBoundary`
+   matches blocks by cell index, never by coordinate, so this never
+   touched any computed result) -- but visible as a thin stray vertical
+   line at the interface in `resolution_comparison.png`'s res96/res144
+   panels. Fixed in `ForwardStepBlocks`'s constructor by deriving
+   `grid2.origin_x`/`origin_y` from `grid1`'s actual extent
+   (`grid1.origin_x + grid1.nx*grid1.dx`, `grid1.origin_y +
+   step_rows*grid1.dy`) instead of independently re-rounding the nominal
+   constants.
+
+Scientific verification:
+Full CPU unit/verification suite re-run after the origin fix: still
+**123/123** passing, no regression. Re-ran the entire five-resolution
+sweep after the fix and confirmed every resolution's `final_mass`
+matched bit-for-bit against the pre-fix run (e.g. res144:
+6.339126 before and after) -- direct confirmation the fix changed
+nothing about the simulated physics, only the VTK output's declared
+real-space origin. Visually confirmed both artifacts are gone from the
+regenerated figures (single clean shock line in the schlieren view; no
+stray line at the res96/res144 interface in the resolution-comparison
+view) before committing.
+
+Architecture decisions: none new -- both fixes are corrections to
+already-decided designs (the schlieren proxy's approach, and
+`ForwardStepBlocks`'s block-geometry construction), not new designs.
+Scope judged small/additive enough (a tutorial plotting script fix and
+a tutorial-only geometry-derivation fix, neither touching production
+numerics/solver code paths) not to require the full Violet/Snorlax/
+Sally/Enzo/Ilia/Amelia review pass per CLAUDE.md's review-effort-
+proportional-to-change guidance -- re-verified directly instead (full
+test suite + bit-identical final_mass + visual confirmation).
+
+Known limitations: unchanged from task 0010's own entry above (CPU-only
+multi-block mechanism, step-corner artifact observed not fixed, CUDA
+3D-correctness/at-scale benchmark still outstanding, rest of Phase 4
+still open) -- this follow-up touched only the 2D tutorial's resolution
+sweep and plotting, not scope covered elsewhere.
+
+Next recommended task: unchanged -- real CUDA hardware access to close
+the outstanding `BlockInterfaceBoundary` 3D-correctness/at-scale
+requirement, or the remaining Phase 4 items.
