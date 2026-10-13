@@ -65,10 +65,12 @@ seed only, refined by 5 fixed Newton-Raphson iterations (Toro
 eq. 4.5-4.8) toward the exact two-shock/two-rarefaction `p*` -- see
 `docs/adr/0012-hllc-numerical-flux.md` for why the non-iterative
 estimate alone was insufficient (a silent, severe robustness bug at a
-strong Mach-3 wall reflection) and for a second, separate robustness fix
+strong Mach-3 wall reflection), for a second, separate robustness fix
 (density/pressure floors guarding against a near-vacuum
 componentwise-MUSCL-reconstruction artifact at a strong 2D multi-wave
-interaction).
+interaction), and for a real forward-step Kelvin-Helmholtz finding this
+flux reproduces that Rusanov never showed
+(`tutorials/euler_2d_forward_step/README.md`).
 
 ## Discontinuous Galerkin
 
