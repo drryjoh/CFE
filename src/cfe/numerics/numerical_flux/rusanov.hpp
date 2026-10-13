@@ -36,18 +36,29 @@
 // maximum* characteristic speed regardless of sign, which is entropy-
 // satisfying for any convex scalar flux -- this is what makes it valid
 // for `BurgersField` specifically, closing the gap `upwind.hpp`
-// documents. Like `UpwindFlux`, this is still NOT a complete scheme for
-// a multi-component system like Euler: there, `alpha` must be the
-// largest eigenvalue magnitude of the flux Jacobian across both states
-// (a per-axis `Field::wave_speed(...)` returning one number is still a
-// compatible shape for that -- Phase 3's eventual Euler `Field` can
-// supply exactly it), and `uL`/`uR`/`F(u)` become vectors, not scalars --
-// so this header's single-`Scalar` free function/functor would need a
-// vector-valued sibling; the underlying formula generalizes unchanged.
+// documents.
+//
+// Vector (system) generalization, below: for a multi-component Field
+// like `EulerField` (fields/euler/field.hpp), `alpha` must be a SINGLE
+// scalar -- the largest characteristic-speed magnitude across both
+// states (`Field::wave_speed(...)` already returns exactly that one
+// number, taking full conserved-state vectors instead of bare scalars
+// for such a Field) -- shared by every component's dissipation term,
+// not a separate value per component. `uL`/`uR`/`F(u)` become
+// `State<Scalar, N>` vectors; the underlying formula is otherwise
+// unchanged, applied componentwise. This is a genuinely different
+// overload (selected by argument type: a bare `Scalar` for N=1 fields
+// like `BurgersField`/`ScalarAdvectionField`, a `State<Scalar, N>` for
+// multi-component fields), not a replacement for the scalar form above
+// -- both are needed since N=1 fields' Calculators take/return bare
+// `Scalar`, not `State<Scalar, 1>`.
 #pragma once
+
+#include <cstddef>
 
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
+#include "cfe/math/fixed_array.hpp"
 
 namespace cfe {
 
@@ -62,11 +73,37 @@ Scalar rusanov_flux(Scalar left_value, Scalar right_value, Axis axis, const Fiel
   return Scalar(0.5) * (flux_left + flux_right) - Scalar(0.5) * alpha * (right_value - left_value);
 }
 
+// System (vector-state) form -- see this file's header comment. `alpha`
+// is computed ONCE from the full states and reused for every component,
+// which is what makes this the correct Rusanov/local-Lax-Friedrichs
+// flux for a coupled system rather than N independent scalar problems.
+template <class Scalar, std::size_t N, class Field>
+CFE_HOST_DEVICE
+State<Scalar, N> rusanov_flux(const State<Scalar, N>& left_state, const State<Scalar, N>& right_state,
+                              Axis axis, const Field& field)
+{
+  const Scalar raw_wave_speed = field.wave_speed(left_state, right_state, axis);
+  const Scalar alpha = raw_wave_speed < Scalar(0) ? -raw_wave_speed : raw_wave_speed;
+  const State<Scalar, N> flux_left = field.physical_flux(left_state, axis);
+  const State<Scalar, N> flux_right = field.physical_flux(right_state, axis);
+
+  State<Scalar, N> flux;
+  for (std::size_t c = 0; c < N; ++c) {
+    flux[c] =
+        Scalar(0.5) * (flux_left[c] + flux_right[c]) - Scalar(0.5) * alpha * (right_state[c] - left_state[c]);
+  }
+  return flux;
+}
+
 // Stateless functor wrapping rusanov_flux into the same swappable shape
 // `UpwindFlux` uses: `NumericalFlux::operator()(left, right, axis,
 // field)`. Solver residual code (solver/explicit/fvm_solver.hpp) never
 // changes when this is substituted for `UpwindFlux` as a template
-// argument.
+// argument -- overload resolution on the argument type (bare `Scalar`
+// vs. `State<Scalar, N>`) picks the matching `rusanov_flux` above, so
+// the SAME `RusanovFlux` type serves both `BurgersField`/
+// `ScalarAdvectionField` (N=1, scalar shape) and `EulerField` (N>1,
+// vector shape) unchanged.
 struct RusanovFlux
 {
   template <class Scalar, class Field>
@@ -74,6 +111,14 @@ struct RusanovFlux
   Scalar operator()(Scalar left_value, Scalar right_value, Axis axis, const Field& field) const
   {
     return rusanov_flux(left_value, right_value, axis, field);
+  }
+
+  template <class Scalar, std::size_t N, class Field>
+  CFE_HOST_DEVICE
+  State<Scalar, N> operator()(const State<Scalar, N>& left_state, const State<Scalar, N>& right_state,
+                              Axis axis, const Field& field) const
+  {
+    return rusanov_flux(left_state, right_state, axis, field);
   }
 };
 

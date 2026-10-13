@@ -42,6 +42,13 @@ add_subdirectory(burgers_3d_visualization)
 add_subdirectory(burgers_1d_shock_and_steepening)
 add_subdirectory(burgers_2d_diagonal_shock)
 
+# 1D compressible Euler verification tutorial: the Sod (1978) shock
+# tube, Phase 3's companion 1D benchmark -- same quantitative-evidence
+# style as the Burgers tutorials above (grid-convergence sweep against
+# an exact reference, here the exact Riemann solution rather than a
+# cut-cell/characteristics formula). CPU-only.
+add_subdirectory(euler_1d_sod_shock_tube)
+
 # 3D MPI strong-scaling demonstration (task spec 0005, follow-up to task
 # 0004's MPI domain-decomposition prototype): the full solver, not just
 # the halo exchange, run at a fixed global resolution across an

@@ -1,18 +1,29 @@
 // Generic explicit FVM solver (task spec item 5, ARCHITECTURE.md #2:
 // "Solver" orchestrates Grid + Field(s) + Numerics + Time Integrator; it
 // contains no physics itself). Assembles a flux-form residual for a
-// single-component conservation law dQ/dt + div(F(Q)) = 0 from:
-//   - `Field` -- the physics (Phase 1's linear scalar advection; a
-//     future Burgers field, also single-component, plugs in here
-//     unchanged -- Euler would NOT: this type hardcodes
-//     `FieldView<Scalar, 1, Layout>` and reads/writes component `0`
-//     only throughout, so a genuinely multi-component state (Euler's
-//     density/momentum/energy) needs this solver generalized over
-//     `NComponents` first, not just a new `Field`);
-//   - `Reconstruction` -- per-side face-value reconstruction
-//     (numerics/fvm/interface_value.hpp);
-//   - `NumericalFlux` -- combines two face values into one flux, using
-//     only Field's Calculator methods (numerics/numerical_flux/upwind.hpp);
+// conservation law dQ/dt + div(F(Q)) = 0, generic over
+// `Field::n_components` (Phase 3: generalized from a hardcoded
+// single-component assumption -- see fields/scalar_advection/field.hpp's
+// and tasks/0003-...md's own comments flagging this as a prerequisite
+// for a multi-component field like `EulerField`, fields/euler/field.hpp)
+// from:
+//   - `Field` -- the physics. N=1 fields (`ScalarAdvectionField`,
+//     `BurgersField`) use a `Scalar`-in/`Scalar`-out Calculator shape;
+//     N>1 fields (`EulerField`) use a `State<Scalar,N>`-in/-out shape,
+//     since a system's flux for any one component genuinely depends on
+//     the whole state. `detail::axis_flux_difference` below dispatches
+//     between the two shapes via `if constexpr (N == 1)` -- zero
+//     behavior change for existing N=1 fields (same calls, same
+//     formula, just routed through a length-1 `State` on the way in/out).
+//   - `Reconstruction` -- per-side, per-component face-value
+//     reconstruction (numerics/fvm/interface_value.hpp,
+//     numerics/fvm/muscl_minmod.hpp). Always scalar-in/-out, applied
+//     independently to each conserved component ("componentwise"
+//     reconstruction, not characteristic reconstruction) -- this is
+//     unchanged from N=1 usage, just looped over components for N>1.
+//   - `NumericalFlux` -- combines two face STATEs into one flux STATE,
+//     using only Field's Calculator methods
+//     (numerics/numerical_flux/upwind.hpp, rusanov.hpp);
 //   - `BoundaryX`/`BoundaryY`/`BoundaryZ` -- ghost-cell filling per axis
 //     (grid/boundary/boundary_condition.hpp).
 // None of these know about each other's internals -- this type is the
@@ -22,7 +33,8 @@
 // Dimension-agnostic: the residual loop runs over however many of X/Y/Z
 // the grid actually has active (`Field::dim`, `if constexpr`, no runtime
 // branch) -- see ADR 0004 and docs/type-reference.md for the design
-// rationale, not repeated here.
+// rationale, not repeated here. Component count (`Field::n_components`)
+// is an orthogonal compile-time axis of genericity -- see ADR 0010.
 //
 // Stencil requirement: computing a cell's full residual along one axis needs
 // both its faces on that axis, and each face's two one-sided
@@ -41,6 +53,7 @@
 #include "cfe/field/field.hpp"
 #include "cfe/grid/ghost/ghost_fill.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
+#include "cfe/math/fixed_array.hpp"
 #include "cfe/numerics/fvm/interface_value.hpp"
 #include "cfe/numerics/numerical_flux/upwind.hpp"
 
@@ -53,50 +66,105 @@ namespace detail {
 // resolved at compile time (`if constexpr`) so this fully inlines with no
 // runtime branching per axis, exactly as if each axis's version had been
 // written out by hand.
+//
+// Returns a `State<Scalar, Field::n_components>` (every component's
+// residual contribution along this one axis at once) -- for N=1 fields
+// this is a length-1 State wrapping exactly the same scalar value the
+// pre-generalization version of this function returned directly.
 template <Axis A, class Scalar, class FieldViewT, class Reconstruction, class NumericalFlux,
           class Field>
 CFE_HOST_DEVICE
-Scalar axis_flux_difference(FieldViewT state, const CartesianGrid<Scalar>& grid, std::size_t i,
-                            std::size_t j, std::size_t k, const Reconstruction& reconstruction,
-                            const NumericalFlux& numerical_flux, const Field& field)
+State<Scalar, Field::n_components> axis_flux_difference(FieldViewT state, const CartesianGrid<Scalar>& grid,
+                                                          std::size_t i, std::size_t j, std::size_t k,
+                                                          const Reconstruction& reconstruction,
+                                                          const NumericalFlux& numerical_flux,
+                                                          const Field& field)
 {
-  Scalar state_m2, state_m1, state_c, state_p1, state_p2, spacing;
+  constexpr std::size_t N = Field::n_components;
+
+  std::size_t cell_m2, cell_m1, cell_c, cell_p1, cell_p2;
+  Scalar spacing;
   if constexpr (A == Axis::X) {
-    state_m2 = state(grid.flat_index(i - 2, j, k), 0);
-    state_m1 = state(grid.flat_index(i - 1, j, k), 0);
-    state_c = state(grid.flat_index(i, j, k), 0);
-    state_p1 = state(grid.flat_index(i + 1, j, k), 0);
-    state_p2 = state(grid.flat_index(i + 2, j, k), 0);
+    cell_m2 = grid.flat_index(i - 2, j, k);
+    cell_m1 = grid.flat_index(i - 1, j, k);
+    cell_c = grid.flat_index(i, j, k);
+    cell_p1 = grid.flat_index(i + 1, j, k);
+    cell_p2 = grid.flat_index(i + 2, j, k);
     spacing = grid.dx;
   } else if constexpr (A == Axis::Y) {
-    state_m2 = state(grid.flat_index(i, j - 2, k), 0);
-    state_m1 = state(grid.flat_index(i, j - 1, k), 0);
-    state_c = state(grid.flat_index(i, j, k), 0);
-    state_p1 = state(grid.flat_index(i, j + 1, k), 0);
-    state_p2 = state(grid.flat_index(i, j + 2, k), 0);
+    cell_m2 = grid.flat_index(i, j - 2, k);
+    cell_m1 = grid.flat_index(i, j - 1, k);
+    cell_c = grid.flat_index(i, j, k);
+    cell_p1 = grid.flat_index(i, j + 1, k);
+    cell_p2 = grid.flat_index(i, j + 2, k);
     spacing = grid.dy;
   } else {
-    state_m2 = state(grid.flat_index(i, j, k - 2), 0);
-    state_m1 = state(grid.flat_index(i, j, k - 1), 0);
-    state_c = state(grid.flat_index(i, j, k), 0);
-    state_p1 = state(grid.flat_index(i, j, k + 1), 0);
-    state_p2 = state(grid.flat_index(i, j, k + 2), 0);
+    cell_m2 = grid.flat_index(i, j, k - 2);
+    cell_m1 = grid.flat_index(i, j, k - 1);
+    cell_c = grid.flat_index(i, j, k);
+    cell_p1 = grid.flat_index(i, j, k + 1);
+    cell_p2 = grid.flat_index(i, j, k + 2);
     spacing = grid.dz;
   }
 
-  // Right face: left value is this cell's own reconstruction, right value
-  // is the next cell's own reconstruction.
-  const Scalar state_left_of_right_face = reconstruction.right(state_m1, state_c, state_p1);
-  const Scalar state_right_of_right_face = reconstruction.left(state_c, state_p1, state_p2);
-  const Scalar flux_right = numerical_flux(state_left_of_right_face, state_right_of_right_face, A, field);
+  // Read this axis's 5-point stencil, every component, into local
+  // State vectors -- the componentwise reconstruction loop below reads
+  // each component's own 5 raw values out of these.
+  State<Scalar, N> state_m2, state_m1, state_c, state_p1, state_p2;
+  for (std::size_t c = 0; c < N; ++c) {
+    state_m2[c] = state(cell_m2, c);
+    state_m1[c] = state(cell_m1, c);
+    state_c[c] = state(cell_c, c);
+    state_p1[c] = state(cell_p1, c);
+    state_p2[c] = state(cell_p2, c);
+  }
 
+  // Componentwise reconstruction: each conserved component gets its own
+  // independent 3-point `Reconstruction::right/left` call, exactly the
+  // same call every N=1 field already made -- just looped over
+  // components. This is NOT characteristic reconstruction (no
+  // eigenvector projection); see ADR 0010 for why that choice is
+  // acceptable for this slice.
+  //
+  // Right face: left value is this cell's own reconstruction, right
+  // value is the next cell's own reconstruction.
   // Left face: left value is the previous cell's own reconstruction,
   // right value is this cell's own reconstruction.
-  const Scalar state_left_of_left_face = reconstruction.right(state_m2, state_m1, state_c);
-  const Scalar state_right_of_left_face = reconstruction.left(state_m1, state_c, state_p1);
-  const Scalar flux_left = numerical_flux(state_left_of_left_face, state_right_of_left_face, A, field);
+  State<Scalar, N> state_left_of_right_face, state_right_of_right_face, state_left_of_left_face,
+      state_right_of_left_face;
+  for (std::size_t c = 0; c < N; ++c) {
+    state_left_of_right_face[c] = reconstruction.right(state_m1[c], state_c[c], state_p1[c]);
+    state_right_of_right_face[c] = reconstruction.left(state_c[c], state_p1[c], state_p2[c]);
+    state_left_of_left_face[c] = reconstruction.right(state_m2[c], state_m1[c], state_c[c]);
+    state_right_of_left_face[c] = reconstruction.left(state_m1[c], state_c[c], state_p1[c]);
+  }
 
-  return -(flux_right - flux_left) / spacing;
+  State<Scalar, N> result;
+  if constexpr (N == 1) {
+    // Legacy scalar-Calculator shape (`ScalarAdvectionField`,
+    // `BurgersField`): call `numerical_flux`/`field` with bare `Scalar`
+    // arguments, exactly as before generalization -- bit-identical
+    // formula and call sequence to the pre-Phase-3 version of this
+    // function.
+    const Scalar flux_right =
+        numerical_flux(state_left_of_right_face[0], state_right_of_right_face[0], A, field);
+    const Scalar flux_left =
+        numerical_flux(state_left_of_left_face[0], state_right_of_left_face[0], A, field);
+    result[0] = -(flux_right - flux_left) / spacing;
+  } else {
+    // Vector (system) Calculator shape (`EulerField`): `numerical_flux`
+    // takes/returns full `State<Scalar, N>` vectors, calling `field`'s
+    // vector-shaped `physical_flux`/`wave_speed` exactly once per face
+    // (not once per component) -- see numerics/numerical_flux/rusanov.hpp.
+    const State<Scalar, N> flux_right =
+        numerical_flux(state_left_of_right_face, state_right_of_right_face, A, field);
+    const State<Scalar, N> flux_left =
+        numerical_flux(state_left_of_left_face, state_right_of_left_face, A, field);
+    for (std::size_t c = 0; c < N; ++c) {
+      result[c] = -(flux_right[c] - flux_left[c]) / spacing;
+    }
+  }
+  return result;
 }
 
 // Maps a dense "active cell number" r in [0, nx*ny*nz) to the padded
@@ -170,8 +238,9 @@ struct FvmSolver
   // and the grid is expected to match it.
   static constexpr bool y_active = Field::dim >= 2;
   static constexpr bool z_active = Field::dim >= 3;
+  static constexpr std::size_t n_components = Field::n_components;
 
-  void residual(FieldView<Scalar, 1, Layout> state, FieldView<Scalar, 1, Layout> out) const
+  void residual(FieldView<Scalar, n_components, Layout> state, FieldView<Scalar, n_components, Layout> out) const
   {
     assert(grid.nx > 0 && grid.dx > Scalar(0) && "FvmSolver requires a positive extent and spacing on X");
     assert(grid.ngx >= 2 && "FvmSolver needs at least 2 ghost layers on every active axis");
@@ -194,12 +263,12 @@ struct FvmSolver
              "documented shape for an unused dimension");
     }
 
-    fill_ghost_cells<Scalar, 1, Layout, BoundaryX, Backend>(state, grid, Axis::X, boundary_x);
+    fill_ghost_cells<Scalar, n_components, Layout, BoundaryX, Backend>(state, grid, Axis::X, boundary_x);
     if constexpr (y_active) {
-      fill_ghost_cells<Scalar, 1, Layout, BoundaryY, Backend>(state, grid, Axis::Y, boundary_y);
+      fill_ghost_cells<Scalar, n_components, Layout, BoundaryY, Backend>(state, grid, Axis::Y, boundary_y);
     }
     if constexpr (z_active) {
-      fill_ghost_cells<Scalar, 1, Layout, BoundaryZ, Backend>(state, grid, Axis::Z, boundary_z);
+      fill_ghost_cells<Scalar, n_components, Layout, BoundaryZ, Backend>(state, grid, Axis::Z, boundary_z);
     }
 
     const CartesianGrid<Scalar> grid = this->grid;
@@ -231,7 +300,7 @@ struct FvmSolver
       const std::size_t j = grid.ngy + local_j;
       const std::size_t k = grid.ngz + local_k;
 
-      Scalar total_flux_difference = detail::axis_flux_difference<Axis::X>(
+      State<Scalar, n_components> total_flux_difference = detail::axis_flux_difference<Axis::X>(
           state, grid, i, j, k, reconstruction, numerical_flux, field);
 
       if constexpr (y_active) {
@@ -243,7 +312,10 @@ struct FvmSolver
             state, grid, i, j, k, reconstruction, numerical_flux, field);
       }
 
-      out(grid.flat_index(i, j, k), 0) = total_flux_difference;
+      const std::size_t cell = grid.flat_index(i, j, k);
+      for (std::size_t c = 0; c < n_components; ++c) {
+        out(cell, c) = total_flux_difference[c];
+      }
     });
   }
 

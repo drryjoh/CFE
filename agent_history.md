@@ -3180,3 +3180,426 @@ Full `ctest` suite (102/102 unit + 7/7 MPI) re-run and still green
 build provides exactly `MPI_THREAD_FUNNELED`, never less -- so the
 standalone harness is this fix's only direct verification). ADR 0009's
 amendment updated with the same detail.
+
+## 2026-10-12 — Task 0009: Phase 3 — compressible Euler, MUSCL/Rusanov, supersonic/slip-wall BCs, Sod shock tube
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+Picked up a prior run that stalled mid-implementation (killed by a
+background watchdog after 600s with no progress). The user's original
+ask combined ROADMAP.md Phase 3 (compressible Euler) with two Phase-4
+items pulled forward (the Woodward & Colella forward-facing-step wind
+tunnel benchmark, 2D + 3D-CPU), reasoning the benchmark only makes
+sense as one package. Per CLAUDE.md, consulted Amelia before committing
+to a design on two open questions: (1) how to represent the forward
+step's L-shaped domain using only today's single-block `CartesianGrid`
+(no generalized unstructured infrastructure, per ROADMAP.md's scope
+guardrails), and (2) whether bundling Phase 3 + the forward-step
+benchmark into one slice is coherent. Amelia recommended (1) two
+`CartesianGrid` blocks joined by a new same-process cross-block
+`BoundaryCondition` (same shape as `mpi_halo_boundary.hpp`'s
+cross-partition read, without MPI), and (2) **splitting the work**:
+land Euler/MUSCL/Rusanov/BCs/Sod-tube now, defer the forward step (a
+brand-new, never-reviewed architectural mechanism) to a separate
+follow-on slice so a misbehaving result can't be ambiguous between new
+physics and a new grid-joining mechanism. Followed both recommendations
+-- this entry covers only the first half. The second half is recorded,
+not implemented, at `tasks/0010-phase4-forward-step-multiblock.md`.
+
+What was already on disk (uncommitted, from the stalled run) and was
+reviewed, built, and tested before anything new was added:
+`src/cfe/fields/euler/field.hpp` (`EulerField<Scalar,Dim>`), the vector
+(`State<Scalar,N>`) overload of `rusanov_flux`/`RusanovFlux`
+(`numerics/numerical_flux/rusanov.hpp`), and `FvmSolver`'s
+generalization from a hardcoded single-component assumption to generic
+`Field::n_components` (`solver/explicit/fvm_solver.hpp`, with
+`n_components = 1` added to `BurgersField`/`ScalarAdvectionField` to
+match). All of it compiled and passed the existing 102-test suite with
+zero regressions on first build -- the stall had happened before any
+verification step, not mid-breakage.
+
+New:
+- `src/cfe/grid/boundary/slip_wall_boundary.hpp` --
+  `SlipWallBoundary<Field>`, CFE's first Field-aware
+  `BoundaryCondition` (AGENTS.md #17, ARCHITECTURE.md #11): mirrors
+  ghost-cell values but negates the single momentum component normal
+  to the wall via `Field::momentum_index(axis)`. Supersonic
+  inflow/outflow reuse existing, physics-agnostic `StaticBoundary`/
+  `InflowOutflowBoundary` unchanged (valid because every characteristic
+  points one direction for supersonic flow -- no Field-awareness
+  needed), so this was the only new BC type required.
+- `tests/unit/test_euler_flux.cpp`, `tests/unit/test_slip_wall_boundary.cpp`
+  -- Calculator hand-computed values, reflecting-BC component-mirroring
+  checks on both the X and Y axis.
+- `tests/verification/` (new directory, matching ARCHITECTURE.md's own
+  proposed layout): `sod_shock_tube_exact.hpp` (an independently
+  implemented exact Riemann solver, Toro Ch. 4 Newton-Raphson + sampling
+  procedure, cross-checked against a standalone Python
+  re-implementation and against Toro's own published Sod-problem table
+  before being trusted as a test oracle), `sod_shock_tube_runner.hpp`
+  (the shared simulation driver both the test and the tutorial call --
+  added during review to remove an initial ~50-line duplication, see
+  Snorlax finding below), and `test_euler_sod_shock_tube.cpp` (exact
+  mass/energy conservation to 1e-10, a momentum-impulse check to 1e-8,
+  density-vs-exact-solution agreement at several sample points, a weak
+  L1-convergence check).
+- `tutorials/euler_1d_sod_shock_tube/` -- the Sod tube at 3 resolutions,
+  actually built and run (not just written): L1(rho) = 1.055e-2 ->
+  5.68e-3 -> 3.19e-3 at nx=100/200/400, decreasing monotonically.
+  Figures not rendered in this environment (no `pandas`/`matplotlib`
+  available, `pip install` blocked by Homebrew's externally-managed-
+  environment guard) -- real, not fabricated, data.
+- `docs/adr/0010-euler-field-and-shock-capturing.md` -- resolves the
+  dangling "ADR 0010" references already present in the stalled run's
+  code comments (that file did not exist yet). Covers: the
+  `FvmSolver` N=1 -> N-component generalization (and the two
+  alternatives rejected -- a separate `VectorFvmSolver` type, and
+  forcing every Field onto `State<Scalar,N>` uniformly), componentwise
+  vs. characteristic reconstruction, why `SlipWallBoundary` is the
+  "lighter-weight" Field-aware BC (not ARCHITECTURE.md #11's
+  characteristic-based subsonic case), and the decision to defer the
+  forward-step benchmark.
+- `docs/type-reference.md` -- entries for `EulerField`, `SlipWallBoundary`,
+  updated `FvmSolver`/`RusanovFlux` entries, phase-label corrections.
+- `tasks/0009-...md` (this slice), `tasks/0010-...md` (forward-step
+  follow-on, not started -- records Amelia's design recommendation so
+  the next session doesn't need to re-derive it).
+
+Tests run: full suite, 115/115 passing (102 pre-existing + 13 new),
+CPU-only (`CFE_ENABLE_CUDA=OFF`, this machine has no CUDA), rebuilt and
+re-run after every round of changes below, not just once at the end.
+
+Review findings and resolution (Violet, Snorlax, Sally, Enzo, run in
+parallel against the finished diff):
+
+- **Violet** (numerical correctness): independently re-derived the
+  exact Sod-tube reference values (standalone Newton-Raphson, matches
+  Toro's published table) and re-ran the full suite + tutorial herself;
+  confirmed `EulerField`'s physics, `SlipWallBoundary`'s reflecting
+  construction, the `FvmSolver` N=1/N>1 branches, and the exact-
+  conservation/momentum-impulse arguments all check out. No blocking
+  finding. Optional, taken: 3 of the test's tolerances (at x=0.35,
+  0.55, 0.78) were 10-80x looser than the actually-measured error --
+  tightened to ~4-30x margins with the measured values recorded in the
+  comments, so a real regression could not hide inside the old slack.
+  Optional, noted (not a defect, tracked): no CUDA correctness test for
+  `EulerField` yet -- expected at this stage (this machine has no CUDA;
+  the standing PR policy requiring a 3D CUDA correctness test + at-scale
+  benchmark on real hardware, e.g. PSC Bridges-2, remains open against
+  this Field, same as it has for prior CPU-developed phases before
+  their own Bridges-2 follow-up).
+- **Snorlax** (simplicity/architecture): no blocking finding (confirmed
+  the `if constexpr(N==1)` branch, `SlipWallBoundary`'s scope, and BC
+  reuse are all justified, not premature). Taken: ADR 0010 now records
+  the "unify all Fields onto `State<Scalar,N>`" alternative and why it
+  was rejected (would churn every existing Field's public signature for
+  no benefit, an unrequested interface-scope expansion per AGENTS.md
+  #6); fixed one ADR sentence that read as if the forward-step
+  benchmark had been delivered in this slice when it had not; fixed a
+  stale "(Phase 1)" tag on `docs/type-reference.md`'s `cfe::solver`
+  section header; factored the ~50-line duplicated Sod-tube driver out
+  of the test and tutorial into the new shared
+  `tests/verification/sod_shock_tube_runner.hpp` (re-built and re-run
+  afterward -- 115/115 still passing, tutorial output numerically
+  unchanged, confirming the refactor was behavior-preserving). Noted,
+  not acted on: unqualified `sqrt()` in `EulerField::sound_speed` is
+  this codebase's first transcendental-function call -- flagged for a
+  future `float`/`double` overload-resolution convention decision, not
+  required for this slice.
+- **Sally** (usability, PhD-student-learning-C++ perspective):
+  **blocking**, fixed -- the tutorial README's documented run commands
+  didn't match where the standalone build actually places the binary,
+  and the plotting step didn't mention its `pandas`/`matplotlib`
+  dependency (both now follow the exact two-path convention and
+  dependency note `tutorials/burgers_1d_shock_and_steepening/README.md`
+  already established). Optional, taken: added a plain-language
+  explanation of what a contact discontinuity physically is (to the
+  tutorial README), a one-sentence physical justification for the
+  exact Riemann solver's rarefaction-vs-shock branch selection (in
+  `sod_shock_tube_exact.hpp`), and a units/nondimensionalization note
+  to `EulerField`'s header comment.
+- **Enzo** (performance/resource discipline): no finding requiring
+  action -- confirmed via actual arm64 disassembly that the N=1 branch
+  of the generalized `axis_flux_difference` is zero-cost (identical
+  codegen to the pre-generalization path) and the new N>1 (Euler) path
+  has no hidden copies/allocations. One real signal recorded as a
+  future watch item, not acted on now: register pressure jumps from a
+  0-byte stack frame at N=3 to a 128-byte spill at N=5 (`-O3`, arm64) --
+  relevant once real CUDA hardware or a higher-component-count field
+  (AGENTS.md #8's 5/10/20/50/100 sweep) is in play, not for this
+  CPU-only, N=3..4 slice.
+
+Independent final review (Ilia, before reading any other reviewer's
+notes) and alignment check (Amelia), run after the above was resolved:
+
+- **Ilia**: independently re-derived the Sod exact solution from
+  scratch (a separate Python implementation, not reading
+  `sod_shock_tube_exact.hpp` first), hand-checked `EulerField`'s
+  physical-flux formula, rebuilt from touched source and re-ran
+  115/115 himself. Confirmed the (now-split) scope was met and the
+  Phase-3/forward-step deferral was documented consistently everywhere
+  he checked (ADR, task files, this entry, the presentation). No
+  numerics or architecture problem found. **Blocking, fixed:** this
+  entry's own prior wording ("CSV data is real and committed") did not
+  hold up -- he checked `tutorials/euler_1d_sod_shock_tube/data/` and
+  `figures/` directly and found both empty, against
+  `tutorials/burgers_1d_shock_and_steepening/data/*.csv` as the
+  project's actual tracked-data precedent. Root cause: the tutorial
+  binary had been run from inside `build/`, so its relative-path output
+  landed under `build/.../data/*.csv`, never under the tracked
+  `tutorials/euler_1d_sod_shock_tube/data/` this repository actually
+  commits from. Fixed by re-running the binary from
+  `tutorials/euler_1d_sod_shock_tube/` itself (exactly as that
+  tutorial's own README documents), confirming the CSVs now land in
+  the tracked directory, and staging them (`git add`) -- not committed
+  to git by this agent, since no commit was requested this session; the
+  wording above is corrected accordingly. Optional (taken): added a
+  one-line acknowledgment (ADR 0010, Decision 3) that Euler's
+  "supersonic outflow" reuse of `InflowOutflowBoundary` is argued
+  correct by a type-level check (it is already generic over
+  `State<Scalar,N>`), not exercised end-to-end with `EulerField` itself
+  in this slice (only `StaticBoundary` is, via the Sod tube) -- real
+  exercise of it is expected in the forward-step follow-on, whose inlet
+  needs exactly this. Optional (taken): added "DG `p=1`/`p=2` prototype
+  where feasible" to task 0009's "Explicitly not in this task" list --
+  ROADMAP.md's Phase 3 section names it with "where feasible" language
+  never actually requested by the user, but every OTHER deferred
+  Phase-3 item (HLLC, subsonic BC, forward-step) was already enumerated
+  there and this one was missing, an inconsistency rather than a scope
+  problem.
+- **Amelia**: alignment check came back clean -- confirmed
+  `docs/adr/0010-...md`'s Decision 4 accurately records her own
+  multi-block-design and slice-split recommendation (not strengthened
+  or weakened), confirmed `tasks/0010-...md` preserves enough of that
+  recommendation (the two-block approach, the cross-block BC shape, the
+  "needs its own ADR/review" requirement) for a future session to pick
+  up without re-consulting her, and confirmed the implementation stays
+  consistent with how other Fields/BCs/NumericalFlux types in this
+  codebase are already shaped. No drift from her original
+  recommendation; no overselling of what shipped.
+
+Architecture decisions:
+`docs/adr/0010-euler-field-and-shock-capturing.md` (new, amended during
+review per the Snorlax findings above, and again per Ilia's optional
+finding above).
+
+Known limitations (unchanged from what the ADR/tasks already document,
+restated here for the record):
+- No CUDA correctness test or at-scale benchmark for `EulerField` yet
+  -- this machine has no CUDA hardware; remains open against this
+  project's standing per-PR requirement, same status prior CPU-first
+  phases carried before their own Bridges-2 follow-up.
+- HLLC/AUSM-family numerical flux not implemented (Rusanov alone
+  satisfies the user's own "Rusanov and/or HLLC" phrasing for this
+  slice; Rusanov's contact-discontinuity smearing is documented and
+  demonstrated in both the test and the tutorial).
+- Componentwise (not characteristic) MUSCL reconstruction; the
+  characteristic-based partial-specification subsonic inflow/outflow
+  BC (ARCHITECTURE.md #11's other named Field-aware shape) remains
+  unimplemented -- no case in this slice needs it.
+- The forward-facing-step benchmark itself (2D and 3D-CPU), its
+  multi-block grid join, and the new cross-block `BoundaryCondition`
+  it needs are NOT implemented -- tracked at
+  `tasks/0010-phase4-forward-step-multiblock.md`, which records
+  Amelia's design recommendation so it does not need to be re-derived.
+- Tutorial figures (PNGs) were not rendered in this environment
+  (`pandas`/`matplotlib` unavailable, install blocked by the system
+  Python's externally-managed-environment guard) -- the underlying CSV
+  data is real, generated by an actual run from the tutorial's own
+  documented working directory, and staged (not committed to git by
+  this agent this session, since no commit was requested).
+
+Next recommended task:
+`tasks/0010-phase4-forward-step-multiblock.md` -- the forward-facing-
+step wind tunnel benchmark, using the two-`CartesianGrid`-block design
+already agreed with Amelia. Needs its own ADR (the cross-block
+boundary mechanism is itself a major architectural decision) and its
+own Violet/Snorlax/Sally/Enzo review pass before Ilia/Amelia sign-off,
+per CLAUDE.md.
+
+## 2026-10-12 — Task 0009: 3D CPU test, CUDA correctness, and PSC Bridges-2 at-scale benchmark (closing the per-PR policy gap before commit)
+
+Before task 0009 was committed, the user caught a real gap against this
+project's own standing per-PR policy (raised during PR #3's review):
+every PR adding a new Field/numerical-scheme must include a 3D CPU
+correctness test, a CUDA correctness test, AND an at-scale GPU
+benchmark in the SAME PR -- not deferred as a follow-up, which is what
+task 0009's "known limitations" above had effectively done. This entry
+closes that gap for `EulerField` before the commit, rather than after.
+
+What was done:
+
+- `tests/unit/test_euler_3d_sanity.cpp` (new, CPU-only, no remote
+  hardware needed): built and run locally first, standalone, to
+  confirm it actually passed before trusting anything else in this
+  slice -- it does (116/116 local CPU tests, this one included).
+- `tests/unit/test_euler_cuda.cu` / `test_euler_3d_cuda.cu` and
+  `benchmarks/euler/bench_euler_cuda.cu` / `bench_euler_3d_cuda.cu`
+  (new, written against real hardware this machine doesn't have):
+  read carefully before trusting them, specifically for the
+  established nvcc hard constraint (a locally-defined lambda cannot be
+  a template argument to a function containing an extended
+  `__device__` lambda in a `.cu` file) -- both test files correctly use
+  the named `cfe::SolverResidual<decltype(solver)>` functor, matching
+  `test_burgers_cuda.cu`/`test_scalar_advection_cuda.cu` precedent
+  exactly; `FvmSolver` aggregate-init and `SlipWallBoundary` usage also
+  matched established precedent. No defect found in this review pass.
+- Found and reused the existing persistent Bridges-2 scratch checkout
+  (`~/scratch_cfe/CFE` on the cluster, same pattern task 0008's own
+  entry documents) rather than cloning fresh: checked out
+  `cfe/development/multi-agent-workflow` there (already on `origin`,
+  matching local `HEAD` `8a6f2d1`), then synced this session's
+  uncommitted working-tree changes on top via `tar | ssh ... | tar x`
+  (`rsync` unavailable on this machine; `scp`'s documented past
+  unreliability over the multiplexed connection avoided entirely).
+  Verified the sync byte-for-byte via `sha256sum` on every new CUDA
+  test/benchmark file and the modified CMakeLists before trusting the
+  remote tree.
+- Loaded `cuda-v100/12.9.2` (aliases `cuda-legacy/12.9.2`) +
+  `gcc/13.3.1-p20240614` and built with
+  `-DCFE_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=70` on the Bridges-2
+  login node (no GPU allocation needed for the build itself) --
+  succeeded cleanly. Ran the CPU ctest sanity gate on the login node
+  first, per task 0008's own precedent: 116/127 passed, the 11
+  failures being exactly the CUDA tests (`cudaMalloc: CUDA driver
+  version is insufficient` -- no GPU on the login node), confirming the
+  CPU-only tests were unaffected before spending any GPU time.
+- GPU allocation: the first `salloc -A phy260058p -p GPU-shared
+  --qos=gpuinteract --gres=gpu:v100-32:1 -t 30:00 --no-shell` attempt
+  queued indefinitely (`Nodes_required_for_job_are_DOWN,_DRAINED_or_
+  reserved_for_jobs_in_higher_priority_partitions` despite the
+  requested QOS) -- the same cluster scheduling noise task 0004's own
+  Bridges-2 entry already documented for a CPU partition; cancelled and
+  resubmitted identically, which granted promptly (job `49095911`,
+  node `v002`, Tesla V100-SXM2-32GB confirmed via `nvidia-smi`).
+- On the allocated node: full suite **127/127 passed**, including both
+  new Euler CUDA tests
+  (`test_euler_cuda_matches_cpu_reference`,
+  `test_euler_3d_cuda_matches_cpu_reference`), zero regressions to any
+  pre-existing CUDA test. `compute-sanitizer --tool initcheck`: **0
+  errors**, matching task 0006's own Burgers-CUDA verification
+  methodology exactly.
+- Ran both new benchmark sweeps for real: 1D up to 10^8 cells
+  (1.648e9 cell-updates/s at 10^8); 3D cube up to 512^3/~134M cells
+  (3.512e8 cell-updates/s at 512^3). The OOM risk flagged going in (5
+  components x 134M cells x 3 device buffers x 8 bytes ~ 16.1 GB
+  against the V100's 32 GB) was watched, not assumed -- the full sweep
+  completed with no allocation failure. Measured against the actual
+  budget this is **~50% utilization** -- a comfortable margin, not a
+  near-miss (an earlier draft of this entry implied otherwise;
+  corrected during Enzo's review, see below).
+- Captured static register/spill data (`nvcc --resource-usage`, no GPU
+  allocation needed) per AGENTS.md #8: the Euler residual kernel uses
+  66 registers / 0 spill at N=3 (1D) and 92 registers / 0 spill at N=5
+  (3D) -- no GPU-side register spilling at either component count, in
+  contrast to task 0009's own CPU (arm64) finding of a 128-byte stack
+  spill at N=5.
+- Allocation released (`scancel`) after ~3.3 of its 30 minutes --
+  correctness, sanitizer, both benchmark sweeps, and the static
+  register check all completed well inside the window by doing setup
+  (sync, build, CPU gate, module load) before `salloc`, not during it.
+- Full real numbers, methodology, environment, and the register/spill
+  table: `docs/performance/0007-phase3-euler-cuda-results.md`. Raw CSVs
+  committed at `benchmarks/results/phase3_euler_v100.csv` /
+  `phase3_euler_3d_v100.csv`.
+
+Review: Violet (numerical correctness of the GPU path) and Enzo
+(performance/register-pressure at scale) reviewed this specific
+follow-up. Both independently confirmed the core claims hold (3D
+reduces bit-exactly/column-for-column to the 1D reference under
+uniform/periodic Y/Z; benchmark/test timed-region structure is clean,
+no hidden allocations or transfers) but found real problems:
+
+- **Enzo, blocking (doc/arithmetic errors, not code problems):** this
+  entry's and `docs/performance/0007-...md`'s first drafts claimed a
+  "roughly-5x" 3D-vs-1D throughput compounding and a naive "~35%"
+  occupancy estimate for the 92-register residual kernel. Both wrong.
+  Real compounding factor, computed directly from the benchmark tables:
+  **~2.2x-2.8x** (average ~2.5x). Real occupancy, accounting for the
+  actual 256-thread launch configuration
+  (`cuda_backend.cuh:49`) and Volta's register-allocation granularity
+  (92 registers rounds up to 96/thread): **~25%**, not ~35%. Both fixed
+  in `docs/performance/0007-...md` with the corrected methodology shown
+  explicitly; this entry's own numbers above corrected to match.
+- **Violet, filed optional but treated as effectively blocking:**
+  `test_euler_cuda.cu`/`test_euler_3d_cuda.cu` originally ran only to
+  t=0.06/t=0.12 -- Violet independently simulated the identical setup
+  and confirmed neither the shock nor the rarefaction reaches either
+  wall in that time, so despite the tests' own "reflecting tube"
+  framing, no version of either test had ever actually exercised a wave
+  reflecting off `SlipWallBoundary` (the CPU-vs-GPU bit-agreement claim
+  itself remained valid -- two backends computing the identical, if
+  boundary-inert, sequence -- but the coverage claim was false
+  advertising). Fixed with real evidence: a standalone CPU-only probe
+  (not committed) confirmed the shock reaches the wall at t~0.27-0.28
+  and the post-reflection max wave speed stays ~2.21 (comfortably under
+  the existing `kMaxSpeedEstimate=5.0` margin, so that constant did not
+  need to change). Both tests' step counts extended to t=0.5
+  (300->2500 steps 1D, 150->625 steps 3D), and a mass/total-energy
+  conservation check added to each as the acceptance criterion for the
+  now-reflection-including run (no closed-form solution exists for a
+  doubly-reflected Sod problem, so conservation -- not an exact value
+  -- is the right physical check). Re-verified for real on a second
+  Bridges-2 V100 allocation (job `49096728`, node `v008`, ~20 min
+  requested, ~1:43 used) after the fix: full suite still **127/127**,
+  `compute-sanitizer --tool initcheck` still **0 errors** -- the longer
+  runs did not regress anything or destabilize.
+- **Violet, optional, taken:** `test_euler_3d_sanity.cpp`'s `1e-10`
+  tolerance was ~10 orders looser than the actual agreement. Tightening
+  this surfaced a genuine cross-platform finding: an exact (`0.0`)
+  tolerance passes deterministically on this project's development
+  machine (arm64/clang) but does NOT reproduce bit-exact on Bridges-2
+  (x86-64/gcc 13.3.1) -- same source/reasoning, different legitimate
+  floating-point rounding between toolchains (confirmed via a careful
+  isolated re-test after first chasing a false lead: an overly broad
+  find-and-replace during the initial tolerance edit had accidentally
+  also corrupted two unrelated `Scalar(0.0)` initializers elsewhere in
+  the same function, which is what actually caused that first,
+  spurious-looking "looser tolerance makes it fail" result -- caught
+  and corrected before it was mistaken for real nondeterminism).
+  Settled on `1e-13`: still ~10^3 tighter than the original for real
+  regression protection, confirmed passing on both toolchains.
+- **Enzo, optional, taken:** the 512^3/N=5 OOM-risk framing above and
+  in the doc implied a near-miss; corrected to state the real measured
+  utilization (~50%, a comfortable margin, not danger narrowly averted).
+- **Enzo, optional, noted, not acted on this session:** no durable
+  tracked location yet for when a real N-configurable field (future
+  species/ChemGen work, AGENTS.md #21) will finally produce actual
+  10/20/50/100-component register/occupancy data per AGENTS.md #8 --
+  a one-line forward reference belongs in that future work's own ADR;
+  recorded as a known limitation below in the meantime.
+
+Ilia's and Amelia's prior sign-off on task 0009 itself (the physics,
+solver, and architecture) was judged still valid rather than re-run
+from scratch: this follow-up adds test/benchmark/documentation
+coverage, and fixes errors discovered within that new coverage, without
+changing any production physics, solver, or architecture code their
+review already covered; Amelia's direction check from the original
+entry (the bundling-split recommendation) is unaffected.
+
+Known limitations (supersedes the "no CUDA correctness test or
+at-scale benchmark" bullet from the entry above, which is now
+resolved):
+- No float32 benchmark variant for Euler yet, no `ncu --set full`
+  runtime occupancy/bandwidth profile (static register/spill check
+  only) -- reasonable future work, not required to close this specific
+  per-PR gap.
+- Register pressure at N=5 (92 registers/thread, 96 after Volta's
+  allocation rounding) bounds V100 occupancy to ~25% even with zero
+  spilling (corrected methodology above); not yet measured at the
+  10/20/50/100-component scale AGENTS.md #8 anticipates for reacting-
+  flow states -- flagged as a watch item for a future higher-component
+  Field benchmark, not a defect in this 3-5 component slice. No durable
+  tracked location for this yet beyond this entry and
+  `docs/performance/0007-...md` -- the first real species/ChemGen
+  N-configurable Field is the natural point to actually collect that
+  data and should reference back here.
+- Every other known limitation from the original task 0009 entry above
+  (Rusanov contact smearing, componentwise reconstruction, no HLLC,
+  no subsonic BC, the forward-step benchmark itself) is unchanged by
+  this follow-up.
+
+Next recommended task: unchanged --
+`tasks/0010-phase4-forward-step-multiblock.md`.
