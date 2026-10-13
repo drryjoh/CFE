@@ -4093,3 +4093,200 @@ Next recommended task: implement HLLC (named Phase 3 item, small,
 well-scoped) and re-run this same KH-rollup check at res288 before
 considering PPM; separately, resolve the MPI task A/B scoping question
 with the user and write whichever is prioritized into `ROADMAP.md`.
+
+## 2026-10-13 — Task 0010 follow-up: `BlockSet` -- one contiguous allocation per buffer kind for the forward-step's two blocks
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+Came out of a user architecture discussion about why the forward-step
+case (`docs/adr/0011-forward-step-block-interface.md`) uses two separate
+`CartesianGrid`/`Field` instances (one per block) rather than one merged
+entity -- already settled (ADR 0011 Decision 1: masking would push
+geometry-awareness into `FvmSolver`'s hot loop; `CartesianGrid`'s
+`flat_index` speed trick only holds within one rectangular box). The
+concrete follow-on the user actually wanted: `ForwardStepBlocks`
+(`tests/verification/forward_step_setup.hpp`) allocated SIX independent
+`cfe::Field<Scalar,N>` objects (state1/stage1_1/scratch1 for block 1,
+state2/stage1_2/scratch2 for block 2) -- two blocks' worth of
+(state/stage1/scratch) buffers, each its own heap allocation. Wanted:
+these consolidated into one contiguous allocation PER BUFFER KIND
+(state/stage1/scratch), not fragmented into six independent allocations
+-- for memory control, locality, and as groundwork toward eventually
+unifying with MPI's own decomposition model. Two deliverables: (1) a
+written memory-layout/architecture roadmap document, (2) the concrete
+refactor itself, verified behavior-preserving, not assumed.
+
+Files changed:
+- `src/cfe/field/block_set.hpp` (new) -- `cfe::BlockSet<Scalar,
+  NComponents, Layout=AoSLayout>`: owns ONE `std::vector<Scalar>` sized
+  for the sum of several blocks' cell counts, hands out a `FieldView` per
+  block (`view(block)`/`view(block) const`) at a precomputed pointer
+  offset into that single allocation. Built from
+  `explicit BlockSet(std::initializer_list<std::size_t> block_cell_counts)`.
+  Needed zero changes to `FieldView` itself (already just
+  `(Scalar* data, std::size_t n_cells)`, no ownership assumption) and
+  zero changes to any of its consumers (`FvmSolver`,
+  `BlockInterfaceBoundary`, `ssp_rk2_combine_stage1/2`) -- they cannot
+  tell a `BlockSet`-provided view from a `Field`-provided one.
+- `tests/verification/forward_step_setup.hpp` -- `ForwardStepBlocks` now
+  has `Blocks state_blocks, stage1_blocks, scratch_blocks;` (three
+  `BlockSet`s, each covering both blocks) instead of six `Field`s. Added
+  `kUpstream=0`/`kDownstream=1` named constants, used at every
+  `.view(...)` call site instead of bare `0`/`1` (Snorlax/Sally review
+  finding: `grid1`/`grid2`'s 1-indexed naming invites an off-by-one slip
+  against 0-indexed `view()`). `fill_uniform`/`scan` (in
+  `max_wave_speed`)/`accumulate` (in `total_mass`)/`write_vtk_block`
+  changed from taking `const Storage&` to `View`/`ConstView` by value --
+  these helpers never needed to know whether a view came from a `Field`
+  or a `BlockSet`.
+- `tests/unit/test_forward_step_sanity.cpp` -- updated both existing
+  tests' call sites to the new `BlockSet` views; added
+  `test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation`,
+  a direct pointer-arithmetic check (`view(kDownstream).data() ==
+  view(kUpstream).data() + view(kUpstream).n_cells() * N`) for all three
+  `BlockSet`s -- confirms genuine contiguity, not just two allocations
+  that happen to produce the same answer.
+- `tutorials/euler_3d_forward_step_extrusion/forward_step_3d.cpp` -- one
+  small call-site update (same pattern).
+- `docs/type-reference.md` -- new `BlockSet` row.
+- `ARCHITECTURE.md` -- new section 21 ("Memory layout: ownership, views,
+  and block-structured grids"): deliverable 1, see "Architecture
+  decisions" below for where/why.
+- `.gitignore` -- `tutorials/euler_2d_forward_step/data/**/*.vtk` and
+  `tutorials/euler_3d_forward_step_extrusion/data/**/*.vtk` (per the
+  user's standing instruction to stop committing raw VTK snapshot data
+  going forward; `summary.csv` in the same directories is deliberately
+  NOT matched by this pattern and stays trackable). The historical VTK
+  data already committed in prior commits is untouched -- a separate
+  cleanup question the user hasn't decided on yet.
+
+Tests added:
+`test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation`
+(above). No other new tests -- this is a refactor of existing,
+already-tested behavior, not new physics/numerics.
+
+Benchmarks run:
+None. This is an allocation-count/memory-layout consolidation (6 calls
+to 3), not a claimed performance improvement -- Enzo's review confirmed
+no overclaiming language exists anywhere in the diff/docs, and this
+entry makes the same distinction explicitly: no wall-clock/throughput
+number is claimed or implied by this change.
+
+Performance change:
+None claimed. `BlockSet::view(block)` is confirmed (Enzo's review) to be
+nothing more than precomputed-offset pointer arithmetic plus a
+two-word, trivially-copyable `FieldView` construction -- no allocation,
+no synchronization, called from `step()`'s hot path the same way
+`Field::view()` already was.
+
+Scientific verification:
+This is a memory-layout-only change with no numerics touched, so the
+required evidence is regression (bit-identical before/after), not new
+verification:
+- Full C++ unit/verification suite: 124/124 passing (123 pre-existing +
+  the 1 new contiguity test above), zero regressions.
+- Full suite re-run a second time under `-fsanitize=address,undefined`
+  (Debug build, `build_asan/`) -- also 124/124, zero sanitizer
+  diagnostics anywhere in the log. Taken on Violet's specific
+  recommendation: before this refactor, an out-of-bounds bug in the
+  ghost/j-mapping arithmetic would likely crash or read garbage
+  (independent heap allocations); after this refactor, the same class of
+  bug could silently read the OTHER block's real, physically-plausible
+  field data instead -- much harder to catch by eye. This repo has no
+  sanitizer infrastructure today; this was a one-time check, not a new
+  standing CI requirement (not decided here).
+- Git-stash A/B comparison (reverted to pre-refactor code, rebuilt a
+  scratch driver, ran it, restored the refactor, reran the identical
+  driver): bit-identical `final_mass` (17 significant digits) and
+  identical step counts at res20/res40 (2D, short run) and a 3D case.
+  Repeated with the REAL production path
+  (`cfe_verification::run_and_report`/`write_vtk_frame`, the tutorial's
+  own driver) at res20/res40 to the tutorial's actual `t_final=4`: also
+  bit-identical.
+- Extended to all of the production 2D sweep's resolutions except
+  288 during the main implementation pass (20/40 directly; 80/96/144/216
+  independently confirmed bit-identical by Violet during her review),
+  then closed out the last one on her optional recommendation: res=288
+  (the largest/most expensive resolution), full production settings
+  (t_final=4, cfl=0.4, threaded backend): baseline steps=12025,
+  final_mass=6.3385045261415618; after refactor: steps=12025,
+  final_mass=6.3385045261415618 -- bit-identical. All 7 of the tutorial's
+  production resolutions are now directly confirmed, not just 6/7.
+- Direct memory-contiguity verification (not just trusted): the new
+  contiguity test's pointer-arithmetic check passes for all three
+  `BlockSet`s at a real grid resolution.
+- Correction on which tests "specifically verify BlockSet" (Ilia's
+  review): of the three tests the task named as most load-bearing,
+  `test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides`
+  builds its own `cfe::Field` objects directly and never instantiates
+  `ForwardStepBlocks`/`BlockSet` at all -- it is a valid regression guard
+  for `BlockInterfaceBoundary` (confirms this refactor didn't disturb
+  it), but is not itself evidence for `BlockSet`. The real load-bearing
+  `BlockSet` oracles are
+  `test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time`
+  (exercises the real `ForwardStepBlocks`/`BlockSet` path end-to-end) and
+  the two `test_forward_step_sanity.cpp` tests (now updated to read
+  through `BlockSet` views) plus the new contiguity test.
+
+Architecture decisions:
+`ARCHITECTURE.md` section 21 ("Memory layout: ownership, views, and
+block-structured grids") -- deliverable 1. Where this document should
+live was agreed with Amelia BEFORE it was written (CLAUDE.md's "consult
+before a consequential design decision" rule), the same pattern ADR 0011
+itself records for its own design direction. Asked to choose among (a) a
+new `docs/architecture/` file, (b) an `ARCHITECTURE.md` addition, or (c)
+a new ADR, Amelia recommended (b) and gave this reasoning: `ARCHITECTURE.md`
+section 1 already describes itself as "current intended architecture"
+that "may evolve through Architecture Decision Records," which is
+exactly what a cross-cutting reference like this is, not a single
+decision with a verdict; `docs/adr/README.md`'s own decision list
+(execution backend, state memory layout, grid connectivity, ...) is a
+list of things already DECIDED, whereas this document's part (d) is
+required to stay a standing OPEN QUESTION (whether/when to unify
+block-structured and MPI-level decomposition) -- writing that as an ADR
+would force an artificial Proposed/Accepted status onto something not
+meant to resolve soon; and `docs/architecture/` is not an existing
+convention in this repo's `docs/` layout (`docs/adr/`, `docs/theory/`,
+`docs/verification/`, `docs/performance/` are). She also flagged
+(blocking, fixed before finalizing) that `block_set.hpp`'s header
+comment and `docs/type-reference.md`'s new row had already cited a
+`docs/architecture/0001-...md` path before this consult landed --
+corrected to point at `ARCHITECTURE.md` #21 once her answer was in. She
+reviewed `BlockSet`'s actual shape (`initializer_list` constructor,
+`view`/`n_cells`/`n_blocks`/`size`) separately and found it
+appropriately scoped to today's two-block need, not over-built. Her
+scope guidance on the document's content (keep part (d) genuinely open,
+not steering toward a recommendation; keep part (e), AMR/unstructured,
+to a pointer rather than a design) was followed as given.
+
+Known limitations:
+- `BlockSet` is a same-process, single-address-space mechanism; it does
+  not generalize to, and says nothing about, MPI-level decomposition --
+  the open question of whether/when `BlockSet`-style block structure and
+  `CartesianPartition`/`MpiHaloBoundary`-style rank decomposition should
+  ever unify remains exactly that, an open question (ARCHITECTURE.md
+  #21), not decided or even scoped here.
+- `BlockSet` still knows nothing about block geometry/adjacency --
+  `BlockInterfaceBoundary`'s existing two-blocks/one-shared-axis
+  limitation (ADR 0011) is unchanged by this task.
+- No CUDA/device-memory counterpart (`DeviceBlockSet`) exists yet --
+  `cfe::Field`'s own device counterpart (`backend::cuda::DeviceField`)
+  has no parallel on the `BlockSet` side. Enzo's review notes this would
+  need its own zero-init-per-block-region handling (not just one
+  `cudaMemset`, unlike `DeviceField`'s current single-region case) if/
+  when a block-structured case needs to run on GPU -- not needed by, or
+  built as part of, this task.
+- `n_blocks()`/`n_cells(block)`/`size()` on `BlockSet` mirror `Field`'s
+  own interface but have no current call site in this codebase (kept for
+  the same reason `Field` exposes them, per Snorlax's review finding;
+  noted here rather than silently carried as unexplained surface).
+
+Next recommended task:
+Real CUDA hardware access remains the standing outstanding item for the
+forward-step mechanism generally (unchanged from the prior entry) --
+closing that would also be the natural point to decide whether a
+`DeviceBlockSet` is worth building. Otherwise, continue Phase 4's
+remaining items (moving-frame/grid-recycling prototype, 1D propagating
+shock demonstration) per `ROADMAP.md`.

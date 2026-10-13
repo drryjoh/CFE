@@ -71,6 +71,7 @@
 #include <string>
 
 #include "cfe/core/types.hpp"
+#include "cfe/field/block_set.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/euler/field.hpp"
 #include "cfe/grid/boundary/block_interface_boundary.hpp"
@@ -91,8 +92,22 @@ struct ForwardStepBlocks
 {
   using Field = cfe::EulerField<Scalar, Dim>;
   static constexpr std::size_t N = Field::n_components;
-  using Storage = cfe::Field<Scalar, N>;
+  // One `BlockSet` per buffer KIND (state/stage1/scratch), each one
+  // contiguous allocation covering BOTH blocks -- see
+  // src/cfe/field/block_set.hpp and ARCHITECTURE.md #21. Block index
+  // `kUpstream` (0) is grid1, `kDownstream` (1) is grid2 -- use these
+  // constants, not bare `0`/`1`, at every `.view(...)` call site below
+  // (the grid1/grid2 naming is 1-indexed, which invites an off-by-one
+  // slip against the 0-indexed `view()` -- these constants remove that
+  // trap for a future third block).
+  static constexpr std::size_t kUpstream = 0;
+  static constexpr std::size_t kDownstream = 1;
+  using Blocks = cfe::BlockSet<Scalar, N, cfe::AoSLayout>;
   using View = cfe::FieldView<Scalar, N, cfe::AoSLayout>;
+  // What `Blocks::view(block)` returns from a `const ForwardStepBlocks`
+  // method (`max_wave_speed`/`total_mass`/`write_vtk_frame` below) --
+  // read-only, same reasoning as `Field::ConstView` (field.hpp).
+  using ConstView = cfe::FieldView<const Scalar, N, cfe::AoSLayout>;
 
   using BoundaryY = cfe::SlipWallBoundary<Field>;
   using BoundaryZ = cfe::PeriodicBoundary;  // inert (never invoked) when Dim == 2
@@ -115,12 +130,16 @@ struct ForwardStepBlocks
 
   Field field{};
   cfe::CartesianGrid<Scalar> grid1, grid2;
-  // `Field<Scalar,N>` (this struct's `Storage` alias) has no default
-  // constructor (its one constructor takes `n_cells`) -- these must be
-  // built from `grid1`/`grid2` in the member-initializer list below, in
-  // DECLARATION order, not reassigned in the constructor body.
-  Storage state1, stage1_1, scratch1;
-  Storage state2, stage1_2, scratch2;
+  // `BlockSet` (this struct's `Blocks` alias) has no default constructor
+  // (its one constructor takes the per-block cell counts) -- these must
+  // be built from `grid1`/`grid2` in the member-initializer list below,
+  // in DECLARATION order, not reassigned in the constructor body. Each
+  // one is a SINGLE allocation covering both blocks' cells for that
+  // buffer kind -- `state_blocks.view(kUpstream)`/`view(kDownstream)` replace the former
+  // independent `state1`/`state2` Fields (same for stage1/scratch), with
+  // zero change to how any per-cell numerics code below consumes them
+  // (they still only ever see a plain `FieldView`).
+  Blocks state_blocks, stage1_blocks, scratch_blocks;
   Solver1 solver1;
   Solver2 solver2;
 
@@ -190,12 +209,9 @@ struct ForwardStepBlocks
   ForwardStepBlocks(std::size_t cells_per_unit_height, std::size_t nz_cells = 1, Scalar span_z = Scalar(1))
       : grid1(make_grid1(cells_per_unit_height, nz_cells)),
         grid2(make_grid2(cells_per_unit_height, nz_cells)),
-        state1(grid1.n_cells_total()),
-        stage1_1(grid1.n_cells_total()),
-        scratch1(grid1.n_cells_total()),
-        state2(grid2.n_cells_total()),
-        stage1_2(grid2.n_cells_total()),
-        scratch2(grid2.n_cells_total())
+        state_blocks{grid1.n_cells_total(), grid2.n_cells_total()},
+        stage1_blocks{grid1.n_cells_total(), grid2.n_cells_total()},
+        scratch_blocks{grid1.n_cells_total(), grid2.n_cells_total()}
   {
     field.gamma = kGamma;
     if constexpr (Dim == 3) {
@@ -236,8 +252,8 @@ struct ForwardStepBlocks
     const cfe::State<Scalar, N> inflow_state =
         field.conserved_from_primitive(kInflowDensity, inflow_velocity, kInflowPressure);
 
-    fill_uniform(state1, grid1, inflow_state);
-    fill_uniform(state2, grid2, inflow_state);
+    fill_uniform(state_blocks.view(kUpstream), grid1, inflow_state);
+    fill_uniform(state_blocks.view(kDownstream), grid2, inflow_state);
 
     // j_offset_to_neighbor derivation: block1's padded j is
     // `ngy1 + local_j1` (local_j1 in [0, ny1)); in the shared band
@@ -257,13 +273,13 @@ struct ForwardStepBlocks
     // transposition here would otherwise compile silently and only show
     // up as a wrong ghost value at runtime (Sally review finding).
     BoundaryX1 boundary_x1{.domain_edge_value = inflow_state,
-                           .neighbor_field = state2.view(),
+                           .neighbor_field = state_blocks.view(kDownstream),
                            .neighbor_grid = grid2,
                            .j_offset_to_neighbor = offset_1_to_2,
                            .j_valid_lo = grid1.ngy + step_rows,
                            .j_valid_hi = grid1.ngy + grid1.ny};
     BoundaryX2 boundary_x2{.domain_edge_value = cfe::State<Scalar, N>{},
-                           .neighbor_field = state1.view(),
+                           .neighbor_field = state_blocks.view(kUpstream),
                            .neighbor_grid = grid1,
                            .j_offset_to_neighbor = offset_2_to_1,
                            .j_valid_lo = grid2.ngy,
@@ -273,7 +289,12 @@ struct ForwardStepBlocks
     solver2 = Solver2{grid2, field, boundary_x2, BoundaryY{}, BoundaryZ{}};
   }
 
-  static void fill_uniform(Storage& state, const cfe::CartesianGrid<Scalar>& grid, const cfe::State<Scalar, N>& q)
+  // Takes a plain `View` (not a `BlockSet` reference): this function, and
+  // every helper below it, never needs to know whether the view it was
+  // handed is backed by its own allocation or is one block of a shared
+  // `BlockSet` buffer -- that is the whole point of `FieldView` being a
+  // non-owning pointer+size (see field.hpp).
+  static void fill_uniform(View state, const cfe::CartesianGrid<Scalar>& grid, const cfe::State<Scalar, N>& q)
   {
     const std::size_t total = grid.n_cells_total();
     for (std::size_t cell = 0; cell < total; ++cell) {
@@ -286,7 +307,7 @@ struct ForwardStepBlocks
   Scalar max_wave_speed() const
   {
     Scalar max_speed = Scalar(0);
-    auto scan = [&](const Storage& state, const cfe::CartesianGrid<Scalar>& grid) {
+    auto scan = [&](ConstView state, const cfe::CartesianGrid<Scalar>& grid) {
       for (std::size_t k = 0; k < grid.nz; ++k) {
         for (std::size_t j = 0; j < grid.ny; ++j) {
           for (std::size_t i = 0; i < grid.nx; ++i) {
@@ -299,8 +320,8 @@ struct ForwardStepBlocks
         }
       }
     };
-    scan(state1, grid1);
-    scan(state2, grid2);
+    scan(state_blocks.view(kUpstream), grid1);
+    scan(state_blocks.view(kDownstream), grid2);
     return max_speed;
   }
 
@@ -310,31 +331,37 @@ struct ForwardStepBlocks
   {
     // Stage 1: both blocks read each other's CURRENT (stage-0) state
     // through the interface boundary (already the case: boundary_x's
-    // neighbor_field already points at state2/state1 after construction
-    // and after the end of the previous step's stage 2, below).
-    solver1.residual(state1.view(), scratch1.view());
-    solver2.residual(state2.view(), scratch2.view());
-    cfe::ssp_rk2_combine_stage1<Scalar>(state1.view(), stage1_1.view(), scratch1.view(), dt,
-                                        solver1.active_cell_count(), solver1.active_cell_index_map());
-    cfe::ssp_rk2_combine_stage1<Scalar>(state2.view(), stage1_2.view(), scratch2.view(), dt,
-                                        solver2.active_cell_count(), solver2.active_cell_index_map());
+    // neighbor_field already points at state_blocks.view(kDownstream) /
+    // view(kUpstream) (solver1's / solver2's neighbor, respectively)
+    // after construction and after the end of the previous step's
+    // stage 2, below).
+    solver1.residual(state_blocks.view(kUpstream), scratch_blocks.view(kUpstream));
+    solver2.residual(state_blocks.view(kDownstream), scratch_blocks.view(kDownstream));
+    cfe::ssp_rk2_combine_stage1<Scalar>(state_blocks.view(kUpstream), stage1_blocks.view(kUpstream),
+                                        scratch_blocks.view(kUpstream), dt, solver1.active_cell_count(),
+                                        solver1.active_cell_index_map());
+    cfe::ssp_rk2_combine_stage1<Scalar>(state_blocks.view(kDownstream), stage1_blocks.view(kDownstream),
+                                        scratch_blocks.view(kDownstream), dt, solver2.active_cell_count(),
+                                        solver2.active_cell_index_map());
 
     // Stage 2: each block's interface boundary must now read the
     // OTHER block's STAGE-1 buffer, not its state buffer -- re-point
     // before computing either residual.
-    solver1.boundary_x.neighbor_field = stage1_2.view();
-    solver2.boundary_x.neighbor_field = stage1_1.view();
-    solver1.residual(stage1_1.view(), scratch1.view());
-    solver2.residual(stage1_2.view(), scratch2.view());
-    cfe::ssp_rk2_combine_stage2<Scalar>(state1.view(), stage1_1.view(), scratch1.view(), dt,
-                                        solver1.active_cell_count(), solver1.active_cell_index_map());
-    cfe::ssp_rk2_combine_stage2<Scalar>(state2.view(), stage1_2.view(), scratch2.view(), dt,
-                                        solver2.active_cell_count(), solver2.active_cell_index_map());
+    solver1.boundary_x.neighbor_field = stage1_blocks.view(kDownstream);
+    solver2.boundary_x.neighbor_field = stage1_blocks.view(kUpstream);
+    solver1.residual(stage1_blocks.view(kUpstream), scratch_blocks.view(kUpstream));
+    solver2.residual(stage1_blocks.view(kDownstream), scratch_blocks.view(kDownstream));
+    cfe::ssp_rk2_combine_stage2<Scalar>(state_blocks.view(kUpstream), stage1_blocks.view(kUpstream),
+                                        scratch_blocks.view(kUpstream), dt, solver1.active_cell_count(),
+                                        solver1.active_cell_index_map());
+    cfe::ssp_rk2_combine_stage2<Scalar>(state_blocks.view(kDownstream), stage1_blocks.view(kDownstream),
+                                        scratch_blocks.view(kDownstream), dt, solver2.active_cell_count(),
+                                        solver2.active_cell_index_map());
 
     // Restore both interface boundaries to point at the (now updated)
     // state buffers, ready for the next step's stage 1.
-    solver1.boundary_x.neighbor_field = state2.view();
-    solver2.boundary_x.neighbor_field = state1.view();
+    solver1.boundary_x.neighbor_field = state_blocks.view(kDownstream);
+    solver2.boundary_x.neighbor_field = state_blocks.view(kUpstream);
   }
 
   // Runs to `t_final` with adaptive-CFL `dt`, recomputed every step.
@@ -357,7 +384,7 @@ struct ForwardStepBlocks
   double total_mass() const
   {
     double mass = 0.0;
-    auto accumulate = [&](const Storage& state, const cfe::CartesianGrid<Scalar>& grid) {
+    auto accumulate = [&](ConstView state, const cfe::CartesianGrid<Scalar>& grid) {
       const double cell_volume = static_cast<double>(grid.dx) * static_cast<double>(grid.dy) *
                                   static_cast<double>(grid.dz);
       for (std::size_t k = 0; k < grid.nz; ++k) {
@@ -369,8 +396,8 @@ struct ForwardStepBlocks
         }
       }
     };
-    accumulate(state1, grid1);
-    accumulate(state2, grid2);
+    accumulate(state_blocks.view(kUpstream), grid1);
+    accumulate(state_blocks.view(kDownstream), grid2);
     return mass;
   }
 
@@ -383,14 +410,14 @@ struct ForwardStepBlocks
   template <class Compute>
   void write_vtk_frame(const std::string& path_prefix, const char* scalar_name, Compute compute) const
   {
-    write_vtk_block(path_prefix + "_block1.vtk", grid1, state1, scalar_name, compute);
-    write_vtk_block(path_prefix + "_block2.vtk", grid2, state2, scalar_name, compute);
+    write_vtk_block(path_prefix + "_block1.vtk", grid1, state_blocks.view(kUpstream), scalar_name, compute);
+    write_vtk_block(path_prefix + "_block2.vtk", grid2, state_blocks.view(kDownstream), scalar_name, compute);
   }
 
  private:
   template <class Compute>
-  static void write_vtk_block(const std::string& path, const cfe::CartesianGrid<Scalar>& grid,
-                               const Storage& state, const char* scalar_name, Compute compute)
+  static void write_vtk_block(const std::string& path, const cfe::CartesianGrid<Scalar>& grid, ConstView state,
+                               const char* scalar_name, Compute compute)
   {
     cfe::Field<Scalar, 1> scalar_field(grid.n_cells_total());
     for (std::size_t k = 0; k < grid.nz; ++k) {

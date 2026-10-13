@@ -86,8 +86,8 @@ int main()
       }
     }
   };
-  scan(blocks.state1, blocks.grid1);
-  scan(blocks.state2, blocks.grid2);
+  scan(blocks.state_blocks.view(blocks.kUpstream), blocks.grid1);
+  scan(blocks.state_blocks.view(blocks.kDownstream), blocks.grid2);
 
   std::printf("done. steps=%zu wall=%.2fs frames=%zu final_mass=%.6f max|mom_z|=%.3e\n", report.steps,
               report.wall_clock_s, report.frames, report.final_mass, max_abs_z_momentum);

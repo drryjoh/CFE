@@ -46,8 +46,8 @@ void run_short_sanity_check(std::size_t nz_cells)
       }
     }
   };
-  check_finite_and_physical(blocks.state1, blocks.grid1);
-  check_finite_and_physical(blocks.state2, blocks.grid2);
+  check_finite_and_physical(blocks.state_blocks.view(blocks.kUpstream), blocks.grid1);
+  check_finite_and_physical(blocks.state_blocks.view(blocks.kDownstream), blocks.grid2);
 
   const double final_mass = blocks.total_mass();
   CFE_CHECK(std::isfinite(final_mass));
@@ -64,4 +64,27 @@ CFE_TEST(test_forward_step_2d_short_run_stays_finite_and_physical)
 CFE_TEST(test_forward_step_3d_short_run_stays_finite_and_physical)
 {
   run_short_sanity_check<3>(4);
+}
+
+// Directly checks the memory-layout claim this task's `BlockSet` refactor
+// rests on -- not just that the two-block solve still produces the right
+// ANSWER (the sanity checks above), but that block2's view genuinely sits
+// immediately after block1's in ONE allocation, rather than two
+// allocations that merely happen to produce the same numbers. Computed
+// from `n_cells()`/`n_components()`, not hardcoded, so it stays correct
+// at any grid resolution.
+CFE_TEST(test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation)
+{
+  cfe_verification::ForwardStepBlocks<Scalar, 2> blocks(10);
+  using Field = cfe::EulerField<Scalar, 2>;
+  constexpr std::size_t N = Field::n_components;
+
+  auto check_contiguous = [&](auto& block_set) {
+    const auto view0 = block_set.view(blocks.kUpstream);
+    const auto view1 = block_set.view(blocks.kDownstream);
+    CFE_CHECK(view1.data() == view0.data() + view0.n_cells() * N);
+  };
+  check_contiguous(blocks.state_blocks);
+  check_contiguous(blocks.stage1_blocks);
+  check_contiguous(blocks.scratch_blocks);
 }

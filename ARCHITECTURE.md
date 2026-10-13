@@ -665,3 +665,159 @@ CPU
 -> MPI + accelerator
 -> additional backends
 ```
+
+## 21. Memory layout: ownership, views, and block-structured grids
+
+This section records how `Field`/`FieldView`/`CartesianGrid`/`FvmSolver`/
+`Backend` relate today, where the block-structured extension (Phase 4)
+and `BlockSet` sit in that picture, and the open question of whether/when
+that extension should ever unify with MPI domain decomposition. It is a
+reference, synthesizing decisions already recorded in ADR 0002
+(state memory layout), ADR 0009 (MPI domain decomposition), and ADR 0011
+(forward-step block interface) -- see those ADRs for the evidence behind
+each decision; this section does not re-decide anything they already
+settled, and introduces no new decision of its own.
+
+Where this section itself should live was agreed with Amelia **before**
+it was written (per CLAUDE.md's "consult before a consequential design
+decision" rule), the same way ADR 0011 records that its own design
+direction was agreed with Amelia before that task's implementation: she
+was asked to choose among (a) a new `docs/architecture/` file, (b) this
+`ARCHITECTURE.md` addition, or (c) a new ADR, and recommended (b) --
+`ARCHITECTURE.md` §1 already describes itself as "current intended
+architecture" that "may evolve"; this section's part on MPI unification
+is deliberately an open question rather than a decision, which does not
+fit an ADR's decided/accepted status; and `docs/architecture/` is not an
+existing convention in this repo (`docs/adr/`, `docs/theory/`,
+`docs/verification/`, `docs/performance/` are). See
+`agent_history.md`'s entry for this task for the full exchange.
+
+### Ownership versus view
+
+Every buffer-holding type in this codebase splits into exactly one of two
+roles:
+
+- **Owning storage** allocates once, in its constructor, and never inside
+  a parallel loop (AGENTS.md #10): `cfe::Field<Scalar, NComponents,
+  Layout>` (one `std::vector<Scalar>`, `field/field.hpp`),
+  `cfe::backend::cuda::DeviceField<...>` (one `cudaMalloc`'d buffer,
+  `backend/cuda/device_field.cuh`, ADR 0002), and -- as of this task --
+  `cfe::BlockSet<Scalar, NComponents, Layout>` (one `std::vector<Scalar>`
+  sized for several blocks at once, `field/block_set.hpp`, see below).
+- **Non-owning view**: `cfe::FieldView<Scalar, NComponents, Layout>` is
+  exactly `(Scalar* data, std::size_t n_cells)` -- trivially copyable,
+  with zero assumption that it owns, or sits at the start of, its own
+  allocation. This is what every piece of per-cell numerics
+  (`FvmSolver::residual()`, every `BoundaryCondition::fill_x/y/z`,
+  `ssp_rk2_combine_stage1/2`) actually consumes. None of that code can
+  tell a `Field`-provided view from a `DeviceField`-provided view from a
+  `BlockSet`-provided view -- they are indistinguishable at the call site,
+  which is the single fact this whole section rests on.
+
+`CartesianGrid<Scalar>` is neither of these: it holds no `Scalar` data at
+all, only shape (cell counts, ghost depth, spacing, origin) and the
+`flat_index(i,j,k)` arithmetic that turns a padded 3-index into the flat
+`cell` index a `FieldView` expects. `Backend` (`CpuParallelFor`/
+`CudaParallelFor`) is orthogonal again: it decides where the loop over
+cells executes, never what the pointers mean.
+
+### Single-grid versus block-structured: the same consumption pattern
+
+Phases 1-3 (scalar advection, Burgers, single-block Euler) all have
+exactly one `CartesianGrid` and one `Field` per buffer (state, stage1,
+scratch). Phase 4's forward-facing-step case (ADR 0011) is CFE's first
+domain that is not one rectangular box: two `CartesianGrid` blocks,
+joined at their shared face by `BlockInterfaceBoundary`, each block still
+using the exact same `FvmSolver`/reconstruction/numerical-flux stack a
+single-block case uses. ADR 0011 Decision 1 already covers why this is
+two blocks rather than one masked grid -- not repeated here.
+
+Going from one block to several did not touch `FvmSolver`,
+`BlockInterfaceBoundary`, or `ssp_rk2_combine_stage1/2`, because none of
+them were ever written against "the one buffer this process owns" --
+they were already written against "a `FieldView`, however it got here."
+Multiple blocks are consumed by running the existing single-block
+machinery once per block (`ForwardStepBlocks` owns one `Solver1`/
+`Solver2` pair, `tests/verification/forward_step_setup.hpp`) and bridging
+them at the shared face with a `BoundaryCondition` that reads the
+neighbor block's `FieldView` directly (same process, no copy) -- the
+numerics layer never had to learn that "domain" could mean more than one
+box.
+
+### Where `BlockSet` sits
+
+Before this task, each block's three buffers (state, stage1, scratch)
+were three independent `cfe::Field` allocations, so a two-block case
+meant six unrelated heap allocations for what is conceptually three
+buffers, each decomposed across more than one block. `cfe::BlockSet<
+Scalar, NComponents, Layout>` (`field/block_set.hpp`) instead owns ONE
+`std::vector<Scalar>` sized for the sum of every block's cell count, and
+hands out a `FieldView` per block (`view(block)`) at the right pointer
+offset into that single allocation -- block `b+1`'s region begins exactly
+where block `b`'s ends.
+
+This needed zero changes to `FvmSolver`, `BlockInterfaceBoundary`, or
+`ssp_rk2_combine_stage1/2` for precisely the reason the previous
+subsection gives: they already only ever consume a `FieldView`, with no
+assumption about where its pointer lives or what else shares the
+allocation behind it. `BlockSet` is additive infrastructure under
+`field/`, at the same level as `Field`/`DeviceField` -- a second owning
+type beside them, not a change to the view type or to any consumer.
+
+Mirroring ADR 0011's own stated limits: `BlockSet` is sized from
+whatever list of per-block cell counts its caller passes (today, always
+two, one per forward-step block) and knows nothing about block geometry,
+adjacency, or how many axes blocks share -- that bookkeeping still lives
+entirely in `BlockInterfaceBoundary`/`ForwardStepBlocks::step()`, per
+ADR 0011's own documented scope (exactly two blocks, one shared axis).
+Extending to three-or-more blocks or multi-axis joins is still the open
+item ADR 0011 already names, unchanged by this task.
+
+### How this connects to MPI domain decomposition -- an open question, not a decision
+
+`CartesianPartition`/`MpiHaloBoundary` (ADR 0009) and
+`BlockInterfaceBoundary` (ADR 0011) are the same pattern at a different
+level: a structured sub-region of a larger domain, bridged to its
+neighbor(s) by a ghost-cell exchange at the shared face, behind the same
+`BoundaryCondition` duck-typed interface. That resemblance is exactly why
+a reader with an HPC background recognizes the shape immediately. It is
+not, however, the same pattern at the same level:
+
+- An MPI rank's local sub-domain is a genuinely separate allocation in a
+  genuinely separate address space (possibly a separate machine); its
+  "ghost exchange" is `MPI_Sendrecv` over the network, and nothing about
+  that can become "one contiguous allocation" the way `BlockSet` makes
+  two same-process blocks contiguous.
+- `BlockSet`'s contiguity is a same-process, single-address-space
+  property. It says nothing about, and does not require, each block
+  running in its own rank.
+
+Whether these two mechanisms should ever be unified into one
+sub-domain abstraction -- e.g. a block-structured case whose blocks can
+each optionally be MPI-decomposed, or an MPI rank whose local domain can
+itself be multiple blocks -- is a standing open architectural question,
+**not decided by this task or this document**. `BlockSet` does not
+generalize past today's same-process, two-block case to answer it either
+way. Two separately-scoped, not-yet-scheduled items already name pieces
+of this space without committing to any unification: `agent_history.md`
+(tasks 0006/0007) notes GPU-aware MPI for the existing single-grid
+`CartesianPartition`/`MpiHaloBoundary` path remains out of scope; ADR
+0011's own "Known limitations" names a possible future MPI-aware
+multi-block boundary (making `BlockInterfaceBoundary` itself cross-rank)
+as a separate, also-not-yet-built capability. Revisiting the unification
+question would be motivated by a case that actually needs both
+block-structured geometry AND multi-rank scale at once, or by either of
+those two items landing in a shape that makes unification clearly
+cheaper than maintaining two mechanisms -- neither has happened yet, so
+this section only names the question, not an order or a plan for
+answering it.
+
+### Where AMR and unstructured grids fit
+
+Not scoped or designed here. `ROADMAP.md`'s "Early 2027" lightweight
+Cartesian AMR and eventual unstructured-grid support (see also this
+file's #6/#20) are future directions that a block-structured-aware
+memory layout may eventually need to accommodate (e.g. per-block
+resolution, parent/child block relationships) -- but extending
+`BlockSet` or `CartesianPartition` toward either is not needed by, and is
+not part of, this task.
