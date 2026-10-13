@@ -4003,3 +4003,93 @@ Known limitations: unchanged from the entries above.
 Next recommended task: unchanged -- real CUDA hardware access to close
 the outstanding `BlockInterfaceBoundary` 3D-correctness/at-scale
 requirement, or the remaining Phase 4 items.
+
+## 2026-10-13 — Task 0010 follow-up: threaded backend + 216/288 resolution sweep, KH-rollup finding
+
+User asked to run the forward-step tutorial faster/finer on their
+Apple M5, specifically to look for Kelvin-Helmholtz rollup on the
+trailing contact discontinuity. Also asked about MPI, and separately
+questioned whether the two-block design is needed at all (answered
+directly, pointing back to ADR 0011 Decision 1's already-reviewed
+reasoning for rejecting a single masked grid -- not re-litigated here).
+
+What was done:
+
+1. **Confirmed the CMake-configurable threaded CPU backend already
+   applies with zero code changes.** `ForwardStepBlocks` never hardcodes
+   `cfe::CpuParallelFor` specifically -- it relies on `FvmSolver`'s
+   default `Backend` template parameter, which resolves at compile time
+   to `backend::serial` or `backend::threaded` per `CFE_DEFAULT_BACKEND`.
+   Reconfigured with `-DCFE_DEFAULT_BACKEND=threaded`: res144 dropped
+   from 36.44s (serial) to 11.68s (threaded), consistent with this
+   machine's own previously-measured ~3x Burgers benchmark speedup.
+2. **Extended the resolution sweep to 216 and 288** (continuing the
+   1.5x pattern from 96/144). Full seven-resolution sweep (threaded):
+   under two minutes total. Re-verified the origin-rounding fix from
+   the prior entry holds at these two new resolutions too (clean
+   `resolution_comparison.png`, no stray interface line).
+3. **Added a zoomed res80-vs-res288 comparison**
+   (`figures/contact_kh_detail.png`) specifically targeting the
+   trailing contact discontinuity. **Finding: no KH rollup appears even
+   at res288** -- the line gets substantially sharper (smeared band ->
+   crisp line) but stays smooth, with no billowing. Reported honestly as
+   a negative result, not glossed over.
+4. **MPI scoping (research only, no implementation)**: confirmed via a
+   dedicated research pass that MPI+threaded composability already
+   exists and is tested together for single-grid decomposition (Phase
+   2's own ctest matrix), but MPI+GPU does not exist anywhere (Phase 2's
+   own history explicitly deferred it), and MPI has never been combined
+   with `BlockInterfaceBoundary` at all -- `CartesianPartition`/
+   `MpiHaloBoundary` only know how to decompose one uniform grid: no
+   rank/block-ownership concept exists for two differently-shaped
+   blocks. Consulted Amelia for sequencing (not implementation):
+   recommended splitting into **Task A** (GPU-aware MPI for the
+   *existing* single-grid 3D decomposition, re-verifying the already-
+   existing Burgers/scalar-advection strong-scaling tutorials on GPU --
+   narrow, reuses existing primitives) and **Task B** (an MPI-aware
+   multi-block interface boundary, new design work comparable in scope
+   to ADR 0011 itself, consuming whatever Task A produces rather than
+   duplicating it), A before B. Neither started -- this is a roadmap
+   scoping recommendation for the user to confirm/prioritize, not yet
+   written into `ROADMAP.md`.
+5. **HLLC/PPM**: per the KH-rollup negative result, Amelia's
+   recommendation (and the honest finding from step 3) point at HLLC
+   (already a named-but-deferred Phase 3 "Rusanov and/or HLLC" item,
+   reuses the same MUSCL reconstruction, just a different Riemann
+   solver) as the correct, cheap next experiment -- *not* pulling PPM
+   forward from its already-planned Phase 5 slot (PPM is a
+   substantially bigger lift: new monotonicity/flattening/
+   discontinuity-detection reconstruction logic, not a flux swap).
+   Recommendation: try HLLC first; revisit PPM only if HLLC at the same
+   high resolution still fails to show rollup, with real evidence (not
+   suspicion) that reconstruction order, not the Riemann solver, is the
+   bottleneck. Neither implemented yet.
+
+Scientific verification:
+Re-ran the full CPU unit/verification suite under the threaded backend
+specifically (not just serial): still 123/123, including both
+interface-conservation tests. Confirmed every re-run resolution's
+`final_mass` is bit-identical between the original serial run and this
+threaded run (e.g. res144: 6.339126 both times) -- no floating-point
+reordering risk from threading, consistent with the residual kernel
+being purely independent per-cell writes with no reduction in the hot
+path (the one reduction in the driver, `max_wave_speed()`, is a plain
+serial scan, not `Backend::run`-wrapped, so dt selection is
+backend-independent by construction).
+
+Architecture decisions: none implemented this round -- the MPI/HLLC/
+PPM items above are scoping recommendations only, pending user
+confirmation on priority/sequencing (see the two open questions Amelia
+raised: whether GPU-aware MPI for single-grid decomposition goes into
+the very next phase ahead of the rest of Phase 4, and whether the
+multi-block MPI task should be written into `ROADMAP.md` now as a
+scoped-but-unstarted item or left as an unscheduled early-2027 line).
+
+Known limitations: unchanged, plus the new honest finding that Rusanov
+does not show KH rollup even at res288 (see above) -- now explicitly
+documented in the tutorial's own README rather than left implicit.
+
+Next recommended task: implement HLLC (named Phase 3 item, small,
+well-scoped) and re-run this same KH-rollup check at res288 before
+considering PPM; separately, resolve the MPI task A/B scoping question
+with the user and write whichever is prioritized into `ROADMAP.md`.

@@ -82,8 +82,14 @@ int main()
   // 20/40/80 are the paper's own reference grids (see this file's header
   // comment); 96/144 extend the sweep further (144 = 96*1.5) to give a
   // finer convergence illustration than the paper's own three points
-  // alone provide.
-  for (std::size_t res : {std::size_t(20), std::size_t(40), std::size_t(80), std::size_t(96), std::size_t(144)}) {
+  // alone provide; 216/288 (continuing the 1.5x pattern) push further
+  // still, specifically to look for Kelvin-Helmholtz rollup on the
+  // trailing contact discontinuity that the README's "mild waviness,
+  // not dramatic rollup" note says isn't yet visible at lower
+  // resolutions.
+  for (std::size_t res :
+       {std::size_t(20), std::size_t(40), std::size_t(80), std::size_t(96), std::size_t(144), std::size_t(216),
+        std::size_t(288)}) {
     run_resolution(res);
   }
   return 0;

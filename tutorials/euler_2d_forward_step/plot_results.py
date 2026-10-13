@@ -187,7 +187,7 @@ def main():
     print("wrote figures/schlieren_time_series.png")
 
     # --- resolution comparison at final time --------------------------------
-    resolutions = [20, 40, 80, 96, 144]
+    resolutions = [20, 40, 80, 96, 144, 216, 288]
     fig, axes = plt.subplots(len(resolutions), 1, figsize=(9, 13), sharex=True)
     for ax, res in zip(axes, resolutions):
         res_dir = os.path.join(DATA, f"res{res}")
@@ -203,6 +203,28 @@ def main():
     fig.savefig(os.path.join(FIGURES, "resolution_comparison.png"), dpi=130, bbox_inches="tight")
     plt.close(fig)
     print("wrote figures/resolution_comparison.png")
+
+    # --- zoomed trailing-contact-discontinuity detail, res80 vs res288 ------
+    # Specifically looking for Kelvin-Helmholtz rollup on the slip line,
+    # which the README describes as only "mild waviness, not dramatic
+    # rollup" at res80 -- check whether finer resolution reveals more.
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
+    for ax, res in zip(axes, [80, 288]):
+        res_dir = os.path.join(DATA, f"res{res}")
+        nf, ts = frame_times(res_dir)
+        idx = nf - 1
+        (f1, o1, s1), (f2, o2, s2) = load_frame(res_dir, idx, "density")
+        g1, g2 = schlieren_proxy_two_blocks((f1, o1, s1), (f2, o2, s2))
+        im = plot_two_blocks(ax, (g1, o1, s1), (g2, o2, s2), cmap="gray_r", vmin=0, vmax=np.percentile(g1, 99))
+        ax.set_xlim(1.0, 2.2)
+        ax.set_ylim(0.1, 0.7)
+        ax.set_title(f"res{res}")
+        ax.set_xlabel("x")
+    axes[0].set_ylabel("y")
+    fig.suptitle(f"Trailing contact discontinuity, zoomed, t={ts[idx]:.2f} -- res80 vs res288")
+    fig.savefig(os.path.join(FIGURES, "contact_kh_detail.png"), dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote figures/contact_kh_detail.png")
 
 
 if __name__ == "__main__":
