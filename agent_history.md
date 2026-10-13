@@ -4290,3 +4290,255 @@ closing that would also be the natural point to decide whether a
 `DeviceBlockSet` is worth building. Otherwise, continue Phase 4's
 remaining items (moving-frame/grid-recycling prototype, 1D propagating
 shock demonstration) per `ROADMAP.md`.
+
+## 2026-10-13 — Task 0011: Phase 3 completion — HLLC numerical flux, and a real Kelvin-Helmholtz finding
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+User asked to scope and add both HLLC and PPM as swappable numerical
+methods for EulerField, specifically to re-check the forward-facing-step
+benchmark for Kelvin-Helmholtz (KH) waviness on the trailing contact
+discontinuity -- MUSCL+Rusanov showed none at any resolution tested up
+to res288 (prior entry). Per CLAUDE.md, consulted Amelia (scope/
+sequencing) and Violet (numerical design) before implementing. Both
+independently recommended: land HLLC only in this task (smaller,
+already-roadmapped, drop-in NumericalFlux swap), defer PPM (much larger,
+Phase-5-scoped Reconstruction mechanism) pending this task's own
+forward-step result, continue on the existing
+cfe/development/phase_0005-euler-forward-step branch (PR #6).
+
+New:
+- `src/cfe/numerics/numerical_flux/hllc.hpp` -- `HllcFlux`/`hllc_flux`,
+  Toro/Spruce/Speares HLLC approximate Riemann solver, generalized over
+  `Dim`. NOT a generic drop-in `NumericalFlux` the way `RusanovFlux` is
+  (needs a full ideal-gas EOS from `Field`, not just
+  `wave_speed`/`physical_flux`) -- documented explicitly.
+- `tests/unit/test_hllc_flux.cpp` (14 tests), `tests/verification/
+  test_euler_sod_shock_tube_hllc.cpp`, `tests/verification/
+  test_euler_isolated_contact_hllc.cpp`, `tests/unit/
+  test_euler_hllc_3d_cuda.cu`.
+- `tasks/0011-phase3-hllc-flux.md`, `docs/adr/0012-hllc-numerical-flux.md`.
+- `tutorials/euler_1d_sod_shock_tube/` extended to run both Rusanov and
+  HLLC, reporting measured contact width.
+- `tutorials/euler_2d_forward_step/` re-run with both fluxes at all 7
+  resolutions (20-288 cells-per-unit-height).
+- `docs/performance/0008-phase3-hllc-cuda-results.md`.
+
+Generalized (default-preserving, zero regression confirmed):
+`tests/verification/sod_shock_tube_runner.hpp` and `tests/verification/
+forward_step_setup.hpp` both gained a `class NumericalFlux =
+cfe::RusanovFlux` template parameter.
+
+Three real bugs found and fixed during end-to-end testing (not caught by
+1D-only unit/verification tests) -- full account in ADR 0012:
+
+1. **Wave-speed sign bug:** the initially-implemented non-iterative ANRS
+   (Adaptive Noniterative Riemann Solver) wave-speed estimate gave a
+   wrong-signed `S_L` at a strong Mach-3 wall reflection (the forward-
+   step's own riser face), silently disabling all dissipation there --
+   the ENTIRE forward-step domain stayed frozen at the exact uniform
+   inflow state for the whole run, every resolution, no crash/NaN at
+   all. Fixed by Newton-Raphson-refining the ANRS seed (5 fixed
+   iterations, GPU-warp-uniform by construction) to the exact two-shock/
+   two-rarefaction `p*`.
+2. **Near-vacuum reconstruction artifact:** after fix 1, res40+ (not
+   res20) went to NaN partway through the run. Traced to MUSCL's
+   componentwise (not characteristic) reconstruction producing a
+   near-vacuum (barely positive) implied pressure at a strong 2D
+   multi-wave interaction (the bow-shock/Mach-stem region) -- exactly
+   the failure mode ADR 0010's Decision 1 named as a revisit criterion.
+   Consulted Violet with the full diagnostic trace; fixed (her
+   recommendation) by flooring density/pressure at the two points in
+   `hllc.hpp` where this artifact could propagate into a
+   `sqrt(negative)` NaN, not by falling back to Rusanov (which would
+   hit the same failure on an already-unphysical input).
+3. **The floor fix itself had a gap** (caught by Enzo's performance
+   review, reading the dataflow rather than from a failing test):
+   `hllc_wave_speeds` still computed velocity/pressure via `Field`
+   accessors that divide by the RAW (unfloored, possibly slightly
+   negative) density in two places -- a small negative density could
+   make the computed pressure swing to a large POSITIVE, finite value
+   that silently passed the floor check. Fixed with a single shared
+   `hllc_floored_primitives` helper deriving velocity/pressure from the
+   SAME floored density everywhere. Added float-precision regression
+   tests (no Euler flux anywhere in this repo had ever been tested at
+   `Scalar=float` before -- a pre-existing gap, closed here).
+
+Full review cycle: Snorlax (duplication fixes: shared floor constants,
+shared `contact_width_cells` helper, shared shock-impedance helper),
+Sally (usability fixes: warp-uniformity explained, `momentum_index`
+consistency, unused template param dropped), Enzo (found bug 3 above;
+also flagged the forward-step wall-clock HLLC-vs-Rusanov comparison as
+methodologically confounded -- single, non-interleaved, non-repeated
+run -- reported honestly in the README/ADR rather than citing a precise
+multiplier). All applied. Full CPU suite: 145/145 passing.
+
+**CUDA correctness and at-scale benchmark (PSC Bridges-2, V100):**
+157/157 passing (145 CPU-only + 12 pre-existing CUDA tests + the new
+`test_euler_hllc_3d_cuda_matches_cpu_reference`), `compute-sanitizer
+--tool initcheck`: 0 errors (job 49117265). Closes the standing per-PR
+CUDA-correctness requirement.
+
+Ilia's independent final review caught that the at-scale benchmark half
+of that same requirement had been skipped (only the correctness test
+existed) -- closed in the same pass: `benchmarks/euler/
+bench_euler_hllc_3d_cuda.cu` (mirrors `bench_euler_3d_cuda.cu` exactly,
+differing only in flux) measured a clean **7.5x-9.4x** HLLC/Rusanov
+slowdown across five cube sizes (64^3 to 512^3, job 49118193), with
+Rusanov's own numbers reproducing task 0009's original figures almost
+exactly (confirms consistent methodology). A register-pressure
+measurement quantifies a real, substantial piece of why: HLLC's
+`FvmSolver::residual` kernel needs 149 registers/thread vs. Rusanov's
+96 (which itself matches task 0009's documented figure) -- on Volta's
+8-register/thread-per-warp allocation granularity, this drops occupancy
+from ~25% to ~12.5% (one resident 256-thread block instead of two), a
+large, directly-measured contributor to the throughput gap, not merely
+inferred from arithmetic intensity. Full account:
+`docs/performance/0008-phase3-hllc-cuda-results.md`.
+
+**Sod shock tube evidence** (`tutorials/euler_1d_sod_shock_tube/`):
+measured contact width at nx=100/200/400: Rusanov 10/13/17 cells, HLLC
+8/11/13 cells -- a real, consistent, honestly-modest ~20-25% narrowing
+at every resolution. The isolated pure-contact test shows the effect
+starkly: HLLC keeps a stationary density step exactly in place
+(`0.000e+00` deviation after many steps) while Rusanov visibly diffuses
+it (`0.224`).
+
+**Forward-step Kelvin-Helmholtz finding (the user's original
+question):** re-ran the full 7-resolution sweep with HLLC, same grid/
+IC/BCs/reconstruction as the existing Rusanov dataset, only the flux
+changed.
+
+- **HLLC's trailing contact line develops a wavy, repeatedly-crossing
+  structure that Rusanov never shows at any resolution tested.** Absent
+  at res20/40 (too coarse); first visible at res80 (the paper's own
+  reference resolution) as a modest line-splitting; progressively more
+  developed at res96/144/216/288. Grows over TIME, with onset (clearly
+  visible by t=2.5-3) matching Woodward & Colella's own reported timing
+  for the "mild Kelvin-Helmholtz instability ('water-wave'/'flag-waving')"
+  almost exactly -- the same qualitative character (wavy/crossing, not
+  discrete rolled-up vortices) and the same onset time the source paper
+  itself reports. This is a genuine, reproduced positive result -- the
+  Rusanov-only dataset (prior task) showed zero trace of this at any
+  resolution up to 288.
+- Direct side-by-side comparison (identical resolution/time, only the
+  flux changed) confirms this is not a resolution artifact: it only
+  ever appears with HLLC.
+- **A second, separate, confirmed finding:** at the bow-shock/Mach-stem
+  triple point specifically, HLLC's low dissipation combined with
+  componentwise (not characteristic) MUSCL reconstruction produces a
+  real, bounded density overshoot (measured at res80: HLLC peak density
+  ~7.1 vs. Rusanov's own ~6.3 at the same place/time) -- finite, not
+  NaN, not conservation-violating, but a genuine local artifact. This
+  directly confirms ADR 0010 Decision 1's own named revisit criterion
+  ("a future canonical case... showing componentwise reconstruction
+  producing visible spurious oscillation at a strong multi-wave
+  interaction would justify adding characteristic reconstruction") with
+  real, reproducible evidence, rather than leaving it hypothetical.
+  Logically separate from the KH finding (different location, different
+  character), reported together for completeness.
+- An existing (task 0010) README claim that Rusanov itself showed "faint
+  waviness... consistent with a weakly KH-unstable slip line" was found,
+  on more careful side-by-side comparison, to be an overstatement --
+  corrected in place rather than left standing.
+- Measured wall-clock: HLLC costs noticeably more per step than Rusanov
+  at every resolution (e.g. res216: 42.9s vs 382.2s), consistent in
+  DIRECTION with the extra Newton-iteration/sqrt-pow cost in the code,
+  but NOT cleanly isolated from possible thermal/OS-contention effects
+  in a single long run (same machine showed three different timings for
+  the identical Rusanov res288 computation across this session's own
+  repeated runs: 49.79s/71.39s/88.13s) -- reported honestly as a
+  methodology limitation (Enzo finding), not as a precise multiplier.
+
+PPM was explicitly NOT pulled forward: per Amelia's conditional
+recommendation, the trigger for doing so (HLLC failing to reproduce the
+paper's mild waviness) did not fire -- HLLC alone answered the question.
+
+**Ilia's independent final review** (formed before reading any other
+reviewer's findings, per his own charter; re-ran the full test suite
+himself rather than trusting the reported count; independently
+re-derived both headline numerical claims from scratch -- the Mach-3
+wall-reflection `p0` bug and the res80 density-overshoot numbers --
+both matched exactly; confirmed via git history that `EulerField`/
+`FvmSolver`/`RusanovFlux` were genuinely untouched; confirmed the test
+suite's comparisons use genuine negative controls, not vacuous ones):
+found two real completeness gaps against this task's own stated
+requirements, both closed before this entry was written --
+
+- **Blocking, closed:** the at-scale GPU benchmark for `HllcFlux` had
+  never actually been written (only the correctness test existed,
+  despite the task's own "required, not deferred" language) -- added
+  `bench_euler_hllc_3d_cuda.cu` and re-ran on Bridges-2 for real (see
+  CUDA section above).
+- **Blocking, closed:** this `agent_history.md` entry did not exist yet
+  at the time of his review, despite `docs/adr/0012-...md` and
+  `docs/performance/0008-...md` both citing "see agent_history.md" as
+  their evidentiary backing for the Amelia/Violet pre-implementation
+  consult -- this entry is that fix.
+- **Optional, taken:** ADR 0012's own "Revisit criteria" line still said
+  CUDA correctness was "still-outstanding" after the correctness half
+  had already landed (and, separately, after the ADR was edited again
+  without updating that line) -- rewritten to distinguish correctness
+  (done) from the at-scale benchmark (now also done).
+- **Optional, taken:** ADR 0010's componentwise-reconstruction revisit
+  criterion still read as purely hypothetical even though ADR 0012
+  confirms it directly -- added a one-line cross-reference.
+- **Optional, taken:** `tasks/0011-...md`'s "floored-PVRS" scope bullets
+  were stale relative to what actually shipped (ANRS+Newton) -- fixed
+  with pointers to ADR 0012's real account.
+
+**Amelia's alignment check** (same task, after Ilia's): confirmed the
+work stays on target with her own pre-implementation recommendation (no
+scope drift either direction), confirmed the PPM-deferral decision is
+properly closed (her own conditional trigger did not fire), and
+suggested (optional, taken) a Phase 5 `ROADMAP.md` planning note
+pairing the now-confirmed componentwise-reconstruction overshoot with
+PPM's own `Reconstruction`-interface-widening work, since both likely
+share one architecture gap (ADR 0012 already names this).
+
+Known limitations:
+- Componentwise (not characteristic) reconstruction -- the density-
+  overshoot finding above is now direct, reproducible evidence for this
+  already-documented limitation's own revisit criterion; not fixed in
+  this task (out of scope, a much bigger undertaking per Violet's own
+  PPM pre-implementation consult this session). `ROADMAP.md`'s Phase 5
+  entry now carries a forward-reference tying this to PPM's own
+  eventual `Reconstruction`-interface work.
+- The forward-step CPU wall-clock HLLC/Rusanov cost comparison remains
+  methodology-confounded (single, non-interleaved, non-repeated run) --
+  now superseded for GPU by the clean, isolated at-scale benchmark
+  above; an isolated CPU-side microbenchmark remains open if a CPU-
+  specific number is ever needed.
+- The 5-Newton-iteration margin is characterized by exactly one measured
+  strong-shock case; a swept pressure-ratio test would turn this into a
+  characterized margin rather than "5 worked for the one case found."
+- No Nsight Compute branch-efficiency numbers for the ANRS seed's 3-way
+  branch or the 4-way flux-region branch (both genuinely state-dependent
+  per thread) -- the register-pressure/occupancy measurement above
+  explains a real, substantial piece of the throughput gap but not all
+  of it.
+- Accumulated-knowledge updates for Violet/Snorlax/Sally/Enzo (patterns
+  identified during this task's review cycle: always test a new Euler
+  flux against a genuine 2D/3D multi-wave interaction before declaring
+  it verified; a floor on one derived quantity is not transitively a
+  floor on every other quantity computed from the same unfloored
+  original; shared floor/tolerance constants must be declared once, not
+  per call site; a performance review reading dataflow can catch
+  correctness bugs a passing test suite missed) are identified but NOT
+  YET applied to `.claude/agents/*.md`, since those files live on
+  `cfe/development/multi-agent-workflow` (not yet merged with this
+  task's branch), which also currently has the user's own local
+  uncommitted work -- recorded here for whoever reconciles the branches,
+  rather than risking interference with that in-progress state.
+
+Next recommended task: an isolated CPU-side HLLC/Rusanov microbenchmark
+(free of the forward-step tutorial's own methodology confound) if a
+CPU-specific cost number is ever needed; Nsight Compute branch-
+efficiency profiling for HLLC's data-dependent branches; otherwise, the
+remaining Phase 4 items (moving-frame/grid-recycling prototype, 1D
+propagating shock demonstration) per `ROADMAP.md`, or Phase 5 (PPM,
+viscous fluxes) on its own originally-scoped schedule -- now with a
+planning note tying PPM's interface work to the componentwise-
+reconstruction-overshoot finding above.

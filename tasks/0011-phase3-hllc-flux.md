@@ -107,9 +107,15 @@ this re-run uses is already owned by that PR.
   "applied S_star to every component" bug class Violet flagged), `
   S_star` agreement with the existing exact Riemann solver's `u_star`
   for the classic Sod parameters, and a strong double-rarefaction
-  stress test (Toro's Test 2 parameters) confirming the floored-PVRS
+  stress test (Toro's Test 2 parameters) confirming the wave-speed
   estimate stays robust (finite, positive density/pressure in the star
-  region) at its documented weak point.
+  region) at its documented weak point. **Note (stale scope bullet,
+  caught in Ilia/Amelia's final review): the estimate actually shipped
+  is ANRS seeded + Newton-Raphson refined, not plain floored-PVRS as
+  originally scoped here -- plain PVRS and ANRS-alone were both tried
+  and rejected after real bugs were found; see
+  `docs/adr/0012-hllc-numerical-flux.md` Decision 2/2b/2c for the full,
+  final account.**
 - `tutorials/euler_1d_sod_shock_tube/`: extended to also run MUSCL+HLLC
   at the same resolutions as MUSCL+Rusanov, reporting a measured
   contact-width comparison for a reader (not just a second set of CSVs).
@@ -142,11 +148,13 @@ this re-run uses is already owned by that PR.
   inflow/outflow BC — unchanged from ADR 0010's Decision 3.
 - AUSM-family flux — `ROADMAP.md`'s "and/or" is satisfied by HLLC alone,
   same framing task 0009 used for Rusanov.
-- Toro's full adaptive (two-shock/two-rarefaction) `p*` estimate — the
-  floored-PVRS estimate is used instead, as a documented, tested
-  simplification (see Required functionality above); revisit only if
-  the strong-rarefaction stress test or a future case shows it
-  insufficiently robust.
+- Toro's fully-iterative Newton-Raphson exact solve as the EXACT solver
+  (`tests/verification/sod_shock_tube_exact.hpp`) implements it, seeded
+  from its own crude guess, was never the plan — what shipped (see ADR
+  0012) is ANRS as a SEED, refined by a fixed 5-iteration Newton-Raphson
+  pass of the same underlying formulas, which is both more accurate
+  than a bare non-iterative estimate and cheaper/more GPU-friendly than
+  the exact solver's own convergence-gated loop.
 
 ## Architecture constraints
 

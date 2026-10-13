@@ -287,5 +287,9 @@ case (a)) remains unimplemented.
 
 - A canonical case showing componentwise reconstruction producing
   visible spurious oscillation at a strong multi-wave interaction.
+  **Confirmed by task 0011** (not merely hypothetical anymore): a real,
+  bounded density overshoot at the forward-step's bow-shock/Mach-stem
+  triple point when paired with HLLC -- see
+  `docs/adr/0012-hllc-numerical-flux.md`'s Decision 2b/Decision 4.
 - A case needing a genuinely subsonic boundary (motivates the
   characteristic-based partial-specification BC).

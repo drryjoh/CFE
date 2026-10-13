@@ -413,20 +413,21 @@ together here for completeness, not conflated.
 - A future case whose strongest shock exceeds what 5 Newton iterations
   (seeded from ANRS) converges correctly for -- would need either more
   iterations or a provably convergent bound (e.g. bisection fallback).
-- A clean, isolated per-face cost comparison against Rusanov (Enzo
-  review finding): the forward-step wall-clock numbers in this ADR/
-  README come from one single, non-interleaved, non-repeated run (all
-  Rusanov resolutions, then all HLLC resolutions, one process, one
-  measurement each) on a laptop-class SoC with no stated thermal/
-  frequency control -- a real methodology confound (thermal throttling
-  or OS contention accumulating over a long run would produce the same
-  "ratio grows with resolution/run-order" signature the raw data shows).
-  Reported honestly as "consistent with HLLC costing more per face" (a
-  code-level count of the extra `sqrt`/`pow` evaluations in the Newton
-  loop supports that direction), NOT as a precise, isolated multiplier.
-  An isolated microbenchmark (call `hllc_flux`/`rusanov_flux` directly in
-  a tight loop, representative mix of face states, no
-  solver/reconstruction around it) would give the real number.
+- **Resolved on GPU, still open on CPU:** a clean, isolated per-face
+  cost comparison against Rusanov (Enzo review finding) -- the
+  forward-step CPU wall-clock numbers in this ADR/README come from one
+  single, non-interleaved, non-repeated run (a real, confirmed
+  methodology confound; the identical Rusanov res288 computation gave
+  three different timings across this session's own repeated runs).
+  Now closed for GPU specifically: `docs/performance/0008-phase3-hllc-
+  cuda-results.md`'s at-scale benchmark (`bench_euler_hllc_3d_cuda.cu`
+  vs. `bench_euler_3d_cuda.cu`, identical IC/cube-sweep, differing only
+  in flux) gives a clean **7.5x-9.4x** slowdown across five problem
+  sizes, with a register-pressure measurement (149 vs. 96
+  registers/thread, ~12.5% vs. ~25% occupancy) quantifying a real,
+  substantial piece of why. An isolated CPU-side microbenchmark (no
+  GPU-specific confounds, no occupancy effects) remains open if a CPU-
+  specific number is ever needed.
 - Whether a convergence-gated (not fixed) Newton loop would be faster on
   CPU specifically, behind a compile-time backend policy (Enzo review
   finding) -- the fixed-iteration choice is justified for GPU
@@ -448,9 +449,15 @@ together here for completeness, not conflated.
   reproduce the paper's mild waviness (Decision 4), so that specific
   trigger for pulling PPM forward does not fire. PPM remains properly
   scoped to Phase 5 unless a DIFFERENT, new need arises.
-- Real CUDA hardware access to complete the still-outstanding 3D
-  CUDA-correctness/at-scale-benchmark requirement for `HllcFlux`
-  specifically (tracked in `agent_history.md`).
+- **Resolved, not open:** real CUDA hardware access to complete the 3D
+  CUDA-correctness/at-scale-benchmark requirement for `HllcFlux` --
+  both halves are now done (`docs/performance/0008-phase3-hllc-cuda-
+  results.md`: 157/157 correctness, 0 compute-sanitizer errors, and a
+  clean 7.5x-9.4x at-scale throughput comparison against Rusanov with a
+  register-pressure explanation). This line was itself stale in an
+  earlier revision of this ADR (said "still-outstanding" after the
+  correctness half had already landed, before the at-scale half also
+  landed) -- caught in Ilia's final review.
 - **ADR 0010 Decision 1's own revisit criterion is now directly, not
   hypothetically, satisfied** (Decision 2b): componentwise MUSCL
   reconstruction producing a near-vacuum implied pressure at a strong 2D
