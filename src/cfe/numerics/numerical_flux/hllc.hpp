@@ -180,6 +180,7 @@
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
+#include "cfe/math/operations.hpp"
 
 namespace cfe {
 
@@ -230,12 +231,18 @@ HllcFlooredPrimitives<Scalar, N, Field> hllc_floored_primitives(const State<Scal
   const Scalar rho_raw = field.density(q);
   const Scalar rho = rho_raw > kTinyDensityFloor<Scalar> ? rho_raw : kTinyDensityFloor<Scalar>;
   const Scalar u = field.momentum(q, axis) / rho;
-  Scalar kinetic = Scalar(0);
-  for (std::size_t d = 0; d < Dim; ++d) {
-    const Scalar m_d = q[Field::momentum_index(static_cast<Axis>(d))];
-    kinetic += m_d * m_d;
-  }
-  kinetic = Scalar(0.5) * kinetic / rho;
+  // Sum-of-squares via `contract` (math/operations.hpp, AGENTS.md #13)
+  // rather than a hand-rolled accumulator -- PR #6 cleanup task, same
+  // treatment as `EulerField::kinetic_energy`. Only the independent
+  // (not fused into another per-component loop) sum-of-squares site in
+  // this file was converted; `hllc_star_state`'s own momentum_squared_sum
+  // below is built WHILE constructing `q_star`'s components in the same
+  // loop and was deliberately left alone (converting it would need an
+  // extra pass over an already-hardened, floor-safety-critical function
+  // for no behavior change -- see this file's own review history).
+  Vector<Scalar, Dim> momentum;
+  for (std::size_t d = 0; d < Dim; ++d) momentum[d] = q[Field::momentum_index(static_cast<Axis>(d))];
+  const Scalar kinetic = Scalar(0.5) * contract(momentum, momentum) / rho;
   const Scalar p_raw = (field.gamma - Scalar(1)) * (field.total_energy(q) - kinetic);
   const Scalar p = p_raw > kTinyPressureFloor<Scalar> ? p_raw : kTinyPressureFloor<Scalar>;
   return HllcFlooredPrimitives<Scalar, N, Field>{rho, u, p};

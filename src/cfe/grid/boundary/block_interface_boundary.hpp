@@ -104,8 +104,10 @@
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
+#include "cfe/grid/boundary/cartesian_fill.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 #include "cfe/math/fixed_array.hpp"
+#include "cfe/math/scalar_ops.hpp"
 
 namespace cfe {
 
@@ -118,9 +120,9 @@ inline void require_matching_block_resolution(const CartesianGrid<Scalar>& a, co
 {
   constexpr Scalar kRelTol = Scalar(1e-9);
   auto close = [&](Scalar x, Scalar y) {
-    const Scalar scale = (x < Scalar(0) ? -x : x) + (y < Scalar(0) ? -y : y) + Scalar(1);
+    const Scalar scale = abs_value(x) + abs_value(y) + Scalar(1);
     const Scalar diff = x - y;
-    return (diff < Scalar(0) ? -diff : diff) <= kRelTol * scale;
+    return abs_value(diff) <= kRelTol * scale;
   };
   if (!close(a.dy, b.dy)) {
     throw std::invalid_argument(
@@ -183,8 +185,6 @@ struct BlockInterfaceBoundary
     detail::require_matching_block_resolution(grid, neighbor_grid);
 
     constexpr std::size_t normal_component = Field::momentum_index(Axis::X);
-    const std::size_t py = grid.padded_ny();
-    const std::size_t pz = grid.padded_nz();
 
     const State<Scalar, N> domain_edge = domain_edge_value;
     const FieldView<Scalar, N, Layout> neighbor = neighbor_field;
@@ -197,12 +197,15 @@ struct BlockInterfaceBoundary
     // this lambda must be the same for both `if constexpr` branches.
     const std::size_t nearest_real_high = grid.ngx + grid.nx - 1;
 
-    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngx;
-      const std::size_t rem = idx / grid.ngx;
-      const std::size_t j = rem % py;
-      const std::size_t k = rem / py;
-
+    // Only the shared decode/dispatch skeleton is reused here
+    // (grid/boundary/cartesian_fill.hpp, PR #6 cleanup task) -- the
+    // neighbor-validity branching and cross-grid read below are genuinely
+    // different control flow from PeriodicBoundary/StaticBoundary/
+    // InflowOutflowBoundary/SlipWallBoundary's shared callback shape, so
+    // they are NOT forced through a common transform signature; this
+    // type just supplies its own (much larger) callback body.
+    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t j,
+                                                                std::size_t k) mutable {
       const bool neighbor_valid = (j >= j_lo && j < j_hi);
       const std::size_t neighbor_j = static_cast<std::size_t>(static_cast<long>(j) + j_offset);
 
