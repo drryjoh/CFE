@@ -44,6 +44,10 @@ template <class Scalar, std::size_t Dim>
 struct BurgersField
 {
   static constexpr std::size_t dim = Dim;
+  // Single-component (scalar) state -- see ScalarAdvectionField's own
+  // analogous comment on why this exists (fvm_solver.hpp generalization
+  // for EulerField).
+  static constexpr std::size_t n_components = 1;
 
   // The physical flux Calculator for one axis: F_axis(state) = state^2 / 2.
   // Identical along every axis -- Burgers has no directional parameter --

@@ -74,6 +74,34 @@ Planned examples include:
 - laminar flame;
 - detonation.
 
+#### Canonical problems with no closed-form exact solution
+
+Some canonical problems (Shu-Osher is the first case in this codebase;
+Taylor-Green vortex and flat plate will likely need the same treatment
+later) have no analytic oracle for their disturbed/nonlinear region --
+that is often the entire point of the test. Accepted practice for these
+(established by `tests/verification/test_euler_shu_osher.cpp`, task
+0012):
+
+- compare against a converged fine-grid reference solution run with the
+  SAME code (and, where more than one numerical method is being
+  compared, the same method per reference -- a Rusanov run is verified
+  against its own Rusanov fine-grid reference, not against an HLLC one),
+  not an analytic oracle;
+- use an exact solution in any subregion that genuinely still has one
+  (e.g. the region ahead of a shock, where the initial condition itself
+  remains an exact, time-independent solution until the shock arrives)
+  as a real, blocking, oracle-based check -- do not treat "no exact
+  solution for the problem as a whole" as "no exact check is possible
+  anywhere in it";
+- use a resolution-converging error metric (error shrinks as resolution
+  increases toward the fine reference) rather than a single
+  fixed-resolution pass/fail;
+- a scriptable proxy (e.g. a feature/extremum count) stands in for
+  "matches a published figure's qualitative structure" where useful --
+  do not attempt to script a direct comparison against a digitized
+  literature plot.
+
 ## 3. CPU/GPU comparison
 
 When the same algorithm runs on CPU and GPU, compare scientifically meaningful quantities within tolerances appropriate for floating-point non-associativity.

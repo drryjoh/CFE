@@ -28,10 +28,25 @@ add_executable(cfe_unit_tests
   unit/test_burgers_3d_sanity.cpp
   unit/test_slab_partition.cpp
   unit/test_cartesian_partition.cpp
+  unit/test_euler_flux.cpp
+  unit/test_hllc_flux.cpp
+  unit/test_slip_wall_boundary.cpp
+  unit/test_euler_3d_sanity.cpp
+  unit/test_block_interface_boundary.cpp
+  unit/test_forward_step_sanity.cpp
+  verification/test_euler_sod_shock_tube.cpp
+  verification/test_euler_sod_shock_tube_hllc.cpp
+  verification/test_euler_isolated_contact_hllc.cpp
+  verification/test_forward_step_interface_conservation.cpp
+  verification/test_euler_shu_osher.cpp
+  verification/test_euler_propagating_shock.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)
-target_include_directories(cfe_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
+target_include_directories(cfe_unit_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/unit
+  ${CMAKE_CURRENT_SOURCE_DIR}/verification
+)
 
 # CUDA correctness test: only added when a CUDA compiler/backend is
 # available. See test_backend_execution_cuda.cu for why it is unverified.
@@ -42,6 +57,9 @@ if(CFE_ENABLE_CUDA)
     unit/test_scalar_advection_3d_cuda.cu
     unit/test_burgers_cuda.cu
     unit/test_burgers_3d_cuda.cu
+    unit/test_euler_cuda.cu
+    unit/test_euler_3d_cuda.cu
+    unit/test_euler_hllc_3d_cuda.cu
   )
   set_target_properties(cfe_unit_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 endif()

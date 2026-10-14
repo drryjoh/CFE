@@ -46,6 +46,32 @@ Planned families include:
 
 Each implementation should cite its exact formulation.
 
+### Rusanov/local Lax-Friedrichs (implemented, Phase 2/3)
+
+`src/cfe/numerics/numerical_flux/rusanov.hpp`. Rusanov, "The calculation
+of the interaction of non-steady shock waves with obstacles," 1961; see
+also Toro, *Riemann Solvers and Numerical Methods for Fluid Dynamics*,
+3rd ed., Sec. 10.5, or LeVeque, *Finite Volume Methods for Hyperbolic
+Problems*, Sec. 10.3-10.4.
+
+### HLLC (implemented, task 0011)
+
+`src/cfe/numerics/numerical_flux/hllc.hpp`. Toro, Spruce, Speares,
+"Restoration of the contact surface in the HLL Riemann solver," Shock
+Waves 4, 1994; reproduced as Toro, *Riemann Solvers and Numerical
+Methods for Fluid Dynamics*, 3rd ed., Ch. 10 (eq. 10.37-10.43). Wave-speed
+estimate: Toro's ANRS (Sec. 9.5.2, adaptive PVRS/TRRS/TSRS) used as a
+seed only, refined by 5 fixed Newton-Raphson iterations (Toro
+eq. 4.5-4.8) toward the exact two-shock/two-rarefaction `p*` -- see
+`docs/adr/0012-hllc-numerical-flux.md` for why the non-iterative
+estimate alone was insufficient (a silent, severe robustness bug at a
+strong Mach-3 wall reflection), for a second, separate robustness fix
+(density/pressure floors guarding against a near-vacuum
+componentwise-MUSCL-reconstruction artifact at a strong 2D multi-wave
+interaction), and for a real forward-step Kelvin-Helmholtz finding this
+flux reproduces that Rusanov never showed
+(`tutorials/euler_2d_forward_step/README.md`).
+
 ## Discontinuous Galerkin
 
 DG development will draw from prior work by:

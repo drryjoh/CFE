@@ -131,6 +131,18 @@ Deliver:
 - Taylor-Green vortex infrastructure;
 - DG `p=1...4` progression where feasible.
 
+PPM planning note (task 0011, `docs/adr/0012-hllc-numerical-flux.md`):
+Violet's pre-implementation consult for that task identified that
+PPM's discontinuity-flattening logic needs `Reconstruction` to become
+`Field`-aware (read pressure/density across a wider stencil, not just
+raw per-component scalars) -- the same architecture gap task 0011's own
+confirmed componentwise-reconstruction density-overshoot finding (ADR
+0010 Decision 1, ADR 0012 Decision 2b/4) would need closed by
+characteristic reconstruction or a positivity-preserving
+`Reconstruction` fallback. Worth scoping PPM's own interface-widening
+work with that second need in mind rather than solving both
+independently later.
+
 Acceptance:
 
 - viscous convergence study;

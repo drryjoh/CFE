@@ -1,0 +1,7 @@
+nx,flux,wake_l1_error,ahead_bulk_max_deviation,ahead_boundary_max_deviation,extrema_count
+100,rusanov,0.82496,0.112673,0.0826215,5
+100,hllc,0.667032,1.40532e-12,0,5
+200,rusanov,0.701803,0.0518142,0.0799896,5
+200,hllc,0.575397,0,0,5
+400,rusanov,0.512709,0.0230699,0.0617842,5
+400,hllc,0.470017,0,0,7

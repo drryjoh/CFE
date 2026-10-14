@@ -46,6 +46,12 @@ struct ScalarAdvectionField
   // dimensionality is decided, and everything downstream derives from it
   // rather than re-deciding it per thread.
   static constexpr std::size_t dim = Dim;
+  // Single-component (scalar) state. Added when `solver/explicit/
+  // fvm_solver.hpp` was generalized from a hardcoded component count of
+  // 1 to `Field::n_components` (to host `EulerField`'s multi-component
+  // state) -- this field's own physics/Calculator shape (`Scalar`-in,
+  // `Scalar`-out) is unchanged.
+  static constexpr std::size_t n_components = 1;
 
   Vector<Scalar, Dim> velocity;
 

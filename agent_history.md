@@ -3180,3 +3180,1840 @@ Full `ctest` suite (102/102 unit + 7/7 MPI) re-run and still green
 build provides exactly `MPI_THREAD_FUNNELED`, never less -- so the
 standalone harness is this fix's only direct verification). ADR 0009's
 amendment updated with the same detail.
+
+## 2026-10-12 — Task 0009: Phase 3 — compressible Euler, MUSCL/Rusanov, supersonic/slip-wall BCs, Sod shock tube
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+Picked up a prior run that stalled mid-implementation (killed by a
+background watchdog after 600s with no progress). The user's original
+ask combined ROADMAP.md Phase 3 (compressible Euler) with two Phase-4
+items pulled forward (the Woodward & Colella forward-facing-step wind
+tunnel benchmark, 2D + 3D-CPU), reasoning the benchmark only makes
+sense as one package. Per CLAUDE.md, consulted Amelia before committing
+to a design on two open questions: (1) how to represent the forward
+step's L-shaped domain using only today's single-block `CartesianGrid`
+(no generalized unstructured infrastructure, per ROADMAP.md's scope
+guardrails), and (2) whether bundling Phase 3 + the forward-step
+benchmark into one slice is coherent. Amelia recommended (1) two
+`CartesianGrid` blocks joined by a new same-process cross-block
+`BoundaryCondition` (same shape as `mpi_halo_boundary.hpp`'s
+cross-partition read, without MPI), and (2) **splitting the work**:
+land Euler/MUSCL/Rusanov/BCs/Sod-tube now, defer the forward step (a
+brand-new, never-reviewed architectural mechanism) to a separate
+follow-on slice so a misbehaving result can't be ambiguous between new
+physics and a new grid-joining mechanism. Followed both recommendations
+-- this entry covers only the first half. The second half is recorded,
+not implemented, at `tasks/0010-phase4-forward-step-multiblock.md`.
+
+What was already on disk (uncommitted, from the stalled run) and was
+reviewed, built, and tested before anything new was added:
+`src/cfe/fields/euler/field.hpp` (`EulerField<Scalar,Dim>`), the vector
+(`State<Scalar,N>`) overload of `rusanov_flux`/`RusanovFlux`
+(`numerics/numerical_flux/rusanov.hpp`), and `FvmSolver`'s
+generalization from a hardcoded single-component assumption to generic
+`Field::n_components` (`solver/explicit/fvm_solver.hpp`, with
+`n_components = 1` added to `BurgersField`/`ScalarAdvectionField` to
+match). All of it compiled and passed the existing 102-test suite with
+zero regressions on first build -- the stall had happened before any
+verification step, not mid-breakage.
+
+New:
+- `src/cfe/grid/boundary/slip_wall_boundary.hpp` --
+  `SlipWallBoundary<Field>`, CFE's first Field-aware
+  `BoundaryCondition` (AGENTS.md #17, ARCHITECTURE.md #11): mirrors
+  ghost-cell values but negates the single momentum component normal
+  to the wall via `Field::momentum_index(axis)`. Supersonic
+  inflow/outflow reuse existing, physics-agnostic `StaticBoundary`/
+  `InflowOutflowBoundary` unchanged (valid because every characteristic
+  points one direction for supersonic flow -- no Field-awareness
+  needed), so this was the only new BC type required.
+- `tests/unit/test_euler_flux.cpp`, `tests/unit/test_slip_wall_boundary.cpp`
+  -- Calculator hand-computed values, reflecting-BC component-mirroring
+  checks on both the X and Y axis.
+- `tests/verification/` (new directory, matching ARCHITECTURE.md's own
+  proposed layout): `sod_shock_tube_exact.hpp` (an independently
+  implemented exact Riemann solver, Toro Ch. 4 Newton-Raphson + sampling
+  procedure, cross-checked against a standalone Python
+  re-implementation and against Toro's own published Sod-problem table
+  before being trusted as a test oracle), `sod_shock_tube_runner.hpp`
+  (the shared simulation driver both the test and the tutorial call --
+  added during review to remove an initial ~50-line duplication, see
+  Snorlax finding below), and `test_euler_sod_shock_tube.cpp` (exact
+  mass/energy conservation to 1e-10, a momentum-impulse check to 1e-8,
+  density-vs-exact-solution agreement at several sample points, a weak
+  L1-convergence check).
+- `tutorials/euler_1d_sod_shock_tube/` -- the Sod tube at 3 resolutions,
+  actually built and run (not just written): L1(rho) = 1.055e-2 ->
+  5.68e-3 -> 3.19e-3 at nx=100/200/400, decreasing monotonically.
+  Figures not rendered in this environment (no `pandas`/`matplotlib`
+  available, `pip install` blocked by Homebrew's externally-managed-
+  environment guard) -- real, not fabricated, data.
+- `docs/adr/0010-euler-field-and-shock-capturing.md` -- resolves the
+  dangling "ADR 0010" references already present in the stalled run's
+  code comments (that file did not exist yet). Covers: the
+  `FvmSolver` N=1 -> N-component generalization (and the two
+  alternatives rejected -- a separate `VectorFvmSolver` type, and
+  forcing every Field onto `State<Scalar,N>` uniformly), componentwise
+  vs. characteristic reconstruction, why `SlipWallBoundary` is the
+  "lighter-weight" Field-aware BC (not ARCHITECTURE.md #11's
+  characteristic-based subsonic case), and the decision to defer the
+  forward-step benchmark.
+- `docs/type-reference.md` -- entries for `EulerField`, `SlipWallBoundary`,
+  updated `FvmSolver`/`RusanovFlux` entries, phase-label corrections.
+- `tasks/0009-...md` (this slice), `tasks/0010-...md` (forward-step
+  follow-on, not started -- records Amelia's design recommendation so
+  the next session doesn't need to re-derive it).
+
+Tests run: full suite, 115/115 passing (102 pre-existing + 13 new),
+CPU-only (`CFE_ENABLE_CUDA=OFF`, this machine has no CUDA), rebuilt and
+re-run after every round of changes below, not just once at the end.
+
+Review findings and resolution (Violet, Snorlax, Sally, Enzo, run in
+parallel against the finished diff):
+
+- **Violet** (numerical correctness): independently re-derived the
+  exact Sod-tube reference values (standalone Newton-Raphson, matches
+  Toro's published table) and re-ran the full suite + tutorial herself;
+  confirmed `EulerField`'s physics, `SlipWallBoundary`'s reflecting
+  construction, the `FvmSolver` N=1/N>1 branches, and the exact-
+  conservation/momentum-impulse arguments all check out. No blocking
+  finding. Optional, taken: 3 of the test's tolerances (at x=0.35,
+  0.55, 0.78) were 10-80x looser than the actually-measured error --
+  tightened to ~4-30x margins with the measured values recorded in the
+  comments, so a real regression could not hide inside the old slack.
+  Optional, noted (not a defect, tracked): no CUDA correctness test for
+  `EulerField` yet -- expected at this stage (this machine has no CUDA;
+  the standing PR policy requiring a 3D CUDA correctness test + at-scale
+  benchmark on real hardware, e.g. PSC Bridges-2, remains open against
+  this Field, same as it has for prior CPU-developed phases before
+  their own Bridges-2 follow-up).
+- **Snorlax** (simplicity/architecture): no blocking finding (confirmed
+  the `if constexpr(N==1)` branch, `SlipWallBoundary`'s scope, and BC
+  reuse are all justified, not premature). Taken: ADR 0010 now records
+  the "unify all Fields onto `State<Scalar,N>`" alternative and why it
+  was rejected (would churn every existing Field's public signature for
+  no benefit, an unrequested interface-scope expansion per AGENTS.md
+  #6); fixed one ADR sentence that read as if the forward-step
+  benchmark had been delivered in this slice when it had not; fixed a
+  stale "(Phase 1)" tag on `docs/type-reference.md`'s `cfe::solver`
+  section header; factored the ~50-line duplicated Sod-tube driver out
+  of the test and tutorial into the new shared
+  `tests/verification/sod_shock_tube_runner.hpp` (re-built and re-run
+  afterward -- 115/115 still passing, tutorial output numerically
+  unchanged, confirming the refactor was behavior-preserving). Noted,
+  not acted on: unqualified `sqrt()` in `EulerField::sound_speed` is
+  this codebase's first transcendental-function call -- flagged for a
+  future `float`/`double` overload-resolution convention decision, not
+  required for this slice.
+- **Sally** (usability, PhD-student-learning-C++ perspective):
+  **blocking**, fixed -- the tutorial README's documented run commands
+  didn't match where the standalone build actually places the binary,
+  and the plotting step didn't mention its `pandas`/`matplotlib`
+  dependency (both now follow the exact two-path convention and
+  dependency note `tutorials/burgers_1d_shock_and_steepening/README.md`
+  already established). Optional, taken: added a plain-language
+  explanation of what a contact discontinuity physically is (to the
+  tutorial README), a one-sentence physical justification for the
+  exact Riemann solver's rarefaction-vs-shock branch selection (in
+  `sod_shock_tube_exact.hpp`), and a units/nondimensionalization note
+  to `EulerField`'s header comment.
+- **Enzo** (performance/resource discipline): no finding requiring
+  action -- confirmed via actual arm64 disassembly that the N=1 branch
+  of the generalized `axis_flux_difference` is zero-cost (identical
+  codegen to the pre-generalization path) and the new N>1 (Euler) path
+  has no hidden copies/allocations. One real signal recorded as a
+  future watch item, not acted on now: register pressure jumps from a
+  0-byte stack frame at N=3 to a 128-byte spill at N=5 (`-O3`, arm64) --
+  relevant once real CUDA hardware or a higher-component-count field
+  (AGENTS.md #8's 5/10/20/50/100 sweep) is in play, not for this
+  CPU-only, N=3..4 slice.
+
+Independent final review (Ilia, before reading any other reviewer's
+notes) and alignment check (Amelia), run after the above was resolved:
+
+- **Ilia**: independently re-derived the Sod exact solution from
+  scratch (a separate Python implementation, not reading
+  `sod_shock_tube_exact.hpp` first), hand-checked `EulerField`'s
+  physical-flux formula, rebuilt from touched source and re-ran
+  115/115 himself. Confirmed the (now-split) scope was met and the
+  Phase-3/forward-step deferral was documented consistently everywhere
+  he checked (ADR, task files, this entry, the presentation). No
+  numerics or architecture problem found. **Blocking, fixed:** this
+  entry's own prior wording ("CSV data is real and committed") did not
+  hold up -- he checked `tutorials/euler_1d_sod_shock_tube/data/` and
+  `figures/` directly and found both empty, against
+  `tutorials/burgers_1d_shock_and_steepening/data/*.csv` as the
+  project's actual tracked-data precedent. Root cause: the tutorial
+  binary had been run from inside `build/`, so its relative-path output
+  landed under `build/.../data/*.csv`, never under the tracked
+  `tutorials/euler_1d_sod_shock_tube/data/` this repository actually
+  commits from. Fixed by re-running the binary from
+  `tutorials/euler_1d_sod_shock_tube/` itself (exactly as that
+  tutorial's own README documents), confirming the CSVs now land in
+  the tracked directory, and staging them (`git add`) -- not committed
+  to git by this agent, since no commit was requested this session; the
+  wording above is corrected accordingly. Optional (taken): added a
+  one-line acknowledgment (ADR 0010, Decision 3) that Euler's
+  "supersonic outflow" reuse of `InflowOutflowBoundary` is argued
+  correct by a type-level check (it is already generic over
+  `State<Scalar,N>`), not exercised end-to-end with `EulerField` itself
+  in this slice (only `StaticBoundary` is, via the Sod tube) -- real
+  exercise of it is expected in the forward-step follow-on, whose inlet
+  needs exactly this. Optional (taken): added "DG `p=1`/`p=2` prototype
+  where feasible" to task 0009's "Explicitly not in this task" list --
+  ROADMAP.md's Phase 3 section names it with "where feasible" language
+  never actually requested by the user, but every OTHER deferred
+  Phase-3 item (HLLC, subsonic BC, forward-step) was already enumerated
+  there and this one was missing, an inconsistency rather than a scope
+  problem.
+- **Amelia**: alignment check came back clean -- confirmed
+  `docs/adr/0010-...md`'s Decision 4 accurately records her own
+  multi-block-design and slice-split recommendation (not strengthened
+  or weakened), confirmed `tasks/0010-...md` preserves enough of that
+  recommendation (the two-block approach, the cross-block BC shape, the
+  "needs its own ADR/review" requirement) for a future session to pick
+  up without re-consulting her, and confirmed the implementation stays
+  consistent with how other Fields/BCs/NumericalFlux types in this
+  codebase are already shaped. No drift from her original
+  recommendation; no overselling of what shipped.
+
+Architecture decisions:
+`docs/adr/0010-euler-field-and-shock-capturing.md` (new, amended during
+review per the Snorlax findings above, and again per Ilia's optional
+finding above).
+
+Known limitations (unchanged from what the ADR/tasks already document,
+restated here for the record):
+- No CUDA correctness test or at-scale benchmark for `EulerField` yet
+  -- this machine has no CUDA hardware; remains open against this
+  project's standing per-PR requirement, same status prior CPU-first
+  phases carried before their own Bridges-2 follow-up.
+- HLLC/AUSM-family numerical flux not implemented (Rusanov alone
+  satisfies the user's own "Rusanov and/or HLLC" phrasing for this
+  slice; Rusanov's contact-discontinuity smearing is documented and
+  demonstrated in both the test and the tutorial).
+- Componentwise (not characteristic) MUSCL reconstruction; the
+  characteristic-based partial-specification subsonic inflow/outflow
+  BC (ARCHITECTURE.md #11's other named Field-aware shape) remains
+  unimplemented -- no case in this slice needs it.
+- The forward-facing-step benchmark itself (2D and 3D-CPU), its
+  multi-block grid join, and the new cross-block `BoundaryCondition`
+  it needs are NOT implemented -- tracked at
+  `tasks/0010-phase4-forward-step-multiblock.md`, which records
+  Amelia's design recommendation so it does not need to be re-derived.
+- Tutorial figures (PNGs) were not rendered in this environment
+  (`pandas`/`matplotlib` unavailable, install blocked by the system
+  Python's externally-managed-environment guard) -- the underlying CSV
+  data is real, generated by an actual run from the tutorial's own
+  documented working directory, and staged (not committed to git by
+  this agent this session, since no commit was requested).
+
+Next recommended task:
+`tasks/0010-phase4-forward-step-multiblock.md` -- the forward-facing-
+step wind tunnel benchmark, using the two-`CartesianGrid`-block design
+already agreed with Amelia. Needs its own ADR (the cross-block
+boundary mechanism is itself a major architectural decision) and its
+own Violet/Snorlax/Sally/Enzo review pass before Ilia/Amelia sign-off,
+per CLAUDE.md.
+
+## 2026-10-12 — Task 0009: 3D CPU test, CUDA correctness, and PSC Bridges-2 at-scale benchmark (closing the per-PR policy gap before commit)
+
+Before task 0009 was committed, the user caught a real gap against this
+project's own standing per-PR policy (raised during PR #3's review):
+every PR adding a new Field/numerical-scheme must include a 3D CPU
+correctness test, a CUDA correctness test, AND an at-scale GPU
+benchmark in the SAME PR -- not deferred as a follow-up, which is what
+task 0009's "known limitations" above had effectively done. This entry
+closes that gap for `EulerField` before the commit, rather than after.
+
+What was done:
+
+- `tests/unit/test_euler_3d_sanity.cpp` (new, CPU-only, no remote
+  hardware needed): built and run locally first, standalone, to
+  confirm it actually passed before trusting anything else in this
+  slice -- it does (116/116 local CPU tests, this one included).
+- `tests/unit/test_euler_cuda.cu` / `test_euler_3d_cuda.cu` and
+  `benchmarks/euler/bench_euler_cuda.cu` / `bench_euler_3d_cuda.cu`
+  (new, written against real hardware this machine doesn't have):
+  read carefully before trusting them, specifically for the
+  established nvcc hard constraint (a locally-defined lambda cannot be
+  a template argument to a function containing an extended
+  `__device__` lambda in a `.cu` file) -- both test files correctly use
+  the named `cfe::SolverResidual<decltype(solver)>` functor, matching
+  `test_burgers_cuda.cu`/`test_scalar_advection_cuda.cu` precedent
+  exactly; `FvmSolver` aggregate-init and `SlipWallBoundary` usage also
+  matched established precedent. No defect found in this review pass.
+- Found and reused the existing persistent Bridges-2 scratch checkout
+  (`~/scratch_cfe/CFE` on the cluster, same pattern task 0008's own
+  entry documents) rather than cloning fresh: checked out
+  `cfe/development/multi-agent-workflow` there (already on `origin`,
+  matching local `HEAD` `8a6f2d1`), then synced this session's
+  uncommitted working-tree changes on top via `tar | ssh ... | tar x`
+  (`rsync` unavailable on this machine; `scp`'s documented past
+  unreliability over the multiplexed connection avoided entirely).
+  Verified the sync byte-for-byte via `sha256sum` on every new CUDA
+  test/benchmark file and the modified CMakeLists before trusting the
+  remote tree.
+- Loaded `cuda-v100/12.9.2` (aliases `cuda-legacy/12.9.2`) +
+  `gcc/13.3.1-p20240614` and built with
+  `-DCFE_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=70` on the Bridges-2
+  login node (no GPU allocation needed for the build itself) --
+  succeeded cleanly. Ran the CPU ctest sanity gate on the login node
+  first, per task 0008's own precedent: 116/127 passed, the 11
+  failures being exactly the CUDA tests (`cudaMalloc: CUDA driver
+  version is insufficient` -- no GPU on the login node), confirming the
+  CPU-only tests were unaffected before spending any GPU time.
+- GPU allocation: the first `salloc -A phy260058p -p GPU-shared
+  --qos=gpuinteract --gres=gpu:v100-32:1 -t 30:00 --no-shell` attempt
+  queued indefinitely (`Nodes_required_for_job_are_DOWN,_DRAINED_or_
+  reserved_for_jobs_in_higher_priority_partitions` despite the
+  requested QOS) -- the same cluster scheduling noise task 0004's own
+  Bridges-2 entry already documented for a CPU partition; cancelled and
+  resubmitted identically, which granted promptly (job `49095911`,
+  node `v002`, Tesla V100-SXM2-32GB confirmed via `nvidia-smi`).
+- On the allocated node: full suite **127/127 passed**, including both
+  new Euler CUDA tests
+  (`test_euler_cuda_matches_cpu_reference`,
+  `test_euler_3d_cuda_matches_cpu_reference`), zero regressions to any
+  pre-existing CUDA test. `compute-sanitizer --tool initcheck`: **0
+  errors**, matching task 0006's own Burgers-CUDA verification
+  methodology exactly.
+- Ran both new benchmark sweeps for real: 1D up to 10^8 cells
+  (1.648e9 cell-updates/s at 10^8); 3D cube up to 512^3/~134M cells
+  (3.512e8 cell-updates/s at 512^3). The OOM risk flagged going in (5
+  components x 134M cells x 3 device buffers x 8 bytes ~ 16.1 GB
+  against the V100's 32 GB) was watched, not assumed -- the full sweep
+  completed with no allocation failure. Measured against the actual
+  budget this is **~50% utilization** -- a comfortable margin, not a
+  near-miss (an earlier draft of this entry implied otherwise;
+  corrected during Enzo's review, see below).
+- Captured static register/spill data (`nvcc --resource-usage`, no GPU
+  allocation needed) per AGENTS.md #8: the Euler residual kernel uses
+  66 registers / 0 spill at N=3 (1D) and 92 registers / 0 spill at N=5
+  (3D) -- no GPU-side register spilling at either component count, in
+  contrast to task 0009's own CPU (arm64) finding of a 128-byte stack
+  spill at N=5.
+- Allocation released (`scancel`) after ~3.3 of its 30 minutes --
+  correctness, sanitizer, both benchmark sweeps, and the static
+  register check all completed well inside the window by doing setup
+  (sync, build, CPU gate, module load) before `salloc`, not during it.
+- Full real numbers, methodology, environment, and the register/spill
+  table: `docs/performance/0007-phase3-euler-cuda-results.md`. Raw CSVs
+  committed at `benchmarks/results/phase3_euler_v100.csv` /
+  `phase3_euler_3d_v100.csv`.
+
+Review: Violet (numerical correctness of the GPU path) and Enzo
+(performance/register-pressure at scale) reviewed this specific
+follow-up. Both independently confirmed the core claims hold (3D
+reduces bit-exactly/column-for-column to the 1D reference under
+uniform/periodic Y/Z; benchmark/test timed-region structure is clean,
+no hidden allocations or transfers) but found real problems:
+
+- **Enzo, blocking (doc/arithmetic errors, not code problems):** this
+  entry's and `docs/performance/0007-...md`'s first drafts claimed a
+  "roughly-5x" 3D-vs-1D throughput compounding and a naive "~35%"
+  occupancy estimate for the 92-register residual kernel. Both wrong.
+  Real compounding factor, computed directly from the benchmark tables:
+  **~2.2x-2.8x** (average ~2.5x). Real occupancy, accounting for the
+  actual 256-thread launch configuration
+  (`cuda_backend.cuh:49`) and Volta's register-allocation granularity
+  (92 registers rounds up to 96/thread): **~25%**, not ~35%. Both fixed
+  in `docs/performance/0007-...md` with the corrected methodology shown
+  explicitly; this entry's own numbers above corrected to match.
+- **Violet, filed optional but treated as effectively blocking:**
+  `test_euler_cuda.cu`/`test_euler_3d_cuda.cu` originally ran only to
+  t=0.06/t=0.12 -- Violet independently simulated the identical setup
+  and confirmed neither the shock nor the rarefaction reaches either
+  wall in that time, so despite the tests' own "reflecting tube"
+  framing, no version of either test had ever actually exercised a wave
+  reflecting off `SlipWallBoundary` (the CPU-vs-GPU bit-agreement claim
+  itself remained valid -- two backends computing the identical, if
+  boundary-inert, sequence -- but the coverage claim was false
+  advertising). Fixed with real evidence: a standalone CPU-only probe
+  (not committed) confirmed the shock reaches the wall at t~0.27-0.28
+  and the post-reflection max wave speed stays ~2.21 (comfortably under
+  the existing `kMaxSpeedEstimate=5.0` margin, so that constant did not
+  need to change). Both tests' step counts extended to t=0.5
+  (300->2500 steps 1D, 150->625 steps 3D), and a mass/total-energy
+  conservation check added to each as the acceptance criterion for the
+  now-reflection-including run (no closed-form solution exists for a
+  doubly-reflected Sod problem, so conservation -- not an exact value
+  -- is the right physical check). Re-verified for real on a second
+  Bridges-2 V100 allocation (job `49096728`, node `v008`, ~20 min
+  requested, ~1:43 used) after the fix: full suite still **127/127**,
+  `compute-sanitizer --tool initcheck` still **0 errors** -- the longer
+  runs did not regress anything or destabilize.
+- **Violet, optional, taken:** `test_euler_3d_sanity.cpp`'s `1e-10`
+  tolerance was ~10 orders looser than the actual agreement. Tightening
+  this surfaced a genuine cross-platform finding: an exact (`0.0`)
+  tolerance passes deterministically on this project's development
+  machine (arm64/clang) but does NOT reproduce bit-exact on Bridges-2
+  (x86-64/gcc 13.3.1) -- same source/reasoning, different legitimate
+  floating-point rounding between toolchains (confirmed via a careful
+  isolated re-test after first chasing a false lead: an overly broad
+  find-and-replace during the initial tolerance edit had accidentally
+  also corrupted two unrelated `Scalar(0.0)` initializers elsewhere in
+  the same function, which is what actually caused that first,
+  spurious-looking "looser tolerance makes it fail" result -- caught
+  and corrected before it was mistaken for real nondeterminism).
+  Settled on `1e-13`: still ~10^3 tighter than the original for real
+  regression protection, confirmed passing on both toolchains.
+- **Enzo, optional, taken:** the 512^3/N=5 OOM-risk framing above and
+  in the doc implied a near-miss; corrected to state the real measured
+  utilization (~50%, a comfortable margin, not danger narrowly averted).
+- **Enzo, optional, noted, not acted on this session:** no durable
+  tracked location yet for when a real N-configurable field (future
+  species/ChemGen work, AGENTS.md #21) will finally produce actual
+  10/20/50/100-component register/occupancy data per AGENTS.md #8 --
+  a one-line forward reference belongs in that future work's own ADR;
+  recorded as a known limitation below in the meantime.
+
+Ilia's and Amelia's prior sign-off on task 0009 itself (the physics,
+solver, and architecture) was judged still valid rather than re-run
+from scratch: this follow-up adds test/benchmark/documentation
+coverage, and fixes errors discovered within that new coverage, without
+changing any production physics, solver, or architecture code their
+review already covered; Amelia's direction check from the original
+entry (the bundling-split recommendation) is unaffected.
+
+Known limitations (supersedes the "no CUDA correctness test or
+at-scale benchmark" bullet from the entry above, which is now
+resolved):
+- No float32 benchmark variant for Euler yet, no `ncu --set full`
+  runtime occupancy/bandwidth profile (static register/spill check
+  only) -- reasonable future work, not required to close this specific
+  per-PR gap.
+- Register pressure at N=5 (92 registers/thread, 96 after Volta's
+  allocation rounding) bounds V100 occupancy to ~25% even with zero
+  spilling (corrected methodology above); not yet measured at the
+  10/20/50/100-component scale AGENTS.md #8 anticipates for reacting-
+  flow states -- flagged as a watch item for a future higher-component
+  Field benchmark, not a defect in this 3-5 component slice. No durable
+  tracked location for this yet beyond this entry and
+  `docs/performance/0007-...md` -- the first real species/ChemGen
+  N-configurable Field is the natural point to actually collect that
+  data and should reference back here.
+- Every other known limitation from the original task 0009 entry above
+  (Rusanov contact smearing, componentwise reconstruction, no HLLC,
+  no subsonic BC, the forward-step benchmark itself) is unchanged by
+  this follow-up.
+
+Next recommended task: unchanged --
+`tasks/0010-phase4-forward-step-multiblock.md`.
+
+## 2026-10-12 — Task 0010: Phase 4 (pulled forward) — forward-facing-step multi-block benchmark
+
+Implemented the Woodward & Colella (1984, JCP 54, 115-173, Sec. IV.b)
+Mach 3 forward-facing-step wind tunnel -- CFE's first multi-block case,
+per the design direction already agreed with Amelia and recorded in
+`tasks/0010-phase4-forward-step-multiblock.md` before this session
+started (two `CartesianGrid` blocks joined by a new same-process
+cross-block `BoundaryCondition`, not one masked grid).
+
+**Files added/changed:**
+- `src/cfe/grid/boundary/block_interface_boundary.hpp` (new):
+  `BlockInterfaceBoundary<Scalar, Field, Side, Layout>` -- same-process
+  cross-block ghost read (the MPI-free analogue of
+  `grid/boundary/mpi_halo_boundary.hpp`'s cross-partition read), with a
+  local slip-wall-style fallback for the step's riser face.
+- `docs/adr/0011-forward-step-block-interface.md` (new): the
+  architectural decision record for this mechanism, kept separate from
+  ADR 0010 (which stayed scoped to task 0009's single-block Euler work)
+  per CLAUDE.md.
+- `tests/verification/forward_step_setup.hpp` (new): shared two-block
+  assembly/stepping driver (`ForwardStepBlocks`), used by both tests and
+  both tutorials -- includes a hand-interleaved SSP-RK2 stage coupling
+  (`step()`) and a shared `run_and_report()` step/snapshot/progress loop.
+- `src/cfe/solver/time_integration/ssp_rk2.hpp` (changed): `ssp_rk2_step`
+  is now a thin wrapper around two newly-public functions,
+  `ssp_rk2_combine_stage1`/`ssp_rk2_combine_stage2` -- added specifically
+  so `ForwardStepBlocks::step()` has a tested, reusable, `Backend`-generic
+  building block to call instead of duplicating the combine formula
+  locally (added during the review cycle below, not in the first draft).
+- `tests/unit/test_block_interface_boundary.cpp` (new): ghost-fill
+  correctness for both `Side::High`/`Side::Low`, including a synthetic
+  test forcing the otherwise-unreachable `Side::Low` riser-face fallback
+  branch (added during review, see below).
+- `tests/verification/test_forward_step_interface_conservation.cpp`
+  (new): the task's required direct conservation check (bit-exact flux
+  agreement from each side of the interface) plus a dynamic mass-balance
+  check through the real interleaved driver (added during review).
+- `tests/unit/test_forward_step_sanity.cpp` (new): short end-to-end
+  sanity runs at `Dim=2` and `Dim=3`.
+- `tutorials/euler_2d_forward_step/` (new): primary 2D deliverable --
+  three reference resolutions (20x60/40x120/80x240-equivalent) to t=4,
+  VTK output, `plot_results.py`, README with the qualitative writeup.
+- `tutorials/euler_3d_forward_step_extrusion/` (new): the 3D CPU
+  "see it work" extrusion.
+- `docs/type-reference.md`, `presentations/0010-phase4-forward-step-
+  multiblock.md`: updated/added per AGENTS.md #26/#27.
+
+**Review trail:** Violet, Snorlax, Sally, and Enzo reviewed the new
+mechanism, the shared driver, the tests, and the benchmark evidence (in
+parallel, each given the task/ADR for context, not a summary of the
+others' findings). No numerical-correctness or architectural defects
+were found anywhere -- Violet independently re-derived the cross-block
+index arithmetic from scratch and confirmed it correct in both
+directions; Enzo confirmed the production boundary-condition code has no
+hidden allocations and correct `CFE_HOST_DEVICE`/`Backend` usage. Real
+findings, all resolved before Ilia/Amelia's sign-off:
+
+- **Blocking (Snorlax):** `tutorials/euler_2d_forward_step/CMakeLists.txt`'s
+  comment falsely claimed the interface-conservation test reused the
+  shared driver -- it builds its own minimal scaffold instead (needs to
+  reach inside the reconstruction/flux pipeline in a way
+  `FvmSolver::residual()` doesn't expose). Fixed.
+- **Blocking (Sally):** the 2D tutorial's README claimed the Mach-stem
+  triple point moves *downstream* with specific x-values. Checked
+  directly against the committed VTK output: it moves *upstream*
+  (x~0.975 at t=1 down to x~0.637 at t=4) -- matching Woodward &
+  Colella's own text ("a Mach stem forms at about time 1.5 and moves
+  very slowly upstream along the upper wall") exactly. The simulation
+  had the physics right; only the prose had the direction backwards.
+  Fixed with the real measured numbers (also corrected in the
+  presentation file).
+- **Blocking (Sally):** `forward_step_setup.hpp`'s `j_offset_to_neighbor`
+  comment pointed at a derivation that didn't actually exist in this
+  file's header. Added the real derivation inline at the point of use.
+- **Blocking (Enzo):** the ADR and 3D README cited an `agent_history.md`
+  completion entry that didn't exist yet. This entry is that fix.
+- **Blocking (Enzo):** the 3D README's "8x the 2D run" timing claim
+  didn't reproduce -- a non-repeated single 2D measurement had been a
+  fast outlier. Re-measured both tutorials with repeats (2D res40:
+  0.85-0.89s across 4 runs; 3D: 11.49-11.56s across 4 runs) -- real ratio
+  is ~13x, explained honestly (per-step overhead that doesn't scale with
+  `nz_cells` is a larger fraction of the cost once each Z-column is
+  cheap) rather than asserted to match a naive 8x guess. Committed CSVs
+  and README updated to the repeated, reproducible numbers.
+- **Optional, taken (Violet):** added the dynamic mass-balance check
+  above (run the real driver for a short, analytically-tractable window,
+  compare against the exact inlet/outlet flux balance -- matches to
+  `~2e-14`).
+- **Optional, taken (Violet):** added the synthetic `Side::Low`
+  riser-face-fallback test (that branch is correct-by-construction but
+  unreachable in the real geometry, where the downstream block's full
+  height always lies inside the upstream block's).
+- **Optional, taken (Violet):** added a `neighbor_grid.nx >= grid.ngx`
+  runtime check to `BlockInterfaceBoundary`'s existing
+  `require_matching_block_resolution` validation.
+- **Optional, taken (Snorlax + Enzo):** refactored
+  `solver/time_integration/ssp_rk2.hpp` to expose
+  `ssp_rk2_combine_stage1`/`ssp_rk2_combine_stage2` as public,
+  `Backend`-generic, `CFE_HOST_DEVICE`-tagged functions (`ssp_rk2_step`
+  becomes a thin wrapper around them), removing `forward_step_setup.hpp`'s
+  own local, non-`Backend`-generic duplicate of the same two formulas.
+  Confirmed zero behavior change for every existing `ssp_rk2_step` caller
+  (full suite re-run, identical pass count, identical numbers).
+- **Optional, taken (Sally):** switched every `BlockInterfaceBoundary`
+  aggregate-initialization call site (two in `forward_step_setup.hpp`,
+  three in `test_block_interface_boundary.cpp`, two in the conservation
+  test) to C++20 designated initializers, removing the six-same-typed-
+  positional-argument transposition risk Sally flagged.
+- **Optional, taken (Snorlax):** factored the two tutorials' near-
+  identical `main()` step/snapshot/progress-report loops into a shared
+  `cfe_verification::run_and_report()` helper in `forward_step_setup.hpp`.
+  Re-ran both tutorials after the refactor: bit-identical output (same
+  final densities/masses/z-momentum, `0.000e+00` max difference against
+  the pre-refactor data) -- confirms the refactor changed no numerics.
+
+During this same investigation (not a reviewer finding, caught directly
+while first generating the benchmark evidence): the original
+`ForwardStepBlocks`'s `total_mass()` reported resolution-dependent
+values for the identical IC (e.g. `0.1764` at res20 vs `0.0441` at
+res80, a clean `1/res` scaling) -- traced to `grid.dz` being left at
+`dx`'s value instead of the `CartesianGrid` default `1` for the 2D case
+(an extra, spurious factor of `dx` in the cell-volume product). Fixed in
+`forward_step_setup.hpp::make_grid1`/`make_grid2` before any of the
+above reviews ran; all reported numbers in this entry and the tutorials'
+own output already reflect the fix.
+
+**2D qualitative evidence** (`tutorials/euler_2d_forward_step/README.md`,
+figures under that tutorial's `figures/`): at all three reference
+resolutions, run to t=4 -- a bow shock peels off the step corner from the
+first frame onward; a classic Mach-reflection triple point forms where it
+meets the top wall and moves upstream over time (measured: x~0.975 at
+t=1 -> x~0.637 at t=4, matching the source paper's own description); a
+fainter trailing contact/slip line is visible in the numerical-schlieren
+view, showing mild waviness at the finest resolution; the step corner's
+own known singular-point artifact is visible as a small, localized
+feature right at the corner in the schlieren view, observed and
+documented, not fixed (matching the task's explicit scope). Resolution
+comparison at t=4 shows the expected sharpening (blurry at res20,
+cleanly separated triple point and trailing line at res80) -- a
+qualitative illustration, not a formal convergence-order claim, per the
+task's own "qualitative checks, not a convergence table" framing.
+
+**Cross-block interface conservation result:** the required direct check
+(`test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides`)
+passes: the Rusanov flux computed at the shared interface face, from
+each block's own reconstruction, agrees to `1e-13` (effectively bit-exact)
+at every shared row of a smooth, genuinely non-uniform test state --
+not just a degenerate uniform-flow case. The dynamic mass-balance
+companion check (added during review) independently confirms the same
+property through the real time-stepping driver, to `~2e-14`.
+
+**3D CPU run evidence**
+(`tutorials/euler_3d_forward_step_extrusion/README.md`): cells-per-unit-
+height=40, 8 Z-cells, periodic Z, run to t=4 in ~11.5s (repeatable across
+4 runs, 11.49-11.56s). Confirmed to stay exactly 2D: solver's own
+`max|momentum_z|` is exactly `0.0` throughout, and a mid-span Z-slice of
+the final-time density field is bit-identical (`0.000e+00` max
+difference) to the 2D run at the same resolution. **This is explicitly
+NOT the standing separate requirement** that every PR adding a Field/
+scheme include a 3D CUDA correctness test + at-scale benchmark on real
+CUDA hardware (as task 0009 delivered for single-block `EulerField` on
+PSC Bridges-2, see `docs/performance/0007-phase3-euler-cuda-results.md`)
+-- this machine has no CUDA, and that work remains genuinely outstanding
+for this multi-block mechanism specifically, named here rather than
+silently dropped.
+
+**Ilia's independent final review and Amelia's alignment check:** both
+run after the fixes above, each starting from the task file and ADR
+directly (not a summary of Violet/Snorlax/Sally/Enzo's findings), and
+both actually completed before this paragraph was written -- what
+follows is their real, post-hoc findings, not an advance assertion of
+the outcome.
+
+- **Amelia:** on target with the design direction she recommended
+  before implementation -- no drift (two blocks, geometry kept entirely
+  inside the `BoundaryCondition`, never the solver's hot loop, confirmed
+  by checking that `fvm_solver.hpp`/`ghost_fill.hpp` are untouched in
+  this diff). `BlockInterfaceBoundary`'s generality (one type, a `Side`
+  parameter, paired fixed/extrapolated domain-edge behavior) judged
+  appropriately scoped, not over- or under-built, against both the
+  immediate need and `ROADMAP.md`'s near-term items. The `ssp_rk2.hpp`
+  refactor judged a reasonable, low-risk, non-speculative change to
+  shared infrastructure. No blocking findings. One optional item: the
+  task file's header still read "Status: not started" despite the work
+  being substantially complete -- fixed (`tasks/0010-...md`'s status
+  line now points at this entry and ADR 0011).
+- **Ilia:** rebuilt the project from scratch and re-ran the full suite
+  himself rather than trusting a reported pass count; hand-verified the
+  cross-block index arithmetic independently; independently re-derived
+  the "3D extrusion equals the 2D run exactly" claim by parsing the raw
+  committed VTK bytes himself (not by reusing `plot_results.py`); read
+  the qualitative-benchmark figures directly and confirmed the prose
+  claims (bow shock, Mach-stem direction/numbers, trailing contact,
+  corner artifact) are actually supported by what the images show. No
+  implementation defects found anywhere; scope discipline (AGENTS.md #6)
+  confirmed clean -- nothing required by the task file was silently
+  dropped, nothing unrequested was added. One blocking (trivial) finding:
+  `docs/adr/0011-...md`'s own Evidence section still said "121/121"
+  (the pre-review-cycle count) instead of the actual current "123/123"
+  (121 pre-existing plus the 2 tests added during Violet's optional
+  findings above) -- fixed. A few additional optional/informational
+  observations were also noted and considered; none were blocking.
+
+**Known limitations (named, not silently dropped):**
+- MUSCL+Rusanov (not PPM), componentwise (not characteristic)
+  reconstruction -- carried over from ADR 0010, unchanged.
+- The step-corner singular-point artifact is observed, not fixed (task's
+  explicit scope).
+- `BlockInterfaceBoundary` assumes exactly two blocks sharing one axis's
+  worth of overlap; three-or-more-block or multi-axis-joined domains are
+  not covered.
+- A same-process multi-block solve still cannot call `ssp_rk2_step`
+  directly per block -- any future multi-block case needs its own
+  interleaved-stage driver, now with `ssp_rk2_combine_stage1`/`stage2` as
+  a reusable building block rather than needing to duplicate the combine
+  formula itself.
+- CPU-only. The CUDA 3D-correctness/at-scale benchmark requirement for
+  this multi-block mechanism remains outstanding, tracked here and in
+  `docs/adr/0011-...md`, not dropped.
+- The rest of Phase 4 (`ROADMAP.md`: moving-frame/grid-recycling
+  prototype, 1D propagating shock demonstration, feature tracking/
+  propagation-speed estimate) is still open -- this task addressed only
+  the forward-facing-step piece, pulled forward from Phase 4 per the
+  task file's own framing.
+
+Next recommended task: real CUDA hardware access (PSC Bridges-2, as
+prior phases used) to close the still-outstanding 3D CUDA-correctness/
+at-scale-benchmark requirement for `BlockInterfaceBoundary` specifically;
+otherwise, the remaining Phase 4 items (moving-frame/grid-recycling
+prototype, 1D propagating shock demonstration) per `ROADMAP.md`.
+
+## 2026-10-13 — Task 0010 follow-up: two 2D refinements (user-requested)
+
+User-requested, after reviewing PR #6: (1) fix a spurious double-line
+artifact noticed in the schlieren figure at the block interface, and
+(2) extend the 2D forward-step resolution sweep past the paper's three
+reference grids (20/40/80) to 96 and 144 (=96*1.5) for a finer
+convergence illustration, with the per-resolution timing documented.
+
+What was done:
+
+1. **Schlieren double-line artifact (plotting bug, not a simulation
+   bug).** `plot_results.py`'s `schlieren_proxy` called `np.gradient`
+   separately on each block's density array, so the two columns
+   adjacent to the shared interface fell back to one-sided differences
+   with no knowledge of the true neighbor value -- fabricating a
+   spurious second line next to the real bow shock. Verified this was
+   plotting-only by comparing against the raw VTK data directly: the
+   underlying density field is smooth across the interface away from
+   the step corner, and the one-sided estimate diverged substantially
+   from a properly stitched centered difference at the affected columns
+   (e.g. 106.6 vs. 70.9 at one sample point). Added
+   `schlieren_proxy_two_blocks`, which corrects just the two edge
+   columns using the same row-offset relationship
+   `forward_step_setup.hpp`'s `j_offset_to_neighbor` already encodes for
+   the real ghost-fill. Density plots were unaffected (no derivative
+   involved). Fixed and pushed as a standalone commit (`eeea040`)
+   before the resolution-sweep work below.
+
+2. **Extended resolution sweep to 96/144, with real timing documented.**
+   `forward_step_2d.cpp` now runs five resolutions
+   (20/40/80/96/144) instead of three; `plot_results.py`'s
+   `resolution_comparison.png` panel count extended to match.
+   `README.md`'s timing table and convergence-illustration paragraph
+   updated with the actual measured numbers (not estimated) from each
+   run's own `summary.csv`.
+
+   **Found and fixed a second, independent bug while verifying the new
+   resolutions' figures**: 96 and 144 don't divide the step
+   position/height evenly (e.g. `0.6*96=57.6`), so `make_grid1`'s and
+   `make_grid2`'s independent `std::lround`-based cell counts are each
+   individually correct, but `make_grid2`'s `origin_x`/`origin_y` were
+   set directly to the *nominal* geometry constants (`kStepPosition`,
+   `kStepHeight`) rather than derived from `grid1`'s actual rounded
+   extent -- leaving a sub-cell-width mismatch between where block1's
+   real cells end and where block2's claimed to begin. Purely a
+   real-space-coordinate/metadata issue (`BlockInterfaceBoundary`
+   matches blocks by cell index, never by coordinate, so this never
+   touched any computed result) -- but visible as a thin stray vertical
+   line at the interface in `resolution_comparison.png`'s res96/res144
+   panels. Fixed in `ForwardStepBlocks`'s constructor by deriving
+   `grid2.origin_x`/`origin_y` from `grid1`'s actual extent
+   (`grid1.origin_x + grid1.nx*grid1.dx`, `grid1.origin_y +
+   step_rows*grid1.dy`) instead of independently re-rounding the nominal
+   constants.
+
+Scientific verification:
+Full CPU unit/verification suite re-run after the origin fix: still
+**123/123** passing, no regression. Re-ran the entire five-resolution
+sweep after the fix and confirmed every resolution's `final_mass`
+matched bit-for-bit against the pre-fix run (e.g. res144:
+6.339126 before and after) -- direct confirmation the fix changed
+nothing about the simulated physics, only the VTK output's declared
+real-space origin. Visually confirmed both artifacts are gone from the
+regenerated figures (single clean shock line in the schlieren view; no
+stray line at the res96/res144 interface in the resolution-comparison
+view) before committing.
+
+Architecture decisions: none new -- both fixes are corrections to
+already-decided designs (the schlieren proxy's approach, and
+`ForwardStepBlocks`'s block-geometry construction), not new designs.
+Scope judged small/additive enough (a tutorial plotting script fix and
+a tutorial-only geometry-derivation fix, neither touching production
+numerics/solver code paths) not to require the full Violet/Snorlax/
+Sally/Enzo/Ilia/Amelia review pass per CLAUDE.md's review-effort-
+proportional-to-change guidance -- re-verified directly instead (full
+test suite + bit-identical final_mass + visual confirmation).
+
+Known limitations: unchanged from task 0010's own entry above (CPU-only
+multi-block mechanism, step-corner artifact observed not fixed, CUDA
+3D-correctness/at-scale benchmark still outstanding, rest of Phase 4
+still open) -- this follow-up touched only the 2D tutorial's resolution
+sweep and plotting, not scope covered elsewhere.
+
+Next recommended task: unchanged -- real CUDA hardware access to close
+the outstanding `BlockInterfaceBoundary` 3D-correctness/at-scale
+requirement, or the remaining Phase 4 items.
+
+## 2026-10-13 — Task 0010 follow-up: fix a silently-reintroduced plotting regression (schlieren double-line artifact)
+
+An external review of PR #6 correctly identified that the schlieren
+double-line fix from the earlier same-day entry above (`eeea040`,
+`schlieren_proxy_two_blocks`) had been silently reverted by the very
+next commit (`6a754fe`, the 96/144 resolution-sweep extension) -- that
+commit touched the same call site while adding the new resolutions and
+reintroduced the naive per-block `schlieren_proxy(f1, s1)` /
+`schlieren_proxy(f2, s2)` calls instead of the stitched function,
+bringing the one-sided-difference artifact back. A plain visual check
+of the regenerated figure at the time did not catch this, since nothing
+about the 96/144 resolutions' own figures looked wrong in isolation.
+
+What was done:
+
+1. **Confirmed the regression directly** (`git diff eeea040 6a754fe --
+   tutorials/euler_2d_forward_step/plot_results.py`) before touching
+   anything -- the report's claim was exactly correct, not assumed.
+2. **Restored `schlieren_proxy_two_blocks`** and its call site, with the
+   same cross-block centered-difference stitching as before (uses the
+   true neighbor cell value at the two columns adjacent to the
+   interface, leaves every other column -- including rows below the
+   step height, where no real neighbor exists -- untouched).
+3. **Fixed a second, related gap this review also named**: the solid
+   step's drawn rectangle in `plot_two_blocks` was hardcoded to the
+   nominal `[0.6, 0.2]` geometry constants. Since the earlier origin fix
+   made block2's VTK-written origin the *actual* rounded extent (which
+   differs from the nominal constants by a sub-cell amount at 96/144),
+   the hardcoded rectangle no longer matched where the two blocks' real
+   cells actually meet at those two resolutions. Now derives the
+   rectangle (and the plot's axis limits) directly from each frame's own
+   `origin2`/`extent`, so it stays correct at every resolution
+   automatically.
+4. **Added a permanent regression test**,
+   `tutorials/euler_2d_forward_step/test_schlieren_two_blocks.py` --
+   builds a synthetic smooth two-block field with a known analytic
+   gradient (no simulation run needed), and asserts (a) the stitched
+   function's edge-column error vs. the analytic gradient is small and
+   substantially better than the naive per-block approach's error, (b)
+   rows below the step height are left bit-identical to the naive
+   result (no value invented across the solid step), and (c) every
+   other column in both blocks is completely untouched. Verified the
+   test actually catches the regression it exists to prevent: manually
+   monkey-patched `schlieren_proxy_two_blocks` back to the exact broken
+   per-block form and confirmed the test fails (nonzero exit, printed
+   diagnostic) before restoring the real fix.
+5. **Regenerated all three figures** from the already-committed VTK data
+   (no re-simulation needed -- this is a postprocessing-only fix).
+   `density_time_series.png` regenerated byte-identical (it never used
+   the gradient, so was never affected). `schlieren_time_series.png` and
+   `resolution_comparison.png` both changed as expected.
+
+Scientific verification:
+Re-ran the full CPU unit/verification suite: still **123/123**,
+including `test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides`
+and `test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time`
+-- confirms what the fix's own scope already implied: this was a
+postprocessing-only regression, not a solver bug, and required zero
+changes to `BlockInterfaceBoundary`, `forward_step_setup.hpp`, or any
+other production/test C++ code. This is also consistent with the
+overnight investigation recorded in this session's memory (two
+from-scratch C++ comparisons against a true single continuous grid --
+one Y-uniform, one genuinely oblique with real Y-momentum generation --
+both showing the interface mechanism bit-exact; neither investigation
+required a solver change either).
+
+Architecture decisions: none -- this is a bug-fix-and-test-coverage
+change to an already-reviewed tutorial's plotting script, not a new
+design. Scope judged small enough (Python postprocessing only, no
+production C++ touched) not to require the full Violet/Snorlax/Sally/
+Enzo/Ilia/Amelia review pass, per CLAUDE.md's review-effort-
+proportional-to-change guidance, same reasoning as the two prior
+same-night follow-ups above -- re-verified directly instead (full test
+suite, a test that provably catches the exact regression, and visual
+confirmation of both regenerated figures).
+
+Known limitations: unchanged from the entries above.
+
+Next recommended task: unchanged -- real CUDA hardware access to close
+the outstanding `BlockInterfaceBoundary` 3D-correctness/at-scale
+requirement, or the remaining Phase 4 items.
+
+## 2026-10-13 — Task 0010 follow-up: threaded backend + 216/288 resolution sweep, KH-rollup finding
+
+User asked to run the forward-step tutorial faster/finer on their
+Apple M5, specifically to look for Kelvin-Helmholtz rollup on the
+trailing contact discontinuity. Also asked about MPI, and separately
+questioned whether the two-block design is needed at all (answered
+directly, pointing back to ADR 0011 Decision 1's already-reviewed
+reasoning for rejecting a single masked grid -- not re-litigated here).
+
+What was done:
+
+1. **Confirmed the CMake-configurable threaded CPU backend already
+   applies with zero code changes.** `ForwardStepBlocks` never hardcodes
+   `cfe::CpuParallelFor` specifically -- it relies on `FvmSolver`'s
+   default `Backend` template parameter, which resolves at compile time
+   to `backend::serial` or `backend::threaded` per `CFE_DEFAULT_BACKEND`.
+   Reconfigured with `-DCFE_DEFAULT_BACKEND=threaded`: res144 dropped
+   from 36.44s (serial) to 11.68s (threaded), consistent with this
+   machine's own previously-measured ~3x Burgers benchmark speedup.
+2. **Extended the resolution sweep to 216 and 288** (continuing the
+   1.5x pattern from 96/144). Full seven-resolution sweep (threaded):
+   under two minutes total. Re-verified the origin-rounding fix from
+   the prior entry holds at these two new resolutions too (clean
+   `resolution_comparison.png`, no stray interface line).
+3. **Added a zoomed res80-vs-res288 comparison**
+   (`figures/contact_kh_detail.png`) specifically targeting the
+   trailing contact discontinuity. **Finding: no KH rollup appears even
+   at res288** -- the line gets substantially sharper (smeared band ->
+   crisp line) but stays smooth, with no billowing. Reported honestly as
+   a negative result, not glossed over.
+4. **MPI scoping (research only, no implementation)**: confirmed via a
+   dedicated research pass that MPI+threaded composability already
+   exists and is tested together for single-grid decomposition (Phase
+   2's own ctest matrix), but MPI+GPU does not exist anywhere (Phase 2's
+   own history explicitly deferred it), and MPI has never been combined
+   with `BlockInterfaceBoundary` at all -- `CartesianPartition`/
+   `MpiHaloBoundary` only know how to decompose one uniform grid: no
+   rank/block-ownership concept exists for two differently-shaped
+   blocks. Consulted Amelia for sequencing (not implementation):
+   recommended splitting into **Task A** (GPU-aware MPI for the
+   *existing* single-grid 3D decomposition, re-verifying the already-
+   existing Burgers/scalar-advection strong-scaling tutorials on GPU --
+   narrow, reuses existing primitives) and **Task B** (an MPI-aware
+   multi-block interface boundary, new design work comparable in scope
+   to ADR 0011 itself, consuming whatever Task A produces rather than
+   duplicating it), A before B. Neither started -- this is a roadmap
+   scoping recommendation for the user to confirm/prioritize, not yet
+   written into `ROADMAP.md`.
+5. **HLLC/PPM**: per the KH-rollup negative result, Amelia's
+   recommendation (and the honest finding from step 3) point at HLLC
+   (already a named-but-deferred Phase 3 "Rusanov and/or HLLC" item,
+   reuses the same MUSCL reconstruction, just a different Riemann
+   solver) as the correct, cheap next experiment -- *not* pulling PPM
+   forward from its already-planned Phase 5 slot (PPM is a
+   substantially bigger lift: new monotonicity/flattening/
+   discontinuity-detection reconstruction logic, not a flux swap).
+   Recommendation: try HLLC first; revisit PPM only if HLLC at the same
+   high resolution still fails to show rollup, with real evidence (not
+   suspicion) that reconstruction order, not the Riemann solver, is the
+   bottleneck. Neither implemented yet.
+
+Scientific verification:
+Re-ran the full CPU unit/verification suite under the threaded backend
+specifically (not just serial): still 123/123, including both
+interface-conservation tests. Confirmed every re-run resolution's
+`final_mass` is bit-identical between the original serial run and this
+threaded run (e.g. res144: 6.339126 both times) -- no floating-point
+reordering risk from threading, consistent with the residual kernel
+being purely independent per-cell writes with no reduction in the hot
+path (the one reduction in the driver, `max_wave_speed()`, is a plain
+serial scan, not `Backend::run`-wrapped, so dt selection is
+backend-independent by construction).
+
+Architecture decisions: none implemented this round -- the MPI/HLLC/
+PPM items above are scoping recommendations only, pending user
+confirmation on priority/sequencing (see the two open questions Amelia
+raised: whether GPU-aware MPI for single-grid decomposition goes into
+the very next phase ahead of the rest of Phase 4, and whether the
+multi-block MPI task should be written into `ROADMAP.md` now as a
+scoped-but-unstarted item or left as an unscheduled early-2027 line).
+
+Known limitations: unchanged, plus the new honest finding that Rusanov
+does not show KH rollup even at res288 (see above) -- now explicitly
+documented in the tutorial's own README rather than left implicit.
+
+Next recommended task: implement HLLC (named Phase 3 item, small,
+well-scoped) and re-run this same KH-rollup check at res288 before
+considering PPM; separately, resolve the MPI task A/B scoping question
+with the user and write whichever is prioritized into `ROADMAP.md`.
+
+## 2026-10-13 — Task 0010 follow-up: `BlockSet` -- one contiguous allocation per buffer kind for the forward-step's two blocks
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+Came out of a user architecture discussion about why the forward-step
+case (`docs/adr/0011-forward-step-block-interface.md`) uses two separate
+`CartesianGrid`/`Field` instances (one per block) rather than one merged
+entity -- already settled (ADR 0011 Decision 1: masking would push
+geometry-awareness into `FvmSolver`'s hot loop; `CartesianGrid`'s
+`flat_index` speed trick only holds within one rectangular box). The
+concrete follow-on the user actually wanted: `ForwardStepBlocks`
+(`tests/verification/forward_step_setup.hpp`) allocated SIX independent
+`cfe::Field<Scalar,N>` objects (state1/stage1_1/scratch1 for block 1,
+state2/stage1_2/scratch2 for block 2) -- two blocks' worth of
+(state/stage1/scratch) buffers, each its own heap allocation. Wanted:
+these consolidated into one contiguous allocation PER BUFFER KIND
+(state/stage1/scratch), not fragmented into six independent allocations
+-- for memory control, locality, and as groundwork toward eventually
+unifying with MPI's own decomposition model. Two deliverables: (1) a
+written memory-layout/architecture roadmap document, (2) the concrete
+refactor itself, verified behavior-preserving, not assumed.
+
+Files changed:
+- `src/cfe/field/block_set.hpp` (new) -- `cfe::BlockSet<Scalar,
+  NComponents, Layout=AoSLayout>`: owns ONE `std::vector<Scalar>` sized
+  for the sum of several blocks' cell counts, hands out a `FieldView` per
+  block (`view(block)`/`view(block) const`) at a precomputed pointer
+  offset into that single allocation. Built from
+  `explicit BlockSet(std::initializer_list<std::size_t> block_cell_counts)`.
+  Needed zero changes to `FieldView` itself (already just
+  `(Scalar* data, std::size_t n_cells)`, no ownership assumption) and
+  zero changes to any of its consumers (`FvmSolver`,
+  `BlockInterfaceBoundary`, `ssp_rk2_combine_stage1/2`) -- they cannot
+  tell a `BlockSet`-provided view from a `Field`-provided one.
+- `tests/verification/forward_step_setup.hpp` -- `ForwardStepBlocks` now
+  has `Blocks state_blocks, stage1_blocks, scratch_blocks;` (three
+  `BlockSet`s, each covering both blocks) instead of six `Field`s. Added
+  `kUpstream=0`/`kDownstream=1` named constants, used at every
+  `.view(...)` call site instead of bare `0`/`1` (Snorlax/Sally review
+  finding: `grid1`/`grid2`'s 1-indexed naming invites an off-by-one slip
+  against 0-indexed `view()`). `fill_uniform`/`scan` (in
+  `max_wave_speed`)/`accumulate` (in `total_mass`)/`write_vtk_block`
+  changed from taking `const Storage&` to `View`/`ConstView` by value --
+  these helpers never needed to know whether a view came from a `Field`
+  or a `BlockSet`.
+- `tests/unit/test_forward_step_sanity.cpp` -- updated both existing
+  tests' call sites to the new `BlockSet` views; added
+  `test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation`,
+  a direct pointer-arithmetic check (`view(kDownstream).data() ==
+  view(kUpstream).data() + view(kUpstream).n_cells() * N`) for all three
+  `BlockSet`s -- confirms genuine contiguity, not just two allocations
+  that happen to produce the same answer.
+- `tutorials/euler_3d_forward_step_extrusion/forward_step_3d.cpp` -- one
+  small call-site update (same pattern).
+- `docs/type-reference.md` -- new `BlockSet` row.
+- `ARCHITECTURE.md` -- new section 21 ("Memory layout: ownership, views,
+  and block-structured grids"): deliverable 1, see "Architecture
+  decisions" below for where/why.
+- `.gitignore` -- `tutorials/euler_2d_forward_step/data/**/*.vtk` and
+  `tutorials/euler_3d_forward_step_extrusion/data/**/*.vtk` (per the
+  user's standing instruction to stop committing raw VTK snapshot data
+  going forward; `summary.csv` in the same directories is deliberately
+  NOT matched by this pattern and stays trackable). The historical VTK
+  data already committed in prior commits is untouched -- a separate
+  cleanup question the user hasn't decided on yet.
+
+Tests added:
+`test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation`
+(above). No other new tests -- this is a refactor of existing,
+already-tested behavior, not new physics/numerics.
+
+Benchmarks run:
+None. This is an allocation-count/memory-layout consolidation (6 calls
+to 3), not a claimed performance improvement -- Enzo's review confirmed
+no overclaiming language exists anywhere in the diff/docs, and this
+entry makes the same distinction explicitly: no wall-clock/throughput
+number is claimed or implied by this change.
+
+Performance change:
+None claimed. `BlockSet::view(block)` is confirmed (Enzo's review) to be
+nothing more than precomputed-offset pointer arithmetic plus a
+two-word, trivially-copyable `FieldView` construction -- no allocation,
+no synchronization, called from `step()`'s hot path the same way
+`Field::view()` already was.
+
+Scientific verification:
+This is a memory-layout-only change with no numerics touched, so the
+required evidence is regression (bit-identical before/after), not new
+verification:
+- Full C++ unit/verification suite: 124/124 passing (123 pre-existing +
+  the 1 new contiguity test above), zero regressions.
+- Full suite re-run a second time under `-fsanitize=address,undefined`
+  (Debug build, `build_asan/`) -- also 124/124, zero sanitizer
+  diagnostics anywhere in the log. Taken on Violet's specific
+  recommendation: before this refactor, an out-of-bounds bug in the
+  ghost/j-mapping arithmetic would likely crash or read garbage
+  (independent heap allocations); after this refactor, the same class of
+  bug could silently read the OTHER block's real, physically-plausible
+  field data instead -- much harder to catch by eye. This repo has no
+  sanitizer infrastructure today; this was a one-time check, not a new
+  standing CI requirement (not decided here).
+- Git-stash A/B comparison (reverted to pre-refactor code, rebuilt a
+  scratch driver, ran it, restored the refactor, reran the identical
+  driver): bit-identical `final_mass` (17 significant digits) and
+  identical step counts at res20/res40 (2D, short run) and a 3D case.
+  Repeated with the REAL production path
+  (`cfe_verification::run_and_report`/`write_vtk_frame`, the tutorial's
+  own driver) at res20/res40 to the tutorial's actual `t_final=4`: also
+  bit-identical.
+- Extended to all of the production 2D sweep's resolutions except
+  288 during the main implementation pass (20/40 directly; 80/96/144/216
+  independently confirmed bit-identical by Violet during her review),
+  then closed out the last one on her optional recommendation: res=288
+  (the largest/most expensive resolution), full production settings
+  (t_final=4, cfl=0.4, threaded backend): baseline steps=12025,
+  final_mass=6.3385045261415618; after refactor: steps=12025,
+  final_mass=6.3385045261415618 -- bit-identical. All 7 of the tutorial's
+  production resolutions are now directly confirmed, not just 6/7.
+- Direct memory-contiguity verification (not just trusted): the new
+  contiguity test's pointer-arithmetic check passes for all three
+  `BlockSet`s at a real grid resolution.
+- Correction on which tests "specifically verify BlockSet" (Ilia's
+  review): of the three tests the task named as most load-bearing,
+  `test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides`
+  builds its own `cfe::Field` objects directly and never instantiates
+  `ForwardStepBlocks`/`BlockSet` at all -- it is a valid regression guard
+  for `BlockInterfaceBoundary` (confirms this refactor didn't disturb
+  it), but is not itself evidence for `BlockSet`. The real load-bearing
+  `BlockSet` oracles are
+  `test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time`
+  (exercises the real `ForwardStepBlocks`/`BlockSet` path end-to-end) and
+  the two `test_forward_step_sanity.cpp` tests (now updated to read
+  through `BlockSet` views) plus the new contiguity test.
+
+Architecture decisions:
+`ARCHITECTURE.md` section 21 ("Memory layout: ownership, views, and
+block-structured grids") -- deliverable 1. Where this document should
+live was agreed with Amelia BEFORE it was written (CLAUDE.md's "consult
+before a consequential design decision" rule), the same pattern ADR 0011
+itself records for its own design direction. Asked to choose among (a) a
+new `docs/architecture/` file, (b) an `ARCHITECTURE.md` addition, or (c)
+a new ADR, Amelia recommended (b) and gave this reasoning: `ARCHITECTURE.md`
+section 1 already describes itself as "current intended architecture"
+that "may evolve through Architecture Decision Records," which is
+exactly what a cross-cutting reference like this is, not a single
+decision with a verdict; `docs/adr/README.md`'s own decision list
+(execution backend, state memory layout, grid connectivity, ...) is a
+list of things already DECIDED, whereas this document's part (d) is
+required to stay a standing OPEN QUESTION (whether/when to unify
+block-structured and MPI-level decomposition) -- writing that as an ADR
+would force an artificial Proposed/Accepted status onto something not
+meant to resolve soon; and `docs/architecture/` is not an existing
+convention in this repo's `docs/` layout (`docs/adr/`, `docs/theory/`,
+`docs/verification/`, `docs/performance/` are). She also flagged
+(blocking, fixed before finalizing) that `block_set.hpp`'s header
+comment and `docs/type-reference.md`'s new row had already cited a
+`docs/architecture/0001-...md` path before this consult landed --
+corrected to point at `ARCHITECTURE.md` #21 once her answer was in. She
+reviewed `BlockSet`'s actual shape (`initializer_list` constructor,
+`view`/`n_cells`/`n_blocks`/`size`) separately and found it
+appropriately scoped to today's two-block need, not over-built. Her
+scope guidance on the document's content (keep part (d) genuinely open,
+not steering toward a recommendation; keep part (e), AMR/unstructured,
+to a pointer rather than a design) was followed as given.
+
+Known limitations:
+- `BlockSet` is a same-process, single-address-space mechanism; it does
+  not generalize to, and says nothing about, MPI-level decomposition --
+  the open question of whether/when `BlockSet`-style block structure and
+  `CartesianPartition`/`MpiHaloBoundary`-style rank decomposition should
+  ever unify remains exactly that, an open question (ARCHITECTURE.md
+  #21), not decided or even scoped here.
+- `BlockSet` still knows nothing about block geometry/adjacency --
+  `BlockInterfaceBoundary`'s existing two-blocks/one-shared-axis
+  limitation (ADR 0011) is unchanged by this task.
+- No CUDA/device-memory counterpart (`DeviceBlockSet`) exists yet --
+  `cfe::Field`'s own device counterpart (`backend::cuda::DeviceField`)
+  has no parallel on the `BlockSet` side. Enzo's review notes this would
+  need its own zero-init-per-block-region handling (not just one
+  `cudaMemset`, unlike `DeviceField`'s current single-region case) if/
+  when a block-structured case needs to run on GPU -- not needed by, or
+  built as part of, this task.
+- `n_blocks()`/`n_cells(block)`/`size()` on `BlockSet` mirror `Field`'s
+  own interface but have no current call site in this codebase (kept for
+  the same reason `Field` exposes them, per Snorlax's review finding;
+  noted here rather than silently carried as unexplained surface).
+
+Next recommended task:
+Real CUDA hardware access remains the standing outstanding item for the
+forward-step mechanism generally (unchanged from the prior entry) --
+closing that would also be the natural point to decide whether a
+`DeviceBlockSet` is worth building. Otherwise, continue Phase 4's
+remaining items (moving-frame/grid-recycling prototype, 1D propagating
+shock demonstration) per `ROADMAP.md`.
+
+## 2026-10-13 — Task 0011: Phase 3 completion — HLLC numerical flux, and a real Kelvin-Helmholtz finding
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+User asked to scope and add both HLLC and PPM as swappable numerical
+methods for EulerField, specifically to re-check the forward-facing-step
+benchmark for Kelvin-Helmholtz (KH) waviness on the trailing contact
+discontinuity -- MUSCL+Rusanov showed none at any resolution tested up
+to res288 (prior entry). Per CLAUDE.md, consulted Amelia (scope/
+sequencing) and Violet (numerical design) before implementing. Both
+independently recommended: land HLLC only in this task (smaller,
+already-roadmapped, drop-in NumericalFlux swap), defer PPM (much larger,
+Phase-5-scoped Reconstruction mechanism) pending this task's own
+forward-step result, continue on the existing
+cfe/development/phase_0005-euler-forward-step branch (PR #6).
+
+New:
+- `src/cfe/numerics/numerical_flux/hllc.hpp` -- `HllcFlux`/`hllc_flux`,
+  Toro/Spruce/Speares HLLC approximate Riemann solver, generalized over
+  `Dim`. NOT a generic drop-in `NumericalFlux` the way `RusanovFlux` is
+  (needs a full ideal-gas EOS from `Field`, not just
+  `wave_speed`/`physical_flux`) -- documented explicitly.
+- `tests/unit/test_hllc_flux.cpp` (14 tests), `tests/verification/
+  test_euler_sod_shock_tube_hllc.cpp`, `tests/verification/
+  test_euler_isolated_contact_hllc.cpp`, `tests/unit/
+  test_euler_hllc_3d_cuda.cu`.
+- `tasks/0011-phase3-hllc-flux.md`, `docs/adr/0012-hllc-numerical-flux.md`.
+- `tutorials/euler_1d_sod_shock_tube/` extended to run both Rusanov and
+  HLLC, reporting measured contact width.
+- `tutorials/euler_2d_forward_step/` re-run with both fluxes at all 7
+  resolutions (20-288 cells-per-unit-height).
+- `docs/performance/0008-phase3-hllc-cuda-results.md`.
+
+Generalized (default-preserving, zero regression confirmed):
+`tests/verification/sod_shock_tube_runner.hpp` and `tests/verification/
+forward_step_setup.hpp` both gained a `class NumericalFlux =
+cfe::RusanovFlux` template parameter.
+
+Three real bugs found and fixed during end-to-end testing (not caught by
+1D-only unit/verification tests) -- full account in ADR 0012:
+
+1. **Wave-speed sign bug:** the initially-implemented non-iterative ANRS
+   (Adaptive Noniterative Riemann Solver) wave-speed estimate gave a
+   wrong-signed `S_L` at a strong Mach-3 wall reflection (the forward-
+   step's own riser face), silently disabling all dissipation there --
+   the ENTIRE forward-step domain stayed frozen at the exact uniform
+   inflow state for the whole run, every resolution, no crash/NaN at
+   all. Fixed by Newton-Raphson-refining the ANRS seed (5 fixed
+   iterations, GPU-warp-uniform by construction) to the exact two-shock/
+   two-rarefaction `p*`.
+2. **Near-vacuum reconstruction artifact:** after fix 1, res40+ (not
+   res20) went to NaN partway through the run. Traced to MUSCL's
+   componentwise (not characteristic) reconstruction producing a
+   near-vacuum (barely positive) implied pressure at a strong 2D
+   multi-wave interaction (the bow-shock/Mach-stem region) -- exactly
+   the failure mode ADR 0010's Decision 1 named as a revisit criterion.
+   Consulted Violet with the full diagnostic trace; fixed (her
+   recommendation) by flooring density/pressure at the two points in
+   `hllc.hpp` where this artifact could propagate into a
+   `sqrt(negative)` NaN, not by falling back to Rusanov (which would
+   hit the same failure on an already-unphysical input).
+3. **The floor fix itself had a gap** (caught by Enzo's performance
+   review, reading the dataflow rather than from a failing test):
+   `hllc_wave_speeds` still computed velocity/pressure via `Field`
+   accessors that divide by the RAW (unfloored, possibly slightly
+   negative) density in two places -- a small negative density could
+   make the computed pressure swing to a large POSITIVE, finite value
+   that silently passed the floor check. Fixed with a single shared
+   `hllc_floored_primitives` helper deriving velocity/pressure from the
+   SAME floored density everywhere. Added float-precision regression
+   tests (no Euler flux anywhere in this repo had ever been tested at
+   `Scalar=float` before -- a pre-existing gap, closed here).
+
+Full review cycle: Snorlax (duplication fixes: shared floor constants,
+shared `contact_width_cells` helper, shared shock-impedance helper),
+Sally (usability fixes: warp-uniformity explained, `momentum_index`
+consistency, unused template param dropped), Enzo (found bug 3 above;
+also flagged the forward-step wall-clock HLLC-vs-Rusanov comparison as
+methodologically confounded -- single, non-interleaved, non-repeated
+run -- reported honestly in the README/ADR rather than citing a precise
+multiplier). All applied. Full CPU suite: 145/145 passing.
+
+**CUDA correctness and at-scale benchmark (PSC Bridges-2, V100):**
+157/157 passing (145 CPU-only + 12 pre-existing CUDA tests + the new
+`test_euler_hllc_3d_cuda_matches_cpu_reference`), `compute-sanitizer
+--tool initcheck`: 0 errors (job 49117265). Closes the standing per-PR
+CUDA-correctness requirement.
+
+Ilia's independent final review caught that the at-scale benchmark half
+of that same requirement had been skipped (only the correctness test
+existed) -- closed in the same pass: `benchmarks/euler/
+bench_euler_hllc_3d_cuda.cu` (mirrors `bench_euler_3d_cuda.cu` exactly,
+differing only in flux) measured a clean **7.5x-9.4x** HLLC/Rusanov
+slowdown across five cube sizes (64^3 to 512^3, job 49118193), with
+Rusanov's own numbers reproducing task 0009's original figures almost
+exactly (confirms consistent methodology). A register-pressure
+measurement quantifies a real, substantial piece of why: HLLC's
+`FvmSolver::residual` kernel needs 149 registers/thread vs. Rusanov's
+96 (which itself matches task 0009's documented figure) -- on Volta's
+8-register/thread-per-warp allocation granularity, this drops occupancy
+from ~25% to ~12.5% (one resident 256-thread block instead of two), a
+large, directly-measured contributor to the throughput gap, not merely
+inferred from arithmetic intensity. Full account:
+`docs/performance/0008-phase3-hllc-cuda-results.md`.
+
+**Sod shock tube evidence** (`tutorials/euler_1d_sod_shock_tube/`):
+measured contact width at nx=100/200/400: Rusanov 10/13/17 cells, HLLC
+8/11/13 cells -- a real, consistent, honestly-modest ~20-25% narrowing
+at every resolution. The isolated pure-contact test shows the effect
+starkly: HLLC keeps a stationary density step exactly in place
+(`0.000e+00` deviation after many steps) while Rusanov visibly diffuses
+it (`0.224`).
+
+**Forward-step Kelvin-Helmholtz finding (the user's original
+question):** re-ran the full 7-resolution sweep with HLLC, same grid/
+IC/BCs/reconstruction as the existing Rusanov dataset, only the flux
+changed.
+
+- **HLLC's trailing contact line develops a wavy, repeatedly-crossing
+  structure that Rusanov never shows at any resolution tested.** Absent
+  at res20/40 (too coarse); first visible at res80 (the paper's own
+  reference resolution) as a modest line-splitting; progressively more
+  developed at res96/144/216/288. Grows over TIME, with onset (clearly
+  visible by t=2.5-3) matching Woodward & Colella's own reported timing
+  for the "mild Kelvin-Helmholtz instability ('water-wave'/'flag-waving')"
+  almost exactly -- the same qualitative character (wavy/crossing, not
+  discrete rolled-up vortices) and the same onset time the source paper
+  itself reports. This is a genuine, reproduced positive result -- the
+  Rusanov-only dataset (prior task) showed zero trace of this at any
+  resolution up to 288.
+- Direct side-by-side comparison (identical resolution/time, only the
+  flux changed) confirms this is not a resolution artifact: it only
+  ever appears with HLLC.
+- **A second, separate, confirmed finding:** at the bow-shock/Mach-stem
+  triple point specifically, HLLC's low dissipation combined with
+  componentwise (not characteristic) MUSCL reconstruction produces a
+  real, bounded density overshoot (measured at res80: HLLC peak density
+  ~7.1 vs. Rusanov's own ~6.3 at the same place/time) -- finite, not
+  NaN, not conservation-violating, but a genuine local artifact. This
+  directly confirms ADR 0010 Decision 1's own named revisit criterion
+  ("a future canonical case... showing componentwise reconstruction
+  producing visible spurious oscillation at a strong multi-wave
+  interaction would justify adding characteristic reconstruction") with
+  real, reproducible evidence, rather than leaving it hypothetical.
+  Logically separate from the KH finding (different location, different
+  character), reported together for completeness.
+- An existing (task 0010) README claim that Rusanov itself showed "faint
+  waviness... consistent with a weakly KH-unstable slip line" was found,
+  on more careful side-by-side comparison, to be an overstatement --
+  corrected in place rather than left standing.
+- Measured wall-clock: HLLC costs noticeably more per step than Rusanov
+  at every resolution (e.g. res216: 42.9s vs 382.2s), consistent in
+  DIRECTION with the extra Newton-iteration/sqrt-pow cost in the code,
+  but NOT cleanly isolated from possible thermal/OS-contention effects
+  in a single long run (same machine showed three different timings for
+  the identical Rusanov res288 computation across this session's own
+  repeated runs: 49.79s/71.39s/88.13s) -- reported honestly as a
+  methodology limitation (Enzo finding), not as a precise multiplier.
+
+PPM was explicitly NOT pulled forward: per Amelia's conditional
+recommendation, the trigger for doing so (HLLC failing to reproduce the
+paper's mild waviness) did not fire -- HLLC alone answered the question.
+
+**Ilia's independent final review** (formed before reading any other
+reviewer's findings, per his own charter; re-ran the full test suite
+himself rather than trusting the reported count; independently
+re-derived both headline numerical claims from scratch -- the Mach-3
+wall-reflection `p0` bug and the res80 density-overshoot numbers --
+both matched exactly; confirmed via git history that `EulerField`/
+`FvmSolver`/`RusanovFlux` were genuinely untouched; confirmed the test
+suite's comparisons use genuine negative controls, not vacuous ones):
+found two real completeness gaps against this task's own stated
+requirements, both closed before this entry was written --
+
+- **Blocking, closed:** the at-scale GPU benchmark for `HllcFlux` had
+  never actually been written (only the correctness test existed,
+  despite the task's own "required, not deferred" language) -- added
+  `bench_euler_hllc_3d_cuda.cu` and re-ran on Bridges-2 for real (see
+  CUDA section above).
+- **Blocking, closed:** this `agent_history.md` entry did not exist yet
+  at the time of his review, despite `docs/adr/0012-...md` and
+  `docs/performance/0008-...md` both citing "see agent_history.md" as
+  their evidentiary backing for the Amelia/Violet pre-implementation
+  consult -- this entry is that fix.
+- **Optional, taken:** ADR 0012's own "Revisit criteria" line still said
+  CUDA correctness was "still-outstanding" after the correctness half
+  had already landed (and, separately, after the ADR was edited again
+  without updating that line) -- rewritten to distinguish correctness
+  (done) from the at-scale benchmark (now also done).
+- **Optional, taken:** ADR 0010's componentwise-reconstruction revisit
+  criterion still read as purely hypothetical even though ADR 0012
+  confirms it directly -- added a one-line cross-reference.
+- **Optional, taken:** `tasks/0011-...md`'s "floored-PVRS" scope bullets
+  were stale relative to what actually shipped (ANRS+Newton) -- fixed
+  with pointers to ADR 0012's real account.
+
+**Amelia's alignment check** (same task, after Ilia's): confirmed the
+work stays on target with her own pre-implementation recommendation (no
+scope drift either direction), confirmed the PPM-deferral decision is
+properly closed (her own conditional trigger did not fire), and
+suggested (optional, taken) a Phase 5 `ROADMAP.md` planning note
+pairing the now-confirmed componentwise-reconstruction overshoot with
+PPM's own `Reconstruction`-interface-widening work, since both likely
+share one architecture gap (ADR 0012 already names this).
+
+Known limitations:
+- Componentwise (not characteristic) reconstruction -- the density-
+  overshoot finding above is now direct, reproducible evidence for this
+  already-documented limitation's own revisit criterion; not fixed in
+  this task (out of scope, a much bigger undertaking per Violet's own
+  PPM pre-implementation consult this session). `ROADMAP.md`'s Phase 5
+  entry now carries a forward-reference tying this to PPM's own
+  eventual `Reconstruction`-interface work.
+- The forward-step CPU wall-clock HLLC/Rusanov cost comparison remains
+  methodology-confounded (single, non-interleaved, non-repeated run) --
+  now superseded for GPU by the clean, isolated at-scale benchmark
+  above; an isolated CPU-side microbenchmark remains open if a CPU-
+  specific number is ever needed.
+- The 5-Newton-iteration margin is characterized by exactly one measured
+  strong-shock case; a swept pressure-ratio test would turn this into a
+  characterized margin rather than "5 worked for the one case found."
+- No Nsight Compute branch-efficiency numbers for the ANRS seed's 3-way
+  branch or the 4-way flux-region branch (both genuinely state-dependent
+  per thread) -- the register-pressure/occupancy measurement above
+  explains a real, substantial piece of the throughput gap but not all
+  of it.
+- Accumulated-knowledge updates for Violet/Snorlax/Sally/Enzo (patterns
+  identified during this task's review cycle: always test a new Euler
+  flux against a genuine 2D/3D multi-wave interaction before declaring
+  it verified; a floor on one derived quantity is not transitively a
+  floor on every other quantity computed from the same unfloored
+  original; shared floor/tolerance constants must be declared once, not
+  per call site; a performance review reading dataflow can catch
+  correctness bugs a passing test suite missed) are identified but NOT
+  YET applied to `.claude/agents/*.md`, since those files live on
+  `cfe/development/multi-agent-workflow` (not yet merged with this
+  task's branch), which also currently has the user's own local
+  uncommitted work -- recorded here for whoever reconciles the branches,
+  rather than risking interference with that in-progress state.
+
+Next recommended task: an isolated CPU-side HLLC/Rusanov microbenchmark
+(free of the forward-step tutorial's own methodology confound) if a
+CPU-specific cost number is ever needed; Nsight Compute branch-
+efficiency profiling for HLLC's data-dependent branches; otherwise, the
+remaining Phase 4 items (moving-frame/grid-recycling prototype, 1D
+propagating shock demonstration) per `ROADMAP.md`, or Phase 5 (PPM,
+viscous fluxes) on its own originally-scoped schedule -- now with a
+planning note tying PPM's interface work to the componentwise-
+reconstruction-overshoot finding above.
+
+## 2026-10-14 — Task 0012: Phase 3 completion — Shu-Osher shock/density-wave interaction, Rusanov vs. HLLC
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+ROADMAP.md Phase 3 names both "Sod shock tube" and "Shu-Osher problem"
+as acceptance items; only Sod had been implemented (task 0009). Add
+Shu-Osher (Shu & Osher 1989): a Mach-3 shock into a sinusoidally-
+perturbed density field, producing fine post-shock oscillatory
+structure. Per the user's explicit instruction ("we should test all
+flux approaches"), run with both `RusanovFlux` and `HllcFlux` and
+report honestly which preserves more fine structure -- a second,
+independent data point on the question task 0011/ADR 0012 first
+surfaced (HLLC showing real Kelvin-Helmholtz waviness on forward-step
+where Rusanov showed none).
+
+Pre-implementation consult (per CLAUDE.md), before any code: Amelia
+(scope/sequencing) and Violet (acceptance criteria, since Shu-Osher has
+no exact solution). Both consulted via the Agent tool with full context
+dumps (ADRs 0010/0012, VERIFICATION.md, ROADMAP.md, existing Sod
+infrastructure), not summarized secondhand.
+
+Amelia's recommendations (all adopted):
+- Two separate task files (0012 for Shu-Osher, 0013 for the
+  propagating-shock case), same granularity this repo already uses
+  (one canonical case = one task file, tasks 0009/0010/0011) -- for
+  unambiguous `agent_history.md`/test-failure attribution -- but both
+  may share the same branch/PR (`cfe/development/phase_0005-euler-
+  forward-step`, PR #6) since ROADMAP phase numbers are planning
+  labels, not release gates (precedent: task 0010's Phase-4 content
+  already shipped inside this Phase-3-labeled PR).
+- No new ADR for either case -- a verification-methodology choice
+  (reference-resolution/error-metric for a no-exact-solution case) is
+  not an architectural decision per AGENTS.md #4.10; recorded as a
+  `VERIFICATION.md` addendum instead (see below).
+- Document a scope boundary now: "test all flux approaches" means the
+  fluxes that exist TODAY (Rusanov, HLLC), not a standing N-way product
+  rule for every future case/flux -- recorded in both task files and in
+  Amelia's own accumulated-knowledge notes from this consult.
+
+Violet's recommendations (all adopted), with real analytical and
+literature cross-checks, not just opinion:
+- Verified Mach-3 left (post-shock) state via BOTH an independent
+  Rankine-Hugoniot derivation AND a literature search: `rho=3.857143,
+  u=2.629369, p=10.333333` (ahead `rho=1,u=0,p=1`, gamma=1.4) --
+  matches to the quoted precision.
+- Acceptance criteria for the no-exact-solution case: (1) a genuine,
+  BLOCKING oracle check in the region still ahead of the shock (exact,
+  time-independent solution of Euler until the shock arrives -- not
+  "no exact check possible anywhere"); (2) converged fine-grid
+  reference (same code, same flux) for the disturbed wake, error
+  required to decrease with resolution; (3) a scriptable extrema-count
+  proxy for wavelength fidelity, not an attempt to script "matches a
+  published figure"; (4) cross-flux fine-grid agreement labeled
+  explicitly as a WEAK, non-independent signal; (5) the headline
+  coarse-resolution Rusanov-vs-HLLC wake-error comparison, measured
+  honestly rather than assumed to transfer from forward-step/Sod.
+- Boundary conditions confirmed analytically, not just asserted:
+  `StaticBoundary` at the left (all three post-shock characteristics
+  point rightward, `u-c=0.692>0`); `InflowOutflowBoundary` at the right
+  (ahead-state sound speed `~1.18` strictly slower than the shock's own
+  `~3`, so the shock stays the rightmost disturbed point through
+  `t=1.8` -- verified directly by the ahead-of-shock test, not just
+  argued).
+
+Files changed/new:
+- `tasks/0012-phase3-shu-osher.md` (new).
+- `tests/verification/shu_osher_setup.hpp` (new): shared driver
+  (`run_shu_osher`), exact ahead-state formula
+  (`shu_osher_exact_ahead_density`), shock-front estimator
+  (`shu_osher_shock_front_estimate`), and (after Snorlax's review, see
+  below) the shared metric helpers `shu_osher_density_at`/
+  `shu_osher_wake_l1_error`/`shu_osher_max_ahead_deviation`/
+  `shu_osher_count_extrema`, used by BOTH the test and the tutorial.
+- `tests/verification/test_euler_shu_osher.cpp` (new): 9 tests, see
+  Scientific verification below.
+- `tests/verification/rankine_hugoniot_jump.hpp` (new, post-review):
+  `NormalShockJump`/`normal_shock_jump`, the shared closed-form RH-jump
+  algebra used by BOTH this task's Shu-Osher left state and task 0013's
+  propagating-shock IC -- originally hardcoded as three separate
+  literal constants in `shu_osher_setup.hpp`, fixed per Sally/Snorlax's
+  joint review finding (see below).
+- `tests/verification/cfl_adaptive_stepping.hpp` (new, post-review):
+  `advance_cfl_adaptive`, the CFL-adaptive SSP-RK2 time-advance loop
+  factored out of `sod_shock_tube_runner.hpp`/`shu_osher_setup.hpp`/
+  `propagating_shock_setup.hpp` after it had been copy-pasted into a
+  THIRD independent driver (Snorlax review finding).
+- `tutorials/euler_1d_shu_osher/` (new): `shu_osher.cpp`,
+  `plot_results.py`, `README.md`, `CMakeLists.txt`.
+- `VERIFICATION.md`: new "Canonical problems with no closed-form exact
+  solution" subsection under "Canonical problems", recording the
+  accepted pattern above as a reusable rule (TGV/flat-plate will likely
+  need it too).
+- `tests/verification/sod_shock_tube_runner.hpp`: CFL loop factored to
+  `advance_cfl_adaptive` (behavior-preserving refactor, see Scientific
+  verification).
+- `tests/CMakeLists.txt`, `tutorials/CMakeLists.txt`: new files wired in.
+- `presentations/0012-phase3-shu-osher.md` (new, post-review): AGENTS.md
+  #26 presentation summary -- missing until Amelia's alignment check
+  caught it.
+- `.gitignore` (post-review): `build-*/` pattern added alongside the
+  existing `build_*/` (Ilia/Amelia both independently flagged ad-hoc
+  hyphenated build directories as untracked cruft).
+
+Tests added (`tests/verification/test_euler_shu_osher.cpp`, 9 tests,
+all passing):
+- RH-derivation cross-check against an independent hand-derivation.
+- `test_shu_osher_hllc_exactly_preserves_stationary_entropy_wave_ahead_of_shock`,
+  the companion Rusanov bulk-convergence test, and (added during review,
+  see below) a separate boundary-adjacent-artifact test -- together the
+  headline finding of the task (see Scientific verification).
+- Rusanov/HLLC wake-L1-error-decreases-with-resolution (own fine
+  reference each).
+- Extrema-count-converges-toward-fine-reference-with-resolution.
+- Weak cross-flux fine-grid agreement check.
+- The headline same-resolution Rusanov-vs-HLLC comparison test.
+
+Scientific verification (the real evidence, not just "tests pass"):
+
+**A genuinely unanticipated finding, not predicted by the
+pre-implementation consult:** the region ahead of the shock is an
+EXACT, time-independent solution of Euler (`u=0`, `p=1` uniform there,
+so the physical flux is the exact constant vector `(0,p,0)` at every
+face regardless of density reconstruction). `HllcFlux` reproduces this
+EXACTLY (floating-point roundoff) at every resolution tested, boundary
+included. `RusanovFlux` does not -- its dissipation term
+`-0.5*alpha*(q_R-q_L)` acts on the raw conserved DENSITY component
+directly, nonzero between neighboring cells even when the physical flux
+is exactly constant, producing a real, resolution-convergent
+numerical-diffusion artifact.
+
+**This number went through a real correction during review, caught by
+Ilia's independent final review, not by Violet/Snorlax/Sally/Enzo's
+earlier pass:** the FIRST measurement (deviation checked across the
+whole ahead-of-shock region with no upper bound) gave 0.1127 (nx=100)
+down to only 0.0237 (nx=2000) -- a shallow ~1.3-1.7x reduction per
+doubling that Ilia flagged as inconsistent with a clean numerical-
+diffusivity story. He built his own standalone diagnostic against the
+shipped headers and found the measurement was dominated by a SEPARATE,
+boundary-localized effect: `InflowOutflowBoundary`'s zero-order
+extrapolation cannot exactly represent the continuously-varying sine
+wave at the domain's own right edge the way it can a genuinely constant
+far-field state, producing a second, larger, also-convergent artifact
+confined to the last 0.5 domain-units. He confirmed this visually too,
+by opening the actual committed figure and observing Rusanov tracking
+the exact curve closely through most of the window with a sharp
+divergence only in the final ~0.2 units. Fixed by splitting the
+measurement into two explicit, separately-reported numbers (the
+function's `x_hi` argument is now required, not defaulted to the
+domain edge) rather than quietly combining them:
+
+| nx | Rusanov BULK max deviation (boundary excluded) | Rusanov BOUNDARY-ADJACENT max deviation | HLLC max deviation (everywhere) |
+|---|---|---|---|
+| 100 | 0.112673 | 0.082622 | ~1.4e-12 |
+| 200 | 0.051814 | 0.079990 | 0 |
+| 400 | 0.023070 | 0.061784 | 0 |
+| 800 | 0.009915 | 0.040903 | 0 |
+| 2000 | 0.003084 | 0.023737 | 0 |
+
+The bulk mechanism now shows a clean ~2-3x reduction per grid doubling,
+consistent with a numerical diffusivity that shrinks with `dx` -- the
+qualitative headline (HLLC exact, Rusanov real-but-bounded) is
+unchanged, but the quoted magnitude and its attribution are now
+correct. The boundary-adjacent artifact is reported honestly alongside
+it (also resolution-convergent, a different mechanism, out of this
+task's scope to investigate further) rather than hidden. Independently
+confirmed via the Agent tool by Violet's earlier post-implementation
+review (before Ilia's deeper dig): she proved analytically that HLLC's
+star-state speed `S_star` degenerates EXACTLY to zero for this IC
+(same-pressure, same-velocity, opposite-side states feed directly into
+the formula that already gives `S_star=0` for a pure contact), which
+collapses its flux-correction term to exactly zero rather than
+something proportional to the density difference -- not luck, a
+provable property of the formula.
+
+Headline (coarse-resolution) wake-region comparison, matching the
+forward-step/Sod-contact direction but independently confirmed, not
+assumed:
+
+| nx | Rusanov wake L1 error | HLLC wake L1 error | Rusanov extrema | HLLC extrema |
+|---|---|---|---|---|
+| 100 | 0.8250 | 0.6670 | 5 | 5 |
+| 200 | 0.7018 | 0.5754 | 5 | 5 |
+| 400 | 0.5127 | 0.4700 | 5 | 7 |
+
+A real, consistent (if modest) HLLC advantage at every resolution
+tested -- both fluxes damp the oscillation amplitude relative to the
+2000-cell reference, expected for a 2nd-order TVD scheme (Shu-Osher is
+literature's own standard illustration of why 5th-order WENO schemes
+were built).
+
+Full CPU unit/verification suite: 158/158 passing, zero regressions,
+~4.5s wall clock (confirmed before AND after the post-review
+refactoring below, with identical measured numbers both times --
+the CFL-loop/RH-jump extraction is behavior-preserving, confirmed
+by re-running the pre-existing Sod tutorial and diffing its
+`data/summary.csv` byte-for-byte against the pre-refactor committed
+baseline).
+
+Review (Violet, Snorlax, Sally, Enzo in parallel via the Agent tool,
+then resolved before this entry was written):
+
+- **Violet (no blocking numerical findings):** independently re-derived
+  the headline Shu-Osher finding analytically (see above), confirmed
+  the acceptance-criteria construction faithfully implements her own
+  pre-implementation recommendations, confirmed the shock-front
+  estimator's HLLC-only usage is correctly enforced everywhere in the
+  test file, confirmed the RH jump formula and feature-tracking method
+  in task 0013's files. One durable lesson recorded (see
+  `.claude/agents/violet.md`): when a flux shows exactly-zero error on
+  a check, prove it analytically before reporting it as "exact" --
+  do not rely on floating-point display alone.
+- **Snorlax (2 blocking, both fixed):**
+  1. `density_at`/`max_ahead_deviation`/`wake_l1_error`/`count_extrema`
+     were duplicated verbatim (~70 lines) between
+     `test_euler_shu_osher.cpp` and
+     `tutorials/euler_1d_shu_osher/shu_osher.cpp` -- moved into
+     `shu_osher_setup.hpp` as shared `shu_osher_*` functions, the same
+     treatment `contact_width_cells` already established in
+     `sod_shock_tube_runner.hpp`.
+  2. (Raised jointly with Sally) `shu_osher_setup.hpp` hardcoded its
+     Mach-3 jump as three separately-derived literal constants instead
+     of calling `normal_shock_jump` (the general formula
+     `propagating_shock_setup.hpp` already had) -- fixed by hoisting
+     `NormalShockJump`/`normal_shock_jump` into a new shared
+     `rankine_hugoniot_jump.hpp`, included by both setup headers;
+     `shu_osher_setup.hpp` now exposes `kShuOsherMach` as a single knob.
+  - Optional, taken: factored the CFL-adaptive timestep loop (now
+    triplicated across three drivers) into
+    `cfl_adaptive_stepping.hpp`'s `advance_cfl_adaptive`, applied to all
+    three (`sod_shock_tube_runner.hpp` included) and verified
+    byte-for-byte identical Sod tutorial output before/after.
+- **Sally (0 blocking, 3 optional, all taken):** added a worked
+  per-face numerical example to the tutorial README explaining WHY
+  Rusanov's dissipation hits the density component even though the
+  physical flux is exactly constant (confirmed both tutorials actually
+  build/run/plot correctly end-to-end, matching their own READMEs).
+- **Enzo (0 blocking, 1 optional, taken):** the nx=2000 HLLC reference
+  was cached (`hllc_fine_reference()`) but the nx=2000 Rusanov reference
+  was recomputed fresh in up to 4 tests -- added matching
+  `rusanov_fine_reference()` caching; measured full-suite wall-clock
+  improvement 5.5s -> 4.5s (~18%) directly attributable. Confirmed HLLC
+  costs roughly an order of magnitude more than Rusanov per run at
+  nx=2000 (consistent with the GPU-side 7.5x-9.4x finding in ADR 0012),
+  so the asymmetric caching this review found was protecting the wrong
+  half -- now symmetric.
+
+**Ilia's independent final review and Amelia's alignment check** (run
+after the Violet/Snorlax/Sally/Enzo round above was resolved): see task
+0013's own entry below for the full account -- Ilia's review is what
+actually caught the ahead-of-shock boundary-artifact misattribution
+documented above (not Violet's earlier pass), plus a process gap
+(this entry and task 0013's not yet existing at the time of his
+review); Amelia's independently confirmed the same process gap plus a
+missing `presentations/` file for each task. Both are closed in the
+same round this entry records.
+
+Known limitations:
+- Componentwise (not characteristic) MUSCL reconstruction remains
+  unchanged (ADR 0010's own tracked limitation) -- Shu-Osher showed no
+  catastrophic multi-wave artifact analogous to the forward-step
+  triple point (expected per Violet's pre-implementation hypothesis,
+  confirmed: this is a 1D single-shock interaction with no analogous
+  geometric singularity), only the ordinary, documented amplitude
+  damping any 2nd-order TVD scheme shows against a much finer
+  reference.
+- The ahead-of-shock Rusanov-diffusion finding is new and specific to
+  a stationary (zero-velocity) density perturbation -- not yet checked
+  whether/how it interacts with a MOVING entropy wave (a case this
+  codebase does not currently have a canonical test for).
+
+Next recommended task: Taylor-Green vortex or flat-plate (Phase 5) can
+reuse this task's `VERIFICATION.md` addendum pattern directly (both are
+also no-exact-solution canonical cases); otherwise the remaining Phase 4
+items (moving-frame/grid-recycling prototype) build directly on task
+0013's feature-tracking utility below.
+
+---
+
+## 2026-10-14 — Task 0013: Phase 4 — 1D propagating shock, feature tracking, propagation-speed estimate
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+ROADMAP.md Phase 4 names "a 1D propagating shock demonstration and
+periodic propagation-speed estimate" -- a building block toward the
+later moving-frame/grid-recycling prototype (ARCHITECTURE.md #12, whose
+own step 1-2 is exactly "track a feature" / "estimate propagation speed
+periodically"). Track a shock's position across snapshots, estimate its
+propagation speed, and compare against the analytically-known
+Rankine-Hugoniot shock speed, with both `RusanovFlux` and `HllcFlux`.
+
+Pre-implementation consult (Amelia, Violet; see task 0012's entry above
+for the shared consult session) produced one load-bearing correction to
+this task's own original draft plan: **use a standalone single
+right-moving shock into quiescent gas, not a reuse of Sod's own right
+shock**, per both agents' independent recommendation. Sod's shock sits
+adjacent to a contact discontinuity whose numerical smearing differs
+materially between Rusanov/HLLC (ADR 0012's own 17-vs-13-cell result),
+which would risk contaminating a shock-POSITION measurement with an
+unrelated effect; a standalone normal-shock jump is also LOWER
+complexity than reusing Sod (pure closed-form Rankine-Hugoniot algebra,
+no Newton iteration at all, vs. needing the exact Riemann solver's own
+iteration to locate Sod's contact/rarefaction for an ambiguity check).
+Matches this codebase's own existing precedent
+(`test_euler_isolated_contact_hllc.cpp` isolates one wave type
+deliberately for the same reason).
+
+Files changed/new:
+- `tasks/0013-phase4-propagating-shock-tracking.md` (new).
+- `tests/verification/rankine_hugoniot_jump.hpp` (new; see task 0012's
+  entry -- originally defined only in this task's
+  `propagating_shock_setup.hpp`, hoisted to a shared location during
+  review since task 0012 needed the same formula).
+- `tests/verification/propagating_shock_setup.hpp` (new): `ShockSnapshot`,
+  `run_propagating_shock` (multi-snapshot CFL-adaptive driver, output
+  times clamped exactly per Violet's consult, not just at `t_final`).
+- `tests/verification/shock_feature_tracking.hpp` (new):
+  `locate_shock_position` (interpolated midpoint-density threshold
+  crossing -- chosen over steepest-gradient per Violet's consult,
+  specifically because it is insensitive to the different smearing
+  WIDTHS/SHAPES the two fluxes produce, so it cannot manufacture a
+  spurious "different speed" between fluxes that are really just
+  differently smeared) and `least_squares_slope` (position-vs-time
+  fit over all snapshots, not a two-point endpoint difference).
+- `tests/verification/test_euler_propagating_shock.cpp` (new): 4 tests.
+- `tutorials/euler_1d_propagating_shock/` (new): `propagating_shock.cpp`,
+  `plot_results.py`, `README.md`, `CMakeLists.txt`.
+- `presentations/0013-phase4-propagating-shock-tracking.md` (new,
+  post-review): AGENTS.md #26 presentation summary -- missing until
+  Amelia's alignment check caught it (see task 0012's entry above for
+  the shared `.gitignore` fix from the same review round).
+
+Problem setup: Mach-2 shock, ahead `rho=1,u=0,p=1` (gamma=1.4), behind
+`rho=2.666667, u=1.479020, p=4.5` (closed-form RH jump), analytic shock
+speed `S=M*c_ahead=2.366432`. Domain `[0,1]`, shock starts at `x=0.2`,
+8 snapshots over `t in [0.025, 0.2]`.
+
+Tests added, all passing:
+- RH-jump-matches-hand-derivation cross-check.
+- Rusanov/HLLC speed-error-decreases-with-resolution (nx=100/200/
+  400/800 sweep, not a single fixed-resolution pass/fail).
+- Rusanov-and-HLLC-measure-the-same-physical-speed (direct cross-flux
+  check, not assumed).
+
+Scientific verification -- measured speed vs. analytic (2.366432),
+both fluxes:
+
+| nx | Rusanov speed | Rusanov \|error\| | HLLC speed | HLLC \|error\| |
+|---|---|---|---|---|
+| 100 | 2.374974 | 0.008542 | 2.374490 | 0.008058 |
+| 200 | 2.367114 | 0.000682 | 2.367112 | 0.000680 |
+| 400 | 2.366554 | 0.000122 | 2.366639 | 0.000207 |
+| 800 | 2.366388 | 0.000044 | 2.366361 | 0.000071 |
+
+Both fluxes converge cleanly (error decreasing monotonically with
+resolution, independently for each) and agree with each other closely
+at every resolution (measured |Rusanov-HLLC| difference: 0.000484 at
+nx=100, 0.000002 at nx=200, 0.000085 at nx=400, 0.000027 at nx=800,
+all well under the 0.001 regression threshold) -- both model the same
+physical shock, as expected, verified directly rather than assumed.
+Neither flux shows a resolution-persistent speed bias relative to the
+other.
+
+Full CPU unit/verification suite: 158/158 passing (shared count with
+task 0012, same test binary), zero regressions.
+
+Review: performed jointly with task 0012 (Violet/Snorlax/Sally/Enzo via
+the Agent tool, in parallel) -- see that entry for the full review
+account. Findings specific to this task's own files: Snorlax's blocking
+duplication/hardcoded-constant findings both touched
+`rankine_hugoniot_jump.hpp` (shared with task 0012) and the CFL-loop
+factoring touched `propagating_shock_setup.hpp` directly; Snorlax's
+optional finding (unused trailing `const fs::path&` parameter in
+`tutorials/euler_1d_propagating_shock/propagating_shock.cpp`'s
+`run_case`) was taken -- dropped. Sally's optional findings specific to
+this task: added a one-line README caveat that `S=M*c_ahead` only holds
+because the ahead gas starts at rest (the header comment already had
+this, the README did not); ported a "shock might exit the domain before
+the last snapshot" warning comment into `propagating_shock.cpp` itself
+(previously only in `shock_feature_tracking.hpp`'s own doc comment --
+Sally's point: a student is more likely to edit the tutorial than the
+shared header, and should see the warning before hitting the resulting
+`std::runtime_error`).
+
+**Ilia's independent final review** (formed before reading any other
+reviewer's findings, per his own charter; re-ran the full test suite
+himself; independently re-derived both the ahead-of-shock Rusanov-
+diffusion mechanism and the propagating-shock speed-convergence numbers
+from scratch; confirmed via `git diff`/`git status` that no `src/cfe/`
+production code was touched by either task, only
+`tests/verification/`/`tutorials/`) found two real issues, both closed
+before this entry was written:
+
+- **Blocking, closed:** `agent_history.md` had no entries for task 0012
+  or 0013 at the time of his review -- the exact gap he caught on task
+  0011 (see that task's own entry), now recurring a second time. This
+  pair of entries is that fix.
+- **Blocking, closed:** the Shu-Osher "Rusanov diffuses the stationary
+  ahead-of-shock wave" headline claim materially mis-attributed its own
+  magnitude -- he proved the mechanism itself was real and correctly
+  explainable, then built a standalone diagnostic against the shipped
+  headers and found the reported deviations were dominated by a
+  single boundary-localized artifact, not the bulk mechanism the code
+  comments/README claimed -- confirmed visually against the actual
+  committed figure too. Full account and the corrected numbers are in
+  task 0012's own entry above; fix applied there
+  (`shu_osher_max_ahead_deviation` now requires an explicit upper bound,
+  a new regression test reports the boundary artifact separately, and
+  the tutorial/README/figures were regenerated and re-checked against
+  the corrected numbers).
+
+**Amelia's alignment check** (same round): confirmed both tasks stay on
+their pre-consult scope (no drift either direction), confirmed the
+"fluxes that exist today" scope boundary was actually written into both
+task files as instructed, confirmed the task-file-per-case /
+shared-branch decision was followed exactly as recommended, and found
+two issues of her own, both closed before this entry was written:
+
+- **Blocking, closed:** no `presentations/` file existed for either
+  task, despite AGENTS.md #26 requiring one per task and this same PR
+  having already established the convention for tasks 0009-0011. Added
+  `presentations/0012-phase3-shu-osher.md` and
+  `presentations/0013-phase4-propagating-shock-tracking.md` -- largely a
+  reformatting exercise since both tutorial READMEs already had the
+  plain-language explanation and headline numbers, per her own note.
+- **Optional, taken:** `.gitignore`'s build-directory pattern only
+  matched an underscore separator (`build_*/`), not the hyphenated
+  ad-hoc build directories (`build-shuosher/`, `build-ilia/`,
+  `build-threaded/`) this session's own work (and others) had been
+  creating -- added a `build-*/` pattern alongside the existing one.
+- **Optional, not acted on now:** `rankine_hugoniot_jump.hpp` is now
+  shared Euler-verification infrastructure rather than belonging to
+  either individual task -- worth a one-line ARCHITECTURE.md or
+  VERIFICATION.md cross-reference the next time a third canonical case
+  needs it, not urgent with only two current users.
+- Noted (not a finding): the Shu-Osher boundary-artifact discovery
+  (task 0012's entry above) is narrowly scoped to this one test's
+  particular boundary setup for now, not a broader architectural
+  concern -- flagged for awareness if a future canonical case hits the
+  same "varying, not constant, far-field value at a zero-order-
+  extrapolated boundary" shape.
+
+Known limitations:
+- The feature-tracking utility (`shock_feature_tracking.hpp`) is
+  verified only for a single, well-separated shock -- not yet
+  exercised against a feature embedded in a more complex wave system
+  (the future moving-frame prototype's own eventual test will be the
+  first real exercise of that).
+- No GPU/CUDA work in this task -- per MEMORY.md's standing PR
+  requirement, a 3D CUDA correctness test + at-scale benchmark is
+  required when a PR adds a new Field/scheme; this task adds neither
+  (purely new verification cases over the existing, already-GPU-
+  verified `EulerField`/`RusanovFlux`/`HllcFlux`), so that requirement
+  does not apply here -- confirmed explicitly, not silently assumed.
+- Same gap task 0011 recorded and left open: durable lessons from this
+  round's reviews (Violet's "prove an exactly-zero result analytically
+  before reporting it as exact," Snorlax's "watch for a THIRD
+  independent copy before factoring shared logic," Amelia's
+  "presentations/ per task is a recurring gap worth a standing
+  reminder") are recorded here in `agent_history.md` but NOT YET applied
+  to `.claude/agents/*.md`, since those files still do not exist on this
+  branch (`cfe/development/phase_0005-euler-forward-step`) -- they live
+  on `cfe/development/multi-agent-workflow`, not yet merged with this
+  task's branch. Recorded here for whoever reconciles the branches.
+
+Next recommended task: the moving-frame/grid-recycling prototype itself
+(ARCHITECTURE.md #12 steps 3-7: shift/recycle the window, remove
+downstream cells, insert upstream cells, preserve indexing/
+communication consistency) can now reuse this task's
+`locate_shock_position`/`least_squares_slope` utilities directly for its
+own periodic speed re-estimate, per their own stated reuse intent.
