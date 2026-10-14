@@ -4542,3 +4542,478 @@ propagating shock demonstration) per `ROADMAP.md`, or Phase 5 (PPM,
 viscous fluxes) on its own originally-scoped schedule -- now with a
 planning note tying PPM's interface work to the componentwise-
 reconstruction-overshoot finding above.
+
+## 2026-10-14 — Task 0012: Phase 3 completion — Shu-Osher shock/density-wave interaction, Rusanov vs. HLLC
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+ROADMAP.md Phase 3 names both "Sod shock tube" and "Shu-Osher problem"
+as acceptance items; only Sod had been implemented (task 0009). Add
+Shu-Osher (Shu & Osher 1989): a Mach-3 shock into a sinusoidally-
+perturbed density field, producing fine post-shock oscillatory
+structure. Per the user's explicit instruction ("we should test all
+flux approaches"), run with both `RusanovFlux` and `HllcFlux` and
+report honestly which preserves more fine structure -- a second,
+independent data point on the question task 0011/ADR 0012 first
+surfaced (HLLC showing real Kelvin-Helmholtz waviness on forward-step
+where Rusanov showed none).
+
+Pre-implementation consult (per CLAUDE.md), before any code: Amelia
+(scope/sequencing) and Violet (acceptance criteria, since Shu-Osher has
+no exact solution). Both consulted via the Agent tool with full context
+dumps (ADRs 0010/0012, VERIFICATION.md, ROADMAP.md, existing Sod
+infrastructure), not summarized secondhand.
+
+Amelia's recommendations (all adopted):
+- Two separate task files (0012 for Shu-Osher, 0013 for the
+  propagating-shock case), same granularity this repo already uses
+  (one canonical case = one task file, tasks 0009/0010/0011) -- for
+  unambiguous `agent_history.md`/test-failure attribution -- but both
+  may share the same branch/PR (`cfe/development/phase_0005-euler-
+  forward-step`, PR #6) since ROADMAP phase numbers are planning
+  labels, not release gates (precedent: task 0010's Phase-4 content
+  already shipped inside this Phase-3-labeled PR).
+- No new ADR for either case -- a verification-methodology choice
+  (reference-resolution/error-metric for a no-exact-solution case) is
+  not an architectural decision per AGENTS.md #4.10; recorded as a
+  `VERIFICATION.md` addendum instead (see below).
+- Document a scope boundary now: "test all flux approaches" means the
+  fluxes that exist TODAY (Rusanov, HLLC), not a standing N-way product
+  rule for every future case/flux -- recorded in both task files and in
+  Amelia's own accumulated-knowledge notes from this consult.
+
+Violet's recommendations (all adopted), with real analytical and
+literature cross-checks, not just opinion:
+- Verified Mach-3 left (post-shock) state via BOTH an independent
+  Rankine-Hugoniot derivation AND a literature search: `rho=3.857143,
+  u=2.629369, p=10.333333` (ahead `rho=1,u=0,p=1`, gamma=1.4) --
+  matches to the quoted precision.
+- Acceptance criteria for the no-exact-solution case: (1) a genuine,
+  BLOCKING oracle check in the region still ahead of the shock (exact,
+  time-independent solution of Euler until the shock arrives -- not
+  "no exact check possible anywhere"); (2) converged fine-grid
+  reference (same code, same flux) for the disturbed wake, error
+  required to decrease with resolution; (3) a scriptable extrema-count
+  proxy for wavelength fidelity, not an attempt to script "matches a
+  published figure"; (4) cross-flux fine-grid agreement labeled
+  explicitly as a WEAK, non-independent signal; (5) the headline
+  coarse-resolution Rusanov-vs-HLLC wake-error comparison, measured
+  honestly rather than assumed to transfer from forward-step/Sod.
+- Boundary conditions confirmed analytically, not just asserted:
+  `StaticBoundary` at the left (all three post-shock characteristics
+  point rightward, `u-c=0.692>0`); `InflowOutflowBoundary` at the right
+  (ahead-state sound speed `~1.18` strictly slower than the shock's own
+  `~3`, so the shock stays the rightmost disturbed point through
+  `t=1.8` -- verified directly by the ahead-of-shock test, not just
+  argued).
+
+Files changed/new:
+- `tasks/0012-phase3-shu-osher.md` (new).
+- `tests/verification/shu_osher_setup.hpp` (new): shared driver
+  (`run_shu_osher`), exact ahead-state formula
+  (`shu_osher_exact_ahead_density`), shock-front estimator
+  (`shu_osher_shock_front_estimate`), and (after Snorlax's review, see
+  below) the shared metric helpers `shu_osher_density_at`/
+  `shu_osher_wake_l1_error`/`shu_osher_max_ahead_deviation`/
+  `shu_osher_count_extrema`, used by BOTH the test and the tutorial.
+- `tests/verification/test_euler_shu_osher.cpp` (new): 9 tests, see
+  Scientific verification below.
+- `tests/verification/rankine_hugoniot_jump.hpp` (new, post-review):
+  `NormalShockJump`/`normal_shock_jump`, the shared closed-form RH-jump
+  algebra used by BOTH this task's Shu-Osher left state and task 0013's
+  propagating-shock IC -- originally hardcoded as three separate
+  literal constants in `shu_osher_setup.hpp`, fixed per Sally/Snorlax's
+  joint review finding (see below).
+- `tests/verification/cfl_adaptive_stepping.hpp` (new, post-review):
+  `advance_cfl_adaptive`, the CFL-adaptive SSP-RK2 time-advance loop
+  factored out of `sod_shock_tube_runner.hpp`/`shu_osher_setup.hpp`/
+  `propagating_shock_setup.hpp` after it had been copy-pasted into a
+  THIRD independent driver (Snorlax review finding).
+- `tutorials/euler_1d_shu_osher/` (new): `shu_osher.cpp`,
+  `plot_results.py`, `README.md`, `CMakeLists.txt`.
+- `VERIFICATION.md`: new "Canonical problems with no closed-form exact
+  solution" subsection under "Canonical problems", recording the
+  accepted pattern above as a reusable rule (TGV/flat-plate will likely
+  need it too).
+- `tests/verification/sod_shock_tube_runner.hpp`: CFL loop factored to
+  `advance_cfl_adaptive` (behavior-preserving refactor, see Scientific
+  verification).
+- `tests/CMakeLists.txt`, `tutorials/CMakeLists.txt`: new files wired in.
+- `presentations/0012-phase3-shu-osher.md` (new, post-review): AGENTS.md
+  #26 presentation summary -- missing until Amelia's alignment check
+  caught it.
+- `.gitignore` (post-review): `build-*/` pattern added alongside the
+  existing `build_*/` (Ilia/Amelia both independently flagged ad-hoc
+  hyphenated build directories as untracked cruft).
+
+Tests added (`tests/verification/test_euler_shu_osher.cpp`, 9 tests,
+all passing):
+- RH-derivation cross-check against an independent hand-derivation.
+- `test_shu_osher_hllc_exactly_preserves_stationary_entropy_wave_ahead_of_shock`,
+  the companion Rusanov bulk-convergence test, and (added during review,
+  see below) a separate boundary-adjacent-artifact test -- together the
+  headline finding of the task (see Scientific verification).
+- Rusanov/HLLC wake-L1-error-decreases-with-resolution (own fine
+  reference each).
+- Extrema-count-converges-toward-fine-reference-with-resolution.
+- Weak cross-flux fine-grid agreement check.
+- The headline same-resolution Rusanov-vs-HLLC comparison test.
+
+Scientific verification (the real evidence, not just "tests pass"):
+
+**A genuinely unanticipated finding, not predicted by the
+pre-implementation consult:** the region ahead of the shock is an
+EXACT, time-independent solution of Euler (`u=0`, `p=1` uniform there,
+so the physical flux is the exact constant vector `(0,p,0)` at every
+face regardless of density reconstruction). `HllcFlux` reproduces this
+EXACTLY (floating-point roundoff) at every resolution tested, boundary
+included. `RusanovFlux` does not -- its dissipation term
+`-0.5*alpha*(q_R-q_L)` acts on the raw conserved DENSITY component
+directly, nonzero between neighboring cells even when the physical flux
+is exactly constant, producing a real, resolution-convergent
+numerical-diffusion artifact.
+
+**This number went through a real correction during review, caught by
+Ilia's independent final review, not by Violet/Snorlax/Sally/Enzo's
+earlier pass:** the FIRST measurement (deviation checked across the
+whole ahead-of-shock region with no upper bound) gave 0.1127 (nx=100)
+down to only 0.0237 (nx=2000) -- a shallow ~1.3-1.7x reduction per
+doubling that Ilia flagged as inconsistent with a clean numerical-
+diffusivity story. He built his own standalone diagnostic against the
+shipped headers and found the measurement was dominated by a SEPARATE,
+boundary-localized effect: `InflowOutflowBoundary`'s zero-order
+extrapolation cannot exactly represent the continuously-varying sine
+wave at the domain's own right edge the way it can a genuinely constant
+far-field state, producing a second, larger, also-convergent artifact
+confined to the last 0.5 domain-units. He confirmed this visually too,
+by opening the actual committed figure and observing Rusanov tracking
+the exact curve closely through most of the window with a sharp
+divergence only in the final ~0.2 units. Fixed by splitting the
+measurement into two explicit, separately-reported numbers (the
+function's `x_hi` argument is now required, not defaulted to the
+domain edge) rather than quietly combining them:
+
+| nx | Rusanov BULK max deviation (boundary excluded) | Rusanov BOUNDARY-ADJACENT max deviation | HLLC max deviation (everywhere) |
+|---|---|---|---|
+| 100 | 0.112673 | 0.082622 | ~1.4e-12 |
+| 200 | 0.051814 | 0.079990 | 0 |
+| 400 | 0.023070 | 0.061784 | 0 |
+| 800 | 0.009915 | 0.040903 | 0 |
+| 2000 | 0.003084 | 0.023737 | 0 |
+
+The bulk mechanism now shows a clean ~2-3x reduction per grid doubling,
+consistent with a numerical diffusivity that shrinks with `dx` -- the
+qualitative headline (HLLC exact, Rusanov real-but-bounded) is
+unchanged, but the quoted magnitude and its attribution are now
+correct. The boundary-adjacent artifact is reported honestly alongside
+it (also resolution-convergent, a different mechanism, out of this
+task's scope to investigate further) rather than hidden. Independently
+confirmed via the Agent tool by Violet's earlier post-implementation
+review (before Ilia's deeper dig): she proved analytically that HLLC's
+star-state speed `S_star` degenerates EXACTLY to zero for this IC
+(same-pressure, same-velocity, opposite-side states feed directly into
+the formula that already gives `S_star=0` for a pure contact), which
+collapses its flux-correction term to exactly zero rather than
+something proportional to the density difference -- not luck, a
+provable property of the formula.
+
+Headline (coarse-resolution) wake-region comparison, matching the
+forward-step/Sod-contact direction but independently confirmed, not
+assumed:
+
+| nx | Rusanov wake L1 error | HLLC wake L1 error | Rusanov extrema | HLLC extrema |
+|---|---|---|---|---|
+| 100 | 0.8250 | 0.6670 | 5 | 5 |
+| 200 | 0.7018 | 0.5754 | 5 | 5 |
+| 400 | 0.5127 | 0.4700 | 5 | 7 |
+
+A real, consistent (if modest) HLLC advantage at every resolution
+tested -- both fluxes damp the oscillation amplitude relative to the
+2000-cell reference, expected for a 2nd-order TVD scheme (Shu-Osher is
+literature's own standard illustration of why 5th-order WENO schemes
+were built).
+
+Full CPU unit/verification suite: 158/158 passing, zero regressions,
+~4.5s wall clock (confirmed before AND after the post-review
+refactoring below, with identical measured numbers both times --
+the CFL-loop/RH-jump extraction is behavior-preserving, confirmed
+by re-running the pre-existing Sod tutorial and diffing its
+`data/summary.csv` byte-for-byte against the pre-refactor committed
+baseline).
+
+Review (Violet, Snorlax, Sally, Enzo in parallel via the Agent tool,
+then resolved before this entry was written):
+
+- **Violet (no blocking numerical findings):** independently re-derived
+  the headline Shu-Osher finding analytically (see above), confirmed
+  the acceptance-criteria construction faithfully implements her own
+  pre-implementation recommendations, confirmed the shock-front
+  estimator's HLLC-only usage is correctly enforced everywhere in the
+  test file, confirmed the RH jump formula and feature-tracking method
+  in task 0013's files. One durable lesson recorded (see
+  `.claude/agents/violet.md`): when a flux shows exactly-zero error on
+  a check, prove it analytically before reporting it as "exact" --
+  do not rely on floating-point display alone.
+- **Snorlax (2 blocking, both fixed):**
+  1. `density_at`/`max_ahead_deviation`/`wake_l1_error`/`count_extrema`
+     were duplicated verbatim (~70 lines) between
+     `test_euler_shu_osher.cpp` and
+     `tutorials/euler_1d_shu_osher/shu_osher.cpp` -- moved into
+     `shu_osher_setup.hpp` as shared `shu_osher_*` functions, the same
+     treatment `contact_width_cells` already established in
+     `sod_shock_tube_runner.hpp`.
+  2. (Raised jointly with Sally) `shu_osher_setup.hpp` hardcoded its
+     Mach-3 jump as three separately-derived literal constants instead
+     of calling `normal_shock_jump` (the general formula
+     `propagating_shock_setup.hpp` already had) -- fixed by hoisting
+     `NormalShockJump`/`normal_shock_jump` into a new shared
+     `rankine_hugoniot_jump.hpp`, included by both setup headers;
+     `shu_osher_setup.hpp` now exposes `kShuOsherMach` as a single knob.
+  - Optional, taken: factored the CFL-adaptive timestep loop (now
+    triplicated across three drivers) into
+    `cfl_adaptive_stepping.hpp`'s `advance_cfl_adaptive`, applied to all
+    three (`sod_shock_tube_runner.hpp` included) and verified
+    byte-for-byte identical Sod tutorial output before/after.
+- **Sally (0 blocking, 3 optional, all taken):** added a worked
+  per-face numerical example to the tutorial README explaining WHY
+  Rusanov's dissipation hits the density component even though the
+  physical flux is exactly constant (confirmed both tutorials actually
+  build/run/plot correctly end-to-end, matching their own READMEs).
+- **Enzo (0 blocking, 1 optional, taken):** the nx=2000 HLLC reference
+  was cached (`hllc_fine_reference()`) but the nx=2000 Rusanov reference
+  was recomputed fresh in up to 4 tests -- added matching
+  `rusanov_fine_reference()` caching; measured full-suite wall-clock
+  improvement 5.5s -> 4.5s (~18%) directly attributable. Confirmed HLLC
+  costs roughly an order of magnitude more than Rusanov per run at
+  nx=2000 (consistent with the GPU-side 7.5x-9.4x finding in ADR 0012),
+  so the asymmetric caching this review found was protecting the wrong
+  half -- now symmetric.
+
+**Ilia's independent final review and Amelia's alignment check** (run
+after the Violet/Snorlax/Sally/Enzo round above was resolved): see task
+0013's own entry below for the full account -- Ilia's review is what
+actually caught the ahead-of-shock boundary-artifact misattribution
+documented above (not Violet's earlier pass), plus a process gap
+(this entry and task 0013's not yet existing at the time of his
+review); Amelia's independently confirmed the same process gap plus a
+missing `presentations/` file for each task. Both are closed in the
+same round this entry records.
+
+Known limitations:
+- Componentwise (not characteristic) MUSCL reconstruction remains
+  unchanged (ADR 0010's own tracked limitation) -- Shu-Osher showed no
+  catastrophic multi-wave artifact analogous to the forward-step
+  triple point (expected per Violet's pre-implementation hypothesis,
+  confirmed: this is a 1D single-shock interaction with no analogous
+  geometric singularity), only the ordinary, documented amplitude
+  damping any 2nd-order TVD scheme shows against a much finer
+  reference.
+- The ahead-of-shock Rusanov-diffusion finding is new and specific to
+  a stationary (zero-velocity) density perturbation -- not yet checked
+  whether/how it interacts with a MOVING entropy wave (a case this
+  codebase does not currently have a canonical test for).
+
+Next recommended task: Taylor-Green vortex or flat-plate (Phase 5) can
+reuse this task's `VERIFICATION.md` addendum pattern directly (both are
+also no-exact-solution canonical cases); otherwise the remaining Phase 4
+items (moving-frame/grid-recycling prototype) build directly on task
+0013's feature-tracking utility below.
+
+---
+
+## 2026-10-14 — Task 0013: Phase 4 — 1D propagating shock, feature tracking, propagation-speed estimate
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+ROADMAP.md Phase 4 names "a 1D propagating shock demonstration and
+periodic propagation-speed estimate" -- a building block toward the
+later moving-frame/grid-recycling prototype (ARCHITECTURE.md #12, whose
+own step 1-2 is exactly "track a feature" / "estimate propagation speed
+periodically"). Track a shock's position across snapshots, estimate its
+propagation speed, and compare against the analytically-known
+Rankine-Hugoniot shock speed, with both `RusanovFlux` and `HllcFlux`.
+
+Pre-implementation consult (Amelia, Violet; see task 0012's entry above
+for the shared consult session) produced one load-bearing correction to
+this task's own original draft plan: **use a standalone single
+right-moving shock into quiescent gas, not a reuse of Sod's own right
+shock**, per both agents' independent recommendation. Sod's shock sits
+adjacent to a contact discontinuity whose numerical smearing differs
+materially between Rusanov/HLLC (ADR 0012's own 17-vs-13-cell result),
+which would risk contaminating a shock-POSITION measurement with an
+unrelated effect; a standalone normal-shock jump is also LOWER
+complexity than reusing Sod (pure closed-form Rankine-Hugoniot algebra,
+no Newton iteration at all, vs. needing the exact Riemann solver's own
+iteration to locate Sod's contact/rarefaction for an ambiguity check).
+Matches this codebase's own existing precedent
+(`test_euler_isolated_contact_hllc.cpp` isolates one wave type
+deliberately for the same reason).
+
+Files changed/new:
+- `tasks/0013-phase4-propagating-shock-tracking.md` (new).
+- `tests/verification/rankine_hugoniot_jump.hpp` (new; see task 0012's
+  entry -- originally defined only in this task's
+  `propagating_shock_setup.hpp`, hoisted to a shared location during
+  review since task 0012 needed the same formula).
+- `tests/verification/propagating_shock_setup.hpp` (new): `ShockSnapshot`,
+  `run_propagating_shock` (multi-snapshot CFL-adaptive driver, output
+  times clamped exactly per Violet's consult, not just at `t_final`).
+- `tests/verification/shock_feature_tracking.hpp` (new):
+  `locate_shock_position` (interpolated midpoint-density threshold
+  crossing -- chosen over steepest-gradient per Violet's consult,
+  specifically because it is insensitive to the different smearing
+  WIDTHS/SHAPES the two fluxes produce, so it cannot manufacture a
+  spurious "different speed" between fluxes that are really just
+  differently smeared) and `least_squares_slope` (position-vs-time
+  fit over all snapshots, not a two-point endpoint difference).
+- `tests/verification/test_euler_propagating_shock.cpp` (new): 4 tests.
+- `tutorials/euler_1d_propagating_shock/` (new): `propagating_shock.cpp`,
+  `plot_results.py`, `README.md`, `CMakeLists.txt`.
+- `presentations/0013-phase4-propagating-shock-tracking.md` (new,
+  post-review): AGENTS.md #26 presentation summary -- missing until
+  Amelia's alignment check caught it (see task 0012's entry above for
+  the shared `.gitignore` fix from the same review round).
+
+Problem setup: Mach-2 shock, ahead `rho=1,u=0,p=1` (gamma=1.4), behind
+`rho=2.666667, u=1.479020, p=4.5` (closed-form RH jump), analytic shock
+speed `S=M*c_ahead=2.366432`. Domain `[0,1]`, shock starts at `x=0.2`,
+8 snapshots over `t in [0.025, 0.2]`.
+
+Tests added, all passing:
+- RH-jump-matches-hand-derivation cross-check.
+- Rusanov/HLLC speed-error-decreases-with-resolution (nx=100/200/
+  400/800 sweep, not a single fixed-resolution pass/fail).
+- Rusanov-and-HLLC-measure-the-same-physical-speed (direct cross-flux
+  check, not assumed).
+
+Scientific verification -- measured speed vs. analytic (2.366432),
+both fluxes:
+
+| nx | Rusanov speed | Rusanov \|error\| | HLLC speed | HLLC \|error\| |
+|---|---|---|---|---|
+| 100 | 2.374974 | 0.008542 | 2.374490 | 0.008058 |
+| 200 | 2.367114 | 0.000682 | 2.367112 | 0.000680 |
+| 400 | 2.366554 | 0.000122 | 2.366639 | 0.000207 |
+| 800 | 2.366388 | 0.000044 | 2.366361 | 0.000071 |
+
+Both fluxes converge cleanly (error decreasing monotonically with
+resolution, independently for each) and agree with each other closely
+at every resolution (measured |Rusanov-HLLC| difference: 0.000484 at
+nx=100, 0.000002 at nx=200, 0.000085 at nx=400, 0.000027 at nx=800,
+all well under the 0.001 regression threshold) -- both model the same
+physical shock, as expected, verified directly rather than assumed.
+Neither flux shows a resolution-persistent speed bias relative to the
+other.
+
+Full CPU unit/verification suite: 158/158 passing (shared count with
+task 0012, same test binary), zero regressions.
+
+Review: performed jointly with task 0012 (Violet/Snorlax/Sally/Enzo via
+the Agent tool, in parallel) -- see that entry for the full review
+account. Findings specific to this task's own files: Snorlax's blocking
+duplication/hardcoded-constant findings both touched
+`rankine_hugoniot_jump.hpp` (shared with task 0012) and the CFL-loop
+factoring touched `propagating_shock_setup.hpp` directly; Snorlax's
+optional finding (unused trailing `const fs::path&` parameter in
+`tutorials/euler_1d_propagating_shock/propagating_shock.cpp`'s
+`run_case`) was taken -- dropped. Sally's optional findings specific to
+this task: added a one-line README caveat that `S=M*c_ahead` only holds
+because the ahead gas starts at rest (the header comment already had
+this, the README did not); ported a "shock might exit the domain before
+the last snapshot" warning comment into `propagating_shock.cpp` itself
+(previously only in `shock_feature_tracking.hpp`'s own doc comment --
+Sally's point: a student is more likely to edit the tutorial than the
+shared header, and should see the warning before hitting the resulting
+`std::runtime_error`).
+
+**Ilia's independent final review** (formed before reading any other
+reviewer's findings, per his own charter; re-ran the full test suite
+himself; independently re-derived both the ahead-of-shock Rusanov-
+diffusion mechanism and the propagating-shock speed-convergence numbers
+from scratch; confirmed via `git diff`/`git status` that no `src/cfe/`
+production code was touched by either task, only
+`tests/verification/`/`tutorials/`) found two real issues, both closed
+before this entry was written:
+
+- **Blocking, closed:** `agent_history.md` had no entries for task 0012
+  or 0013 at the time of his review -- the exact gap he caught on task
+  0011 (see that task's own entry), now recurring a second time. This
+  pair of entries is that fix.
+- **Blocking, closed:** the Shu-Osher "Rusanov diffuses the stationary
+  ahead-of-shock wave" headline claim materially mis-attributed its own
+  magnitude -- he proved the mechanism itself was real and correctly
+  explainable, then built a standalone diagnostic against the shipped
+  headers and found the reported deviations were dominated by a
+  single boundary-localized artifact, not the bulk mechanism the code
+  comments/README claimed -- confirmed visually against the actual
+  committed figure too. Full account and the corrected numbers are in
+  task 0012's own entry above; fix applied there
+  (`shu_osher_max_ahead_deviation` now requires an explicit upper bound,
+  a new regression test reports the boundary artifact separately, and
+  the tutorial/README/figures were regenerated and re-checked against
+  the corrected numbers).
+
+**Amelia's alignment check** (same round): confirmed both tasks stay on
+their pre-consult scope (no drift either direction), confirmed the
+"fluxes that exist today" scope boundary was actually written into both
+task files as instructed, confirmed the task-file-per-case /
+shared-branch decision was followed exactly as recommended, and found
+two issues of her own, both closed before this entry was written:
+
+- **Blocking, closed:** no `presentations/` file existed for either
+  task, despite AGENTS.md #26 requiring one per task and this same PR
+  having already established the convention for tasks 0009-0011. Added
+  `presentations/0012-phase3-shu-osher.md` and
+  `presentations/0013-phase4-propagating-shock-tracking.md` -- largely a
+  reformatting exercise since both tutorial READMEs already had the
+  plain-language explanation and headline numbers, per her own note.
+- **Optional, taken:** `.gitignore`'s build-directory pattern only
+  matched an underscore separator (`build_*/`), not the hyphenated
+  ad-hoc build directories (`build-shuosher/`, `build-ilia/`,
+  `build-threaded/`) this session's own work (and others) had been
+  creating -- added a `build-*/` pattern alongside the existing one.
+- **Optional, not acted on now:** `rankine_hugoniot_jump.hpp` is now
+  shared Euler-verification infrastructure rather than belonging to
+  either individual task -- worth a one-line ARCHITECTURE.md or
+  VERIFICATION.md cross-reference the next time a third canonical case
+  needs it, not urgent with only two current users.
+- Noted (not a finding): the Shu-Osher boundary-artifact discovery
+  (task 0012's entry above) is narrowly scoped to this one test's
+  particular boundary setup for now, not a broader architectural
+  concern -- flagged for awareness if a future canonical case hits the
+  same "varying, not constant, far-field value at a zero-order-
+  extrapolated boundary" shape.
+
+Known limitations:
+- The feature-tracking utility (`shock_feature_tracking.hpp`) is
+  verified only for a single, well-separated shock -- not yet
+  exercised against a feature embedded in a more complex wave system
+  (the future moving-frame prototype's own eventual test will be the
+  first real exercise of that).
+- No GPU/CUDA work in this task -- per MEMORY.md's standing PR
+  requirement, a 3D CUDA correctness test + at-scale benchmark is
+  required when a PR adds a new Field/scheme; this task adds neither
+  (purely new verification cases over the existing, already-GPU-
+  verified `EulerField`/`RusanovFlux`/`HllcFlux`), so that requirement
+  does not apply here -- confirmed explicitly, not silently assumed.
+- Same gap task 0011 recorded and left open: durable lessons from this
+  round's reviews (Violet's "prove an exactly-zero result analytically
+  before reporting it as exact," Snorlax's "watch for a THIRD
+  independent copy before factoring shared logic," Amelia's
+  "presentations/ per task is a recurring gap worth a standing
+  reminder") are recorded here in `agent_history.md` but NOT YET applied
+  to `.claude/agents/*.md`, since those files still do not exist on this
+  branch (`cfe/development/phase_0005-euler-forward-step`) -- they live
+  on `cfe/development/multi-agent-workflow`, not yet merged with this
+  task's branch. Recorded here for whoever reconciles the branches.
+
+Next recommended task: the moving-frame/grid-recycling prototype itself
+(ARCHITECTURE.md #12 steps 3-7: shift/recycle the window, remove
+downstream cells, insert upstream cells, preserve indexing/
+communication consistency) can now reuse this task's
+`locate_shock_position`/`least_squares_slope` utilities directly for its
+own periodic speed re-estimate, per their own stated reuse intent.

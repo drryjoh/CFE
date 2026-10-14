@@ -22,6 +22,13 @@
 // simulation setup -- the same "one driver, shared by every caller"
 // shape this file's own header already established between the test and
 // the tutorial.
+//
+// The CFL-adaptive time-advance loop itself (`dt` recomputed every step
+// from the field's own current max wave speed) is factored into
+// `cfl_adaptive_stepping.hpp`'s `advance_cfl_adaptive`, shared with
+// `shu_osher_setup.hpp`/`propagating_shock_setup.hpp` (tasks 0012/0013)
+// -- this was a THIRD independent copy of that loop before being
+// factored out (Snorlax review finding).
 #pragma once
 
 #include <array>
@@ -38,6 +45,7 @@
 #include "cfe/numerics/numerical_flux/rusanov.hpp"
 #include "cfe/solver/explicit/fvm_solver.hpp"
 #include "cfe/solver/time_integration/ssp_rk2.hpp"
+#include "cfl_adaptive_stepping.hpp"
 #include "sod_shock_tube_exact.hpp"
 
 namespace cfe_verification {
@@ -138,22 +146,9 @@ SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const Primit
 
   const auto initial = total_integrals();
 
-  Scalar t = Scalar(0.0);
-  while (t < t_final) {
-    Scalar max_speed = Scalar(0.0);
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      cfe::State<Scalar, 3> q;
-      const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-      for (std::size_t c = 0; c < 3; ++c) q[c] = state(cell, c);
-      const Scalar speed = std::abs(field.velocity_component(q, cfe::Axis::X)) + field.sound_speed(q);
-      max_speed = speed > max_speed ? speed : max_speed;
-    }
-    Scalar dt = cfl * grid.dx / max_speed;
-    if (t + dt > t_final) dt = t_final - t;
-    cfe::ssp_rk2_step<Scalar>(state.view(), stage1.view(), scratch.view(), dt, residual,
-                               solver.active_cell_count(), solver.active_cell_index_map());
-    t += dt;
-  }
+  advance_cfl_adaptive<Scalar, 3>(state.view(), stage1.view(), scratch.view(), grid, field, residual,
+                                   solver.active_cell_count(), solver.active_cell_index_map(), Scalar(0.0), t_final,
+                                   cfl);
 
   const auto final_integrals = total_integrals();
 

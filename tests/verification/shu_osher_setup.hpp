@@ -1,0 +1,332 @@
+// Shu-Osher shock/density-wave interaction (Shu & Osher, "Efficient
+// Implementation of Essentially Non-oscillatory Shock-Capturing
+// Schemes, II," JCP 83, 1989): a Mach-3 shock propagating into a
+// sinusoidally-perturbed density field, producing fine post-shock
+// oscillatory structure -- ROADMAP.md Phase 3's second canonical Euler
+// case (alongside Sod, task 0009), added by
+// tasks/0012-phase3-shu-osher.md. Unlike Sod, no closed-form exact
+// solution exists for the full post-shock region; see that task file
+// and VERIFICATION.md's "Canonical problems" addendum for the accepted
+// verification approach (converged fine-grid reference + an exact
+// check in the region genuinely still unperturbed).
+//
+// Same shared-driver shape as sod_shock_tube_runner.hpp/
+// propagating_shock_setup.hpp: templated on Scalar and NumericalFlux
+// (default cfe::RusanovFlux) so this case runs with cfe::HllcFlux
+// through identical code.
+#pragma once
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <vector>
+
+#include "cfe/core/types.hpp"
+#include "cfe/field/field.hpp"
+#include "cfe/fields/euler/field.hpp"
+#include "cfe/grid/boundary/boundary_condition.hpp"
+#include "cfe/grid/structured/cartesian_grid.hpp"
+#include "cfe/numerics/fvm/muscl_minmod.hpp"
+#include "cfe/numerics/numerical_flux/rusanov.hpp"
+#include "cfe/solver/explicit/fvm_solver.hpp"
+#include "cfe/solver/time_integration/ssp_rk2.hpp"
+#include "cfl_adaptive_stepping.hpp"
+#include "rankine_hugoniot_jump.hpp"  // NormalShockJump / normal_shock_jump, shared with propagating_shock_setup.hpp
+
+namespace cfe_verification {
+
+constexpr double kShuOsherGamma = 1.4;
+constexpr double kShuOsherMach = 3.0;
+constexpr double kShuOsherShockX0 = -4.0;
+constexpr double kShuOsherDomainXMax = 5.0;
+
+// Margin excluded from the domain's own right edge when measuring the
+// BULK ahead-of-shock mechanism (shu_osher_max_ahead_deviation's own
+// `x_hi` argument) -- see that function's header comment for why this
+// exclusion exists (a second, boundary-localized error source distinct
+// from the bulk one, caught by Ilia's independent final review on this
+// task).
+constexpr double kShuOsherBoundaryMargin = 0.5;
+
+// Left (post-shock) state: the Rankine-Hugoniot jump for a Mach-3 shock
+// into the background rho=1, u=0, p=1 (the RIGHT state's own uniform
+// part -- the sine perturbation is superimposed on top of this
+// background, see shu_osher_exact_ahead_density's own comment).
+// Computed via the SAME shared `normal_shock_jump` formula
+// propagating_shock_setup.hpp uses (Snorlax/Sally review finding on
+// this task: an earlier version of this file hardcoded its own
+// separately-derived rho=3.857143/u=2.629369/p=10.333333 literal
+// constants instead of calling this one shared formula, leaving a
+// reader wanting a different Mach number with no single knob to turn --
+// `kShuOsherMach` above is now that knob). Function-local `static`
+// (computed once, not once per call) since `run_shu_osher` may be
+// called many times across a resolution sweep.
+inline const NormalShockJump& shu_osher_shock_jump()
+{
+  static const NormalShockJump jump = normal_shock_jump(kShuOsherGamma, /*rho_ahead=*/1.0, /*p_ahead=*/1.0,
+                                                         kShuOsherMach);
+  return jump;
+}
+
+// Exact ahead-state density at a given x: the sinusoidal perturbation
+// superimposed on the uniform background, evaluated at the GIVEN x
+// regardless of time -- this is an exact, time-independent solution of
+// the Euler equations (u=0, p=1 uniform ahead of the shock => zero flux
+// divergence there) until the shock physically reaches that x. Known,
+// documented IC subtlety (do not "fix"): evaluated at the shock's own
+// initial location x=-4, this formula gives ~0.817, not exactly the
+// background value 1 -- the standard IC (used identically in the
+// original paper and every subsequent reproduction) superimposes the
+// perturbation without locally re-balancing the Rankine-Hugoniot jump,
+// producing a small, expected inconsistency right at the initial shock
+// location only.
+inline double shu_osher_exact_ahead_density(double x) { return 1.0 + 0.2 * std::sin(5.0 * x); }
+
+template <class Scalar>
+struct ShuOsherProfile
+{
+  std::vector<Scalar> x, rho, u, p;
+};
+
+// Runs Shu-Osher on an `nx`-cell grid over x in [-5,5] to `t_final`.
+// Boundary: InflowOutflowBoundary -- fixed post-shock state at the LOW
+// (left, x=-5) end (all three post-shock characteristics point
+// rightward there, u-c=0.692>0, so no information should ever need to
+// enter from that side -- the same "all characteristics point into the
+// domain" case ADR 0010 Decision 3 covers for StaticBoundary; a fixed
+// low-end value is exactly as valid here), zero-order extrapolation at
+// the HIGH (right, x=5) end (the only one of the two existing BC types
+// that can represent a spatially-varying far-field state at all, and
+// physically correct regardless: any rightward-propagating signal
+// generated by the shock/density-wave interaction travels at the LOCAL
+// ahead-state sound speed, ~1.18, strictly slower than the shock's own
+// ~3.5, so the shock is always the rightmost disturbed point and x=5
+// stays exactly on the untouched initial condition through t=1.8 --
+// verified directly by this task's own ahead-of-shock exact-match test,
+// not merely assumed).
+template <class Scalar, class NumericalFlux = cfe::RusanovFlux>
+ShuOsherProfile<Scalar> run_shu_osher(std::size_t nx, Scalar t_final, Scalar cfl)
+{
+  cfe::CartesianGrid<Scalar> grid;
+  grid.nx = nx;
+  grid.ngx = 2;
+  grid.origin_x = Scalar(-5.0);
+  grid.dx = Scalar(10.0) / static_cast<Scalar>(nx);
+
+  cfe::Field<Scalar, 3> state(grid.n_cells_total());
+  cfe::Field<Scalar, 3> stage1(grid.n_cells_total());
+  cfe::Field<Scalar, 3> scratch(grid.n_cells_total());
+
+  cfe::EulerField<Scalar, 1> field{};
+  field.gamma = Scalar(kShuOsherGamma);
+
+  const PrimitiveState& left = shu_osher_shock_jump().behind;
+  const cfe::State<Scalar, 3> left_q =
+      field.conserved_from_primitive(Scalar(left.rho), cfe::Vector<Scalar, 1>(Scalar(left.u)), Scalar(left.p));
+
+  for (std::size_t i = 0; i < grid.nx; ++i) {
+    const Scalar x = grid.x_center(grid.ngx + i);
+    cfe::State<Scalar, 3> q;
+    if (static_cast<double>(x) < kShuOsherShockX0) {
+      q = left_q;
+    } else {
+      const Scalar rho = Scalar(shu_osher_exact_ahead_density(static_cast<double>(x)));
+      q = field.conserved_from_primitive(rho, cfe::Vector<Scalar, 1>(Scalar(0.0)), Scalar(1.0));
+    }
+    for (std::size_t c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
+  }
+
+  cfe::InflowOutflowBoundary<Scalar, 3> boundary{left_q};
+  cfe::FvmSolver<Scalar, cfe::AoSLayout, cfe::EulerField<Scalar, 1>, cfe::InflowOutflowBoundary<Scalar, 3>,
+                 cfe::InflowOutflowBoundary<Scalar, 3>, cfe::InflowOutflowBoundary<Scalar, 3>,
+                 cfe::fvm::MusclMinmodReconstruction, NumericalFlux>
+      solver{grid, field, boundary};
+  auto residual = [&](cfe::FieldView<Scalar, 3> in, cfe::FieldView<Scalar, 3> out) {
+    solver.residual(in, out);
+  };
+
+  advance_cfl_adaptive<Scalar, 3>(state.view(), stage1.view(), scratch.view(), grid, field, residual,
+                                   solver.active_cell_count(), solver.active_cell_index_map(), Scalar(0.0), t_final,
+                                   cfl);
+
+  ShuOsherProfile<Scalar> result;
+  result.x.resize(grid.nx);
+  result.rho.resize(grid.nx);
+  result.u.resize(grid.nx);
+  result.p.resize(grid.nx);
+  for (std::size_t i = 0; i < grid.nx; ++i) {
+    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+    cfe::State<Scalar, 3> q;
+    for (std::size_t c = 0; c < 3; ++c) q[c] = state(cell, c);
+    result.x[i] = grid.x_center(grid.ngx + i);
+    result.rho[i] = field.density(q);
+    result.u[i] = field.velocity_component(q, cfe::Axis::X);
+    result.p[i] = field.pressure(q);
+  }
+  return result;
+}
+
+// Rightmost x at which the numerical density deviates from the exact,
+// still-undisturbed ahead-state formula by more than `tolerance` --
+// i.e. an estimate of the shock's own current front location, used to
+// (a) define the margin excluded from the oscillatory-wake error metric
+// and (b) confirm the "ahead of the shock" exact-match region actually
+// starts where expected. Deliberately NOT a gradient/threshold detector
+// (shock_feature_tracking.hpp's locate_shock_position, used for task
+// 0013's clean single-shock case): here both sides of the front are
+// themselves non-constant (the post-shock region is the complex
+// oscillatory structure under study, not a flat plateau), so comparing
+// directly against the known exact ahead-state formula is the more
+// robust choice for this specific use.
+//
+// IMPORTANT, discovered empirically while verifying this task (not
+// anticipated in advance): always call this on an HLLC profile, never
+// a Rusanov one, regardless of which flux's wake-error is ultimately
+// being measured. RusanovFlux's own numerical dissipation genuinely,
+// slowly diffuses the AHEAD region's density perturbation over the
+// course of the run -- a real, bounded, resolution-convergent artifact
+// (see test_euler_shu_osher.cpp's own
+// test_shu_osher_rusanov_diffuses_stationary_entropy_wave_but_
+// convergently), NOT a sign the shock has physically arrived there --
+// but it is large enough by t=1.8 (up to ~0.11 at nx=100, decreasing to
+// ~0.024 at nx=2000) that a Rusanov profile can make this estimator
+// report a "front" almost at the domain's right edge, confusing slow
+// far-field diffusion with the shock's own arrival. HllcFlux shows
+// EXACTLY zero deviation ahead of the shock at every resolution tested
+// (an extension of its documented exact-contact-preservation property,
+// test_euler_isolated_contact_hllc.cpp, to a continuum stationary
+// entropy wave rather than a single discrete jump), making it the
+// robust choice for locating the shock via this method -- the shock's
+// true physical location is a property of the IC/physics, not of which
+// flux is used to approximate it, so one canonical HLLC-based front
+// estimate is reused for both fluxes' own margin-exclusion logic.
+template <class Scalar>
+double shu_osher_shock_front_estimate(const ShuOsherProfile<Scalar>& profile, double tolerance)
+{
+  double front = static_cast<double>(profile.x.front());
+  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+    const double x = static_cast<double>(profile.x[i]);
+    const double deviation = std::fabs(static_cast<double>(profile.rho[i]) - shu_osher_exact_ahead_density(x));
+    if (deviation > tolerance) front = x;
+  }
+  return front;
+}
+
+// --- shared metrics, used by BOTH test_euler_shu_osher.cpp and
+// tutorials/euler_1d_shu_osher/shu_osher.cpp -----------------------------
+//
+// Originally duplicated verbatim between the test and the tutorial
+// (Snorlax review finding on this task, the same "pull the shared part
+// into the setup header" pattern `contact_width_cells` already
+// established in sod_shock_tube_runner.hpp) -- moved here so both
+// callers compute these quantities identically, not just similarly.
+
+// Nearest-cell lookup (same convention as the Sod driver's own
+// density-sampling helpers): used only for comparing two SIMULATED
+// profiles at different resolutions against each other (where no
+// single exact x alignment exists anyway), never for comparing against
+// the exact ahead-state FORMULA -- see max_ahead_deviation's own
+// comment on why that distinction matters (an earlier draft compared a
+// nearest-cell lookup against the formula evaluated at a mismatched
+// query point and produced a spurious ~0.01 "error" that was pure
+// grid-interpolation mismatch, not a real discrepancy).
+template <class Scalar>
+double shu_osher_density_at(const ShuOsherProfile<Scalar>& profile, double x_query)
+{
+  std::size_t best = 0;
+  double best_dist = 1e300;
+  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+    const double d = std::fabs(static_cast<double>(profile.x[i]) - x_query);
+    if (d < best_dist) {
+      best_dist = d;
+      best = i;
+    }
+  }
+  return static_cast<double>(profile.rho[best]);
+}
+
+// Integral L1 error of `test` against `reference` over x <= `x_cutoff`
+// (the wake region behind the shock, excluding the shock front itself
+// and everything ahead of it -- pure O(dx) front-smearing differences
+// between resolutions/fluxes are not what this metric is measuring).
+template <class Scalar>
+double shu_osher_wake_l1_error(const ShuOsherProfile<Scalar>& test, const ShuOsherProfile<Scalar>& reference,
+                                double x_cutoff)
+{
+  const double dx = static_cast<double>(test.x[1]) - static_cast<double>(test.x[0]);
+  double error = 0.0;
+  for (std::size_t i = 0; i < test.x.size(); ++i) {
+    const double x = static_cast<double>(test.x[i]);
+    if (x > x_cutoff) continue;
+    error += std::fabs(static_cast<double>(test.rho[i]) - shu_osher_density_at(reference, x)) * dx;
+  }
+  return error;
+}
+
+// Maximum |rho - exact_ahead_density| over every cell in [x_lo, x_hi],
+// comparing each cell's OWN numerically computed density against the
+// exact formula evaluated at that SAME cell's own x_center --
+// deliberately not a nearest-cell lookup against some other fixed query
+// point (see shu_osher_density_at's own comment).
+//
+// `x_hi` is REQUIRED, not defaulted to the domain's own right edge, by
+// design (Ilia's independent final review on this task caught a real
+// attribution bug in an earlier version of this function that had no
+// upper bound at all): the bulk ahead-of-shock mechanism this function
+// is meant to isolate (RusanovFlux's own dissipation diffusing the
+// density-only perturbation, see test_euler_shu_osher.cpp's header
+// comment) is NOT the only source of deviation from the exact formula
+// out here -- `InflowOutflowBoundary`'s zero-order extrapolation at the
+// domain's own right edge (x=5) cannot exactly represent a continuously
+// VARYING sinusoidal far-field state the way it can a genuinely
+// constant one, producing a second, distinct, boundary-localized error
+// confined to roughly the last 0.5 domain-units. Measured: at nx=2000
+// this boundary-adjacent error (~0.024) is actually LARGER than the
+// bulk dissipation error at the same resolution (~0.003) -- an earlier
+// version of this function (and this task's own README) quoted the
+// COMBINED number as if it were purely the bulk mechanism, overstating
+// it by 3-8x at every resolution except nx=100 (where the bulk error
+// itself happens to be the larger of the two) and showing an
+// artificially shallow ~1.3-1.7x-per-doubling convergence trend instead
+// of the bulk mechanism's own much cleaner ~2-3x-per-doubling. Callers
+// measuring the BULK mechanism specifically should pass an `x_hi` that
+// excludes the boundary-adjacent region (e.g. domain_x_max - 0.5);
+// callers wanting the boundary-adjacent artifact itself should query
+// that region directly instead.
+template <class Scalar>
+double shu_osher_max_ahead_deviation(const ShuOsherProfile<Scalar>& profile, double x_lo, double x_hi)
+{
+  double max_dev = 0.0;
+  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+    const double x = static_cast<double>(profile.x[i]);
+    if (x < x_lo || x > x_hi) continue;
+    const double exact = shu_osher_exact_ahead_density(x);
+    max_dev = std::max(max_dev, std::fabs(static_cast<double>(profile.rho[i]) - exact));
+  }
+  return max_dev;
+}
+
+// Counts sign changes of the discrete density gradient within
+// [x_lo, x_hi] -- a scriptable proxy for oscillation-wavelength
+// fidelity (how many ripples does the profile show in this window),
+// since "matches a published figure's wavelength" cannot itself be a
+// CFE_CHECK.
+template <class Scalar>
+int shu_osher_count_extrema(const ShuOsherProfile<Scalar>& profile, double x_lo, double x_hi)
+{
+  int count = 0;
+  int prev_sign = 0;
+  for (std::size_t i = 0; i + 1 < profile.x.size(); ++i) {
+    const double x = static_cast<double>(profile.x[i]);
+    if (x < x_lo || x > x_hi) continue;
+    const double gradient = static_cast<double>(profile.rho[i + 1]) - static_cast<double>(profile.rho[i]);
+    const int sign = gradient > 0.0 ? 1 : (gradient < 0.0 ? -1 : 0);
+    if (sign != 0) {
+      if (prev_sign != 0 && sign != prev_sign) ++count;
+      prev_sign = sign;
+    }
+  }
+  return count;
+}
+
+}  // namespace cfe_verification

@@ -38,6 +38,8 @@ add_executable(cfe_unit_tests
   verification/test_euler_sod_shock_tube_hllc.cpp
   verification/test_euler_isolated_contact_hllc.cpp
   verification/test_forward_step_interface_conservation.cpp
+  verification/test_euler_shu_osher.cpp
+  verification/test_euler_propagating_shock.cpp
 )
 
 target_link_libraries(cfe_unit_tests PRIVATE cfe_core)

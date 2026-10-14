@@ -49,6 +49,20 @@ add_subdirectory(burgers_2d_diagonal_shock)
 # cut-cell/characteristics formula). CPU-only.
 add_subdirectory(euler_1d_sod_shock_tube)
 
+# ROADMAP.md Phase 3's SECOND named Euler canonical case alongside Sod:
+# Shu-Osher (Shu & Osher 1989) shock/density-wave interaction, task
+# 0012. Same reused EulerField/MUSCL/Rusanov+HLLC/FvmSolver stack;
+# verifies (and here, visualizes) the fine post-shock structure question
+# -- see tests/verification/test_euler_shu_osher.cpp and
+# tasks/0012-phase3-shu-osher.md. CPU-only.
+add_subdirectory(euler_1d_shu_osher)
+
+# ROADMAP.md Phase 4's "1D propagating shock demonstration and periodic
+# propagation-speed estimate", task 0013: a standalone single
+# right-moving shock, tracked across snapshots and compared against the
+# analytic Rankine-Hugoniot speed. CPU-only.
+add_subdirectory(euler_1d_propagating_shock)
+
 # Phase 4 (pulled forward), task 0010: Woodward & Colella (1984) Mach 3
 # forward-facing-step wind tunnel -- CFE's first multi-block case, two
 # CartesianGrid blocks joined by the new BlockInterfaceBoundary
