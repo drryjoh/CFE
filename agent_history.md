@@ -5017,3 +5017,347 @@ downstream cells, insert upstream cells, preserve indexing/
 communication consistency) can now reuse this task's
 `locate_shock_position`/`least_squares_slope` utilities directly for its
 own periodic speed re-estimate, per their own stated reuse intent.
+
+---
+
+## 2026-10-15 — Task 0017: Float precision — closing the dual-precision testing gap
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+`cfe::scalar` (`core/types.hpp`, `-DCFE_SCALAR_TYPE=float|double`) exists
+so CFE can run its full pipeline in `float` to exploit hardware
+meaningfully faster at float32 (GPUs especially, SIMD CPU throughput
+generally). Production physics/numerics headers were already confirmed
+fully `Scalar`-generic (zero hardcoded `double` in
+`fields/euler/field.hpp`, `numerics/numerical_flux/{hllc,rusanov}.hpp`,
+`grid/boundary/*.hpp`). The actual gap was at the test/tutorial/
+benchmark layer: establish ground truth, close it where it was
+incidental (not the deliberate, correct double-oracle pattern), measure
+a real float-vs-double speedup, and institutionalize the requirement
+going forward.
+
+### Step 1 — Ground truth (before any code change)
+
+Configured and built fresh (`build-float/`: `-DCFE_SCALAR_TYPE=float
+-DCFE_BUILD_TESTS=ON -DCFE_BUILD_TUTORIALS=ON -DCFE_ENABLE_MPI=ON`,
+Release), separate from `build-double/` at the same configuration.
+Zero compile errors/warnings at either precision. The existing suite
+already reported "158/158 tests passed" at float -- but on inspection,
+`tests/unit/test_hllc_flux.cpp`, `test_euler_3d_sanity.cpp`,
+`test_forward_step_sanity.cpp`, and all six
+`tests/verification/test_euler_{sod_shock_tube,sod_shock_tube_hllc,
+shu_osher,propagating_shock,isolated_contact_hllc}.cpp`/
+`test_forward_step_interface_conservation.cpp` hardcoded
+`using Scalar = double;` at file scope -- independent of
+`CFE_SCALAR_TYPE`, so that earlier "158/158" result did not mean what
+it looked like it meant: none of those tests had ever actually run at
+`float`, despite the build being configured for it. Confirmed via
+`grep`: zero other hardcoded `double` anywhere under `src/` (only the
+documented fallback in `core/types.hpp` itself).
+
+### Step 2/3 — Closing the gap
+
+Every check in the 9 affected files converted from a file-scope
+`using Scalar = double;` to a `template <class Scalar>` function,
+registered under two `CFE_TEST` entries (`..._double`/`..._float`),
+matching `tests/unit/test_fixed_array.cpp`'s original Phase-0 pattern
+(Sally's review: this origin pattern itself was never explained at
+either `test_fixed_array.cpp` or the `CFE_TEST` macro definition --
+fixed, see below). Files changed:
+- `tests/unit/test_hllc_flux.cpp`, `test_euler_3d_sanity.cpp`,
+  `test_forward_step_sanity.cpp`.
+- `tests/verification/test_euler_sod_shock_tube.cpp`,
+  `test_euler_sod_shock_tube_hllc.cpp`,
+  `test_euler_isolated_contact_hllc.cpp`,
+  `test_forward_step_interface_conservation.cpp`,
+  `test_euler_propagating_shock.cpp`, `test_euler_shu_osher.cpp`.
+
+A standalone calibration harness (outside the repo, reusing
+`sod_shock_tube_runner.hpp`/`shu_osher_setup.hpp`/
+`propagating_shock_setup.hpp`/`forward_step_setup.hpp`/`hllc.hpp`
+directly, compiled with the SAME toolchain CMake itself selects --
+`g++` on this machine is AppleClang 21) measured the actual
+float-vs-double error for every tolerance before choosing a float
+value, rather than guessing. Headline findings:
+- Most checks needed NO widening at all: exact-solution density
+  samples, L1-convergence trends, the Sod HLLC contact-width/
+  discrimination result, the propagating-shock resolution sweep (both
+  fluxes, nx=100-800), and most of Shu-Osher's checks (including HLLC's
+  ahead-of-shock "exact preservation," whose existing `1e-6` double
+  tolerance already covers the measured float deviation, ~5.9e-8, with
+  margin) came out nearly identical between float and double --
+  truncation error, not roundoff, dominates these.
+- A handful of genuinely roundoff-sensitive checks needed real
+  widening, each justified by a measured number in the test file's own
+  comment: Sod/HLLC exact-conservation checks (double `1e-10`/`1e-8` ->
+  float `1e-6`, measured errors 8.6e-10 to 9.2e-8); the
+  `test_euler_3d_sanity.cpp` column-match and
+  `test_forward_step_interface_conservation.cpp` bit-exact-flux checks
+  (double `1e-13` -> float `1e-4`, scaling the double tolerance's own
+  ~450x-over-epsilon margin ratio to float's much larger epsilon --
+  measured EXACT 0.0 at float too, same within-precision-
+  reproducibility argument as the double version, so the widened
+  tolerance is a portability margin, not a measured requirement);
+  `test_forward_step_interface_conservation.cpp`'s mass-balance check
+  (double `1e-10` -> float `1e-6`, measured ~4.0e-9).
+- No check in this task's scope was found where `float` is
+  insufficient at any reasonable tolerance -- itself a documented
+  finding (VERIFICATION.md #4's own "document where single precision is
+  insufficient" -- answer: nowhere found, in this scope).
+
+### Step 4 — Benchmark/tutorial `cfe::scalar` tracking
+
+`benchmarks/mpi/bench_mpi_halo_exchange.cpp`,
+`tutorials/mpi_burgers_3d_strong_scaling/mpi_burgers_3d.cpp`,
+`tutorials/mpi_scalar_advection_3d_strong_scaling/mpi_scalar_advection_3d.cpp`:
+`using Scalar = double;` -> `using Scalar = cfe::scalar;` (these
+hardcode the SIMULATION/field precision, confirmed by checking what
+`Scalar` actually parameterizes in each -- the `Field`/grid/solver
+types, or in the halo-exchange benchmark's case `sizeof(Scalar)`
+itself, which determines the real bytes moved). Wall-clock timing
+stays plain `double` in all three, unchanged -- a reported metric, not
+simulation state, same convention `tutorials/burgers_3d_visualization/`
+already uses for the Burgers family specifically (NOT yet a
+project-wide convention -- `benchmarks/scalar_advection/
+bench_scalar_advection.cpp`/`tutorials/scalar_advection_3d_visualization/
+advect_gaussian_3d.cpp` still hardcode `double`, named as a real,
+separate, out-of-scope residual, not silently closed by this task's own
+comments overclaiming it -- Enzo's review finding).
+
+### Step 5 — Measured float-vs-double speedup (CPU only; no GPU hardware available)
+
+Full methodology, data, and the halo-exchange size/ghost-depth sweep
+analysis are in `docs/performance/0017-float-precision-cpu-results.md`
+(new). Headline numbers (`ForwardStepBlocks` at
+`cells_per_unit_height=80`, `t_final=1.0`, 1 untimed warm-up + 5 timed
+repetitions, median/min/max reported -- methodology revised mid-task
+per Enzo's review, which flagged the original 3-repetition/no-warm-up
+pass as vulnerable to contamination from other concurrent CPU work on
+this machine the same evening):
+
+| Flux | double median (s) | float median (s) | Speedup |
+|---|---|---|---|
+| Rusanov | 1.5412 (spread 3.9%) | 1.4808 (spread 0.3%) | 1.041x (~4%) |
+| HLLC | 23.6036 (spread 1.9%) | 15.2795 (spread 1.3%) | 1.545x (~35%) |
+
+Tight spread at every flux/precision combination (<4% of median)
+supports reading these as real, not noise-dominated. Reading: float's
+advantage is NOT uniform -- Rusanov (a short, simple per-face
+calculation) shows only a modest ~4% benefit; HLLC (an iterative/
+Newton-refined pressure estimate, several square roots, multiple
+branches) shows a real ~1.5x speedup, consistent with (not proven to be
+caused by, absent an actual profile) float helping most where a kernel
+is itself compute-bound -- the regime a GPU puts every kernel into.
+
+MPI halo-exchange (`bench_mpi_halo_exchange.cpp`, `np=2`, two
+independent sweeps -- by cross-section message size and by ghost
+depth): `bytes_per_exchange` correctly halves at float in every row
+(confirms the Step 4 fix actually changes what is measured). The
+WALL-CLOCK speedup, however, stays in a flat ~6-13% band across both
+sweeps (message sizes ~1KB to ~512KB) rather than approaching the ~2x a
+pure bandwidth-bound regime would predict at the largest sizes --
+Enzo's review specifically asked this be checked against the full size
+sweep (not just one data point) before writing up a latency-bound
+story, and the full sweep contradicts a simple "narrows with size"
+latency-bound narrative; the flat gap is more consistent with an
+element-count-bound pack/unpack cost than a purely byte-bound one, a
+HYPOTHESIS stated as such (not profiled, not written into Enzo's own
+accumulated-knowledge file as settled, per AGENTS.md #25). One
+reproducible anomaly (cross-section n=16 showing a much larger ~1.5x
+speedup than its neighbors, confirmed across two independent runs) is
+reported honestly as unexplained, not smoothed over. The reported
+`bandwidth_GBps` METRIC itself comes out lower at float despite float
+being faster in wall-clock terms at every size tested except the n=16
+anomaly -- an artifact of dividing by half the bytes over a similarly-
+sized time, not a regression, flagged explicitly so a reader does not
+misread that one column in isolation.
+
+### Step 6 — Institutionalizing
+
+`docs/adr/0014-dual-precision-verification-requirement.md` (new) and an
+`AGENTS.md` #11 addition: every PR introducing/changing numerical
+production code must pass relevant tests at both
+`-DCFE_SCALAR_TYPE=float` and `=double`, in the same PR -- modeled
+explicitly on this project's existing "every PR adding a Field/scheme
+needs a 3D CUDA correctness test + at-scale benchmark" convention
+(same shape, per the task's own instruction to match existing
+institutional-requirement style rather than invent a new one).
+Cross-references `VERIFICATION.md` #4 ("Precision verification"), which
+already stated this as a general, previously-unenforced principle.
+
+### Review trail
+
+- **Violet** (numerical correctness): independently rebuilt both
+  configs, reran 196/196 + ctest 7/7 at both precisions, independently
+  re-measured 9 of the file comments' specific "measured X" claims
+  (all reproduced to the same order of magnitude or better). Found
+  ONE BLOCKING issue: `test_hllc_flux.cpp`'s wall-reflection regression
+  test shared one tolerance (`1e-5`) between mass flux (measured
+  ~7.3e-7 error, ~13.7x margin -- fine) and energy flux (measured
+  ~7.0e-6 error, only ~1.4x margin -- NOT fine, and demonstrably
+  sensitive to FP-contraction/optimization flags even on the same
+  compiler). Fixed: split into separate `tol_mass_flux`/
+  `tol_energy_flux` parameters, energy flux widened to `1e-4` (~14.2x
+  measured margin), comment corrected to state the actual per-component
+  margins rather than a blanket (and false) ">=10x every case" claim.
+  Rebuilt/reran after the fix: 196/196 at both precisions, confirmed.
+- **Snorlax** (simplicity/architecture): independently rebuilt and ran
+  196/196 at both configs. No blocking findings. Agreed with the
+  decision (recorded in ADR 0014's "Alternatives considered") not to
+  introduce a shared macro for the double/float `CFE_TEST` registration
+  pair -- the six verification files' tolerance-derivation logic
+  differs too much for one macro to stay readable. Two OPTIONAL
+  findings, both confirmed pre-existing (not introduced by this task,
+  out of its stated scope): `test_euler_sod_shock_tube.cpp`/
+  `test_euler_sod_shock_tube_hllc.cpp`'s duplicated `SodClassic<Scalar>`
+  struct/`kLeft`/`kRight`/`density_at` helper, and
+  `test_euler_propagating_shock.cpp`'s structurally-identical Rusanov/
+  HLLC resolution-sweep check bodies -- named as real, legitimate
+  follow-up candidates, not fixed in this task.
+- **Sally** (usability): independently rebuilt both configs, ran
+  196/196, cross-checked several measured-number claims against actual
+  stdout. Found ONE BLOCKING issue: the `template<Scalar>` + two-
+  `CFE_TEST` idiom was never explained at its own origin
+  (`test_fixed_array.cpp`/the `CFE_TEST` macro itself) -- a student
+  opening either file first, rather than one of this task's six new
+  files (which DO explain it locally), would find no answer. Fixed:
+  added a 10-line explanation directly above the `CFE_TEST` macro
+  definition in `test_framework.hpp`. Three OPTIONAL findings, all
+  addressed: (1) `sod_shock_tube_exact.hpp`'s header now states
+  explicitly why its oracle values stay `double` regardless of the
+  solver-under-test's `Scalar`; (2) `test_forward_step_interface_
+  conservation.cpp`'s `total_mass()` call site now has a comment
+  distinguishing its "accumulate in double for roundoff" convention
+  from the separate "oracle stays double" convention sitting right next
+  to it in the same function; (3) `CFE_CHECK_NEAR`'s own comment now
+  notes that an explicit `static_cast<double>(...)` at a call site is
+  redundant self-documentation, not a sign the macro would otherwise
+  compare at a narrower type.
+- **Enzo** (performance): independently checked the `cfe::scalar`-
+  vs-metric categorization in all three benchmark/tutorial fixes
+  (confirmed correct) and found the established-convention claim
+  overstated for the scalar-advection file specifically (fixed, see
+  Step 4 above). Found TWO BLOCKING issues on the speedup measurement
+  itself: (1) the original 3-repetition/no-warm-up forward-step timing
+  could not rule out contamination from other concurrent threaded CPU
+  work on this machine that evening -- resolved by re-measuring with a
+  warm-up repetition, 5 timed repetitions, and reported spread (see
+  Step 5; tight <4% spread at every combination supports the numbers as
+  real, not noise); confirmed the harness is single-threaded
+  (`cfe::parallel_for` resolves to the serial backend without
+  `-DCFE_DEFAULT_BACKEND_THREADED`, which this harness never defines),
+  so it was never exposed to the specific threaded-vs-threaded
+  contention risk, though ordinary OS-scheduling contention remained a
+  live concern the rerun's tight spread now addresses directly; (2) the
+  halo-exchange "lower bandwidth at float" writeup had been drafted from
+  a single `np=2` "ranks" data point without checking the benchmark's
+  own `size`/`ghost_depth` sweeps -- resolved by rerunning both sweeps
+  explicitly and rewriting the mechanism discussion from the full data
+  (see Step 5), which told a more nuanced story (flat ~6-13% gap, not a
+  narrowing-with-size one) than the original single-point draft had
+  assumed. Optional items addressed: corrected `-DCFE_SCALAR_TYPE`
+  (CMake cache variable) vs. `CFE_SCALAR_IS_FLOAT` (actual preprocessor
+  define) wording in the performance writeup; noted the cache-resident
+  problem-size caveat; declined to write the Rusanov-vs-HLLC mechanism
+  explanation into Enzo's own accumulated-knowledge file without an
+  actual instruction-level profile, per AGENTS.md #25.
+- **Ilia** (independent final review, formed before reading any other
+  reviewer's findings): rebuilt both configs from scratch, reran
+  196/196 + ctest 7/7 at both precisions, independently re-derived the
+  wall-reflection mass/energy-flux tolerance margins from his own
+  measurement (matched the corrected ~13.7x/~14.2x numbers closely),
+  and reran the halo-exchange benchmark a THIRD time independently,
+  reproducing the `n=16` anomaly again. **No blocking findings** --
+  confirmed the ground-truth pass counts, the tolerance-derivation
+  claims, and the benchmark/tutorial `cfe::scalar`-vs-metric
+  categorization all hold up under fresh, independent scrutiny.
+- **Amelia** (direction/alignment check): **on target, no blocking
+  findings.** Confirmed ROADMAP.md Phase 6 ("single/double precision
+  studies," "CPU/GPU performance studies," target Nov 30 2026) is the
+  deliverable this task is a correctly-scoped, not-overstepping
+  precursor to. Confirmed the new dual-precision PR requirement
+  (ADR 0014/AGENTS.md #11) is orthogonal to, not redundant with, the
+  existing cross-backend CUDA-coverage requirement (one verifies
+  cross-PRECISION correctness at a fixed backend, the other verifies
+  cross-BACKEND correctness at a fixed precision). Confirmed this
+  task's `template<Scalar>`+two-`CFE_TEST` approach extends
+  `test_fixed_array.cpp`'s own Phase-0 pattern rather than forking a
+  competing one. Confirmed the scope boundary (Burgers/ScalarAdvection
+  benchmark/tutorial files left untouched, named explicitly) is the
+  right call per AGENTS.md #6. Two non-blocking notes for the record:
+  fold the named residual (scalar-advection benchmark/tutorial still
+  hardcoding `double`) into whichever future task next touches that
+  directory, rather than opening a dedicated task solely for it; have
+  the eventual Phase 6 GPU precision study reuse this task's CPU
+  numbers as its "before" baseline rather than re-deriving them.
+
+A post-review correction (coordinator's own spot-check, confirmed and
+applied): two small, found-after-Ilia doc-accuracy items --
+`sod_shock_tube_runner.hpp`'s header comment still described itself as
+running "at a fixed `double`" (stale -- it is `Scalar`-templated and
+the double-only oracle is the separate `sod_shock_tube_exact.hpp`,
+updated to point there); `presentations/0017-float-precision.md`'s
+speedup slide still said Rusanov showed "basically NO speedup," the
+pre-correction framing from before the warm-up+5-rep remeasurement --
+updated to the corrected ~4%/1.041x finding this entry and
+`docs/performance/0017-...md` already state. Both fixed, no further
+numerical/tolerance content was affected.
+
+Files changed/new (complete list):
+- `AGENTS.md` (#11 addition).
+- `docs/adr/0014-dual-precision-verification-requirement.md` (new).
+- `docs/performance/0017-float-precision-cpu-results.md` (new).
+- `tasks/0017-float-precision.md` (new).
+- `presentations/0017-float-precision.md` (new).
+- `tests/unit/test_framework.hpp` (Sally finding: explain the
+  template+two-CFE_TEST idiom at its origin; clarify
+  `CFE_CHECK_NEAR`'s implicit double-widening).
+- `tests/unit/test_hllc_flux.cpp`, `test_euler_3d_sanity.cpp`,
+  `test_forward_step_sanity.cpp`.
+- `tests/verification/sod_shock_tube_exact.hpp` (Sally finding: oracle-
+  stays-double convention now stated at its own header, not only at
+  call sites).
+- `tests/verification/test_euler_sod_shock_tube.cpp`,
+  `test_euler_sod_shock_tube_hllc.cpp`,
+  `test_euler_isolated_contact_hllc.cpp`,
+  `test_forward_step_interface_conservation.cpp`,
+  `test_euler_propagating_shock.cpp`, `test_euler_shu_osher.cpp`.
+- `benchmarks/mpi/bench_mpi_halo_exchange.cpp`,
+  `tutorials/mpi_burgers_3d_strong_scaling/mpi_burgers_3d.cpp`,
+  `tutorials/mpi_scalar_advection_3d_strong_scaling/mpi_scalar_advection_3d.cpp`.
+
+Verification performed (all actually run, not assumed):
+- `cfe_unit_tests` (196/196) at both `build-float`/`build-double`,
+  rerun after every fix in this task, including the final Violet-finding
+  fix.
+- `ctest` (7/7, including 4 MPI tests at np=2/4/8) at both precisions.
+- `mpirun -np 2 ./benchmarks/mpi/cfe_bench_mpi_halo_exchange` at both
+  precisions, twice independently (both runs' numbers agree closely,
+  quoted in `docs/performance/0017-...md`).
+- The standalone forward-step speedup harness, at both precisions,
+  twice (an initial 3-rep pass, then the revised 1-warm-up+5-rep pass
+  that superseded it per Enzo's review).
+
+Known limitations (named, not silently dropped):
+- CPU-only; no CUDA/GPU measurement (no hardware available this task --
+  same standing limitation several recent tasks have flagged).
+  ROADMAP.md Phase 6 ("single/double precision studies," "CPU/GPU
+  performance studies") remains the deliverable this task is a tested
+  precursor to, not a replacement for.
+- The earlier Phase 1/2 Burgers/ScalarAdvection unit tests (e.g.
+  `test_euler_flux.cpp`, `test_burgers_*.cpp`,
+  `test_scalar_advection_*.cpp`) and
+  `benchmarks/scalar_advection/bench_scalar_advection.cpp`/
+  `tutorials/scalar_advection_3d_visualization/advect_gaussian_3d.cpp`
+  were NOT touched by this task (out of its stated scope, named
+  explicitly rather than silently left) -- a real, separate residual
+  gap for a future task.
+- Two Snorlax-flagged pre-existing duplications (`SodClassic<Scalar>`
+  across two Sod test files; the Rusanov/HLLC resolution-sweep bodies
+  in `test_euler_propagating_shock.cpp`) remain unfixed, named as
+  optional follow-up candidates, not blocking this PR.
+- The halo-exchange element-count-bound mechanism explanation is a
+  plausible reading of two independent wall-clock sweeps, not an
+  instruction-level-profiled conclusion.

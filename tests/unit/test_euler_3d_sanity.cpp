@@ -23,6 +23,23 @@
 // Field" from "silently broken" (an axis mixup, e.g. reading
 // `momentum_index(Axis::Y)` where `Axis::Z` was meant, would not show up
 // there at all).
+//
+// Dual-precision instantiation (task 0017): templated on `Scalar`, run
+// at both `double` (original tolerance, unchanged) and `float`. Measured
+// (this task's own calibration, same toolchain/arm64-AppleClang the
+// double tolerance below was itself measured on): the column-for-column
+// match is EXACT (0.0) at float too, same as double -- this check's
+// underlying argument (same dt sequence, same per-cell arithmetic, Y/Z
+// flux differences identically zero) is a within-precision
+// reproducibility claim, not a cross-precision comparison, so it holds
+// at whichever Scalar both the reference and the 3D solve share. The
+// float tolerance below is nonetheless a non-zero, float-epsilon-scaled
+// margin (not the measured exact 0.0) for the same cross-toolchain
+// portability reason the double comment below gives: this file's own
+// 1e-13 (double) is roughly 450x double's epsilon (2.22e-16); applying
+// that same ratio to float's own, much larger epsilon (~1.19e-7) gives
+// ~5.4e-5, so 1e-4 is used at float to keep a comparable, deliberately
+// non-tightened margin.
 #include <cmath>
 #include <cstddef>
 
@@ -41,21 +58,19 @@
 
 namespace {
 
-using Scalar = double;
-constexpr Scalar kGamma = Scalar(1.4);
-constexpr Scalar kX0 = Scalar(0.5);
-constexpr Scalar kTFinal = Scalar(0.2);
-constexpr Scalar kCfl = Scalar(0.4);
-constexpr std::size_t kNx = 100;
-constexpr std::size_t kN3 = 5;  // EulerField<Scalar,3>::n_components
-
-const cfe_verification::PrimitiveState kLeft{1.0, 0.0, 1.0};
-const cfe_verification::PrimitiveState kRight{0.125, 0.0, 0.1};
-
-}  // namespace
-
-CFE_TEST(test_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_uniform_in_y_and_z)
+template <class Scalar>
+void check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_uniform_in_y_and_z(double tol)
 {
+  constexpr Scalar kGamma = Scalar(1.4);
+  constexpr Scalar kX0 = Scalar(0.5);
+  constexpr Scalar kTFinal = Scalar(0.2);
+  constexpr Scalar kCfl = Scalar(0.4);
+  constexpr std::size_t kNx = 100;
+  constexpr std::size_t kN3 = 5;  // EulerField<Scalar,3>::n_components
+
+  const cfe_verification::PrimitiveState kLeft{1.0, 0.0, 1.0};
+  const cfe_verification::PrimitiveState kRight{0.125, 0.0, 0.1};
+
   // --- 1D reference: the exact same shared driver the production Sod
   // verification test and tutorial use, at the classic parameters.
   const cfe_verification::SodProfile<Scalar> reference =
@@ -147,32 +162,42 @@ CFE_TEST(test_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_whe
         const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
         for (std::size_t c = 0; c < kN3; ++c) q[c] = state(cell, c);
 
-        // This file's header comment argues every (j,k) column runs the
-        // IDENTICAL sequence of floating-point operations as the 1D
-        // reference (same dt sequence, same per-cell arithmetic, Y/Z
-        // flux differences identically zero). On this development
-        // machine (arm64/clang) that reasoning holds to the bit --
-        // EXACT (0.0) tolerance passes here, deterministically, across
-        // repeated runs. It does NOT reproduce bit-exact on PSC
-        // Bridges-2 (x86-64/gcc 13.3.1): the same reasoning/code
-        // produces a nonzero (sub-1e-13, so not a real discrepancy --
-        // ordinary cross-platform/cross-compiler floating-point
-        // reassociation, e.g. differing FMA contraction) difference
-        // there instead. `1e-13` (not `0.0`) is used for exactly this
-        // reason -- still ~10^3 tighter than the original `1e-10` this
-        // tolerance was tightened from, for real regression protection,
-        // while staying portable across the toolchains this project
-        // actually builds on (AGENTS.md #9: x86-64, Apple Silicon,
-        // CUDA).
-        CFE_CHECK_NEAR(field.density(q), reference.rho[i], 1e-13);
-        CFE_CHECK_NEAR(field.velocity_component(q, cfe::Axis::X), reference.u[i], 1e-13);
-        CFE_CHECK_NEAR(field.pressure(q), reference.p[i], 1e-13);
+        CFE_CHECK_NEAR(static_cast<double>(field.density(q)), static_cast<double>(reference.rho[i]), tol);
+        CFE_CHECK_NEAR(static_cast<double>(field.velocity_component(q, cfe::Axis::X)),
+                       static_cast<double>(reference.u[i]), tol);
+        CFE_CHECK_NEAR(static_cast<double>(field.pressure(q)), static_cast<double>(reference.p[i]), tol);
         // Y/Z momentum (components 2 and 3 of EulerField<Scalar,3>'s
         // conserved-state layout): must stay exactly zero -- the
         // problem never varies in Y/Z and starts at exactly zero there.
-        CFE_CHECK_NEAR(q[2], Scalar(0), 1e-13);
-        CFE_CHECK_NEAR(q[3], Scalar(0), 1e-13);
+        CFE_CHECK_NEAR(static_cast<double>(q[2]), 0.0, tol);
+        CFE_CHECK_NEAR(static_cast<double>(q[3]), 0.0, tol);
       }
     }
   }
+}
+
+}  // namespace
+
+// This development machine (arm64/clang) reproduces the SAME dt
+// sequence/per-cell arithmetic bit-for-bit between the 1D reference and
+// the 3D solve, at either precision -- EXACT (0.0) tolerance passes
+// here, deterministically, across repeated runs. It does NOT reproduce
+// bit-exact on PSC Bridges-2 (x86-64/gcc 13.3.1): the same
+// reasoning/code produces a nonzero (sub-1e-13, so not a real
+// discrepancy -- ordinary cross-platform/cross-compiler floating-point
+// reassociation, e.g. differing FMA contraction) difference there
+// instead. `1e-13` (not `0.0`) is used for exactly this reason at
+// double -- still ~10^3 tighter than the original `1e-10` this
+// tolerance was tightened from, for real regression protection, while
+// staying portable across the toolchains this project actually builds
+// on (AGENTS.md #9: x86-64, Apple Silicon, CUDA). `1e-4` at float scales
+// that same margin-over-epsilon ratio up to float's own, much larger
+// epsilon -- see this file's header comment for the derivation.
+CFE_TEST(test_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_uniform_in_y_and_z_double)
+{
+  check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_uniform_in_y_and_z<double>(1e-13);
+}
+CFE_TEST(test_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_uniform_in_y_and_z_float)
+{
+  check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_uniform_in_y_and_z<float>(1e-4);
 }

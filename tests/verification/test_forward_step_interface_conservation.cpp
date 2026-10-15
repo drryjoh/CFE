@@ -28,6 +28,22 @@
 // mean the interface read is NOT copying the right values (a real bug:
 // a wrong row offset, a transposed axis, truncation from a precision
 // mismatch), not mere floating-point noise.
+//
+// Dual-precision instantiation (task 0017): both checks below are
+// `template <class Scalar>` functions, instantiated at `double` and
+// `float`. Measured (this task's own calibration, same toolchain): the
+// flux-agreement check is EXACT (0.0) at float too, same within-
+// precision-reproducibility argument as test_euler_3d_sanity.cpp's own
+// column-match check (both sides derive from the identical underlying
+// stored values, just assembled from different storage, regardless of
+// which Scalar that storage happens to be) -- `1e-4` at float is a
+// float-epsilon-scaled portability margin (same ~450x-over-epsilon
+// ratio test_euler_3d_sanity.cpp's own float tolerance uses), not a
+// measured requirement. The mass-balance check genuinely does
+// accumulate roundoff over many timesteps (measured ~4.0e-9 at float vs.
+// double's ~2.0e-14); `1e-6` keeps a >=200x measured margin, the same
+// float-epsilon-scale choice this task's other "exact conservation over
+// a short run" checks use.
 #include <cmath>
 #include <cstddef>
 
@@ -44,10 +60,7 @@
 
 namespace {
 
-using Scalar = double;
-using Field = cfe::EulerField<Scalar, 2>;
-constexpr std::size_t kN = 4;
-
+template <class Scalar>
 cfe::CartesianGrid<Scalar> make_block(std::size_t nx, std::size_t ny, Scalar origin_x, Scalar origin_y)
 {
   cfe::CartesianGrid<Scalar> grid;
@@ -55,8 +68,8 @@ cfe::CartesianGrid<Scalar> make_block(std::size_t nx, std::size_t ny, Scalar ori
   grid.ny = ny;
   grid.ngx = 2;
   grid.ngy = 0;  // only fill_x is exercised here
-  grid.dx = 0.1;
-  grid.dy = 0.1;
+  grid.dx = Scalar(0.1);
+  grid.dy = Scalar(0.1);
   grid.origin_x = origin_x;
   grid.origin_y = origin_y;
   return grid;
@@ -66,45 +79,53 @@ cfe::CartesianGrid<Scalar> make_block(std::size_t nx, std::size_t ny, Scalar ori
 // sinusoidal perturbation of a Mach-3-like freestream, so every
 // conserved component has a real, nonzero gradient everywhere
 // (density, both momentum components, and energy all vary).
-cfe::State<Scalar, kN> state_at(const Field& field, Scalar x, Scalar y)
+template <class Scalar, class Field, std::size_t N>
+cfe::State<Scalar, N> state_at(const Field& field, Scalar x, Scalar y)
 {
-  const Scalar rho = 1.4 + 0.05 * std::sin(7.0 * x + 3.0 * y);
-  const Scalar ux = 3.0 + 0.1 * std::cos(5.0 * x - 2.0 * y);
-  const Scalar uy = 0.1 * std::sin(4.0 * x + 6.0 * y);
-  const Scalar p = 1.0 + 0.02 * std::cos(6.0 * x + 4.0 * y);
+  const Scalar rho = Scalar(1.4) + Scalar(0.05) * std::sin(Scalar(7.0) * x + Scalar(3.0) * y);
+  const Scalar ux = Scalar(3.0) + Scalar(0.1) * std::cos(Scalar(5.0) * x - Scalar(2.0) * y);
+  const Scalar uy = Scalar(0.1) * std::sin(Scalar(4.0) * x + Scalar(6.0) * y);
+  const Scalar p = Scalar(1.0) + Scalar(0.02) * std::cos(Scalar(6.0) * x + Scalar(4.0) * y);
   cfe::Vector<Scalar, 2> velocity;
   velocity[0] = ux;
   velocity[1] = uy;
   return field.conserved_from_primitive(rho, velocity, p);
 }
 
-void fill_smooth_state(cfe::Field<Scalar, kN>& state, const cfe::CartesianGrid<Scalar>& grid, const Field& field)
+template <class Scalar, std::size_t N, class Field>
+void fill_smooth_state(cfe::Field<Scalar, N>& state, const cfe::CartesianGrid<Scalar>& grid, const Field& field)
 {
   for (std::size_t j = 0; j < grid.ny; ++j) {
     for (std::size_t i = 0; i < grid.nx; ++i) {
       const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
-      const cfe::State<Scalar, kN> q = state_at(field, grid.x_center(grid.ngx + i), grid.y_center(grid.ngy + j));
-      for (std::size_t c = 0; c < kN; ++c) state(cell, c) = q[c];
+      const cfe::State<Scalar, N> q =
+          state_at<Scalar, Field, N>(field, grid.x_center(grid.ngx + i), grid.y_center(grid.ngy + j));
+      for (std::size_t c = 0; c < N; ++c) state(cell, c) = q[c];
     }
   }
 }
 
-cfe::State<Scalar, kN> read(const cfe::Field<Scalar, kN>& state, std::size_t cell)
+template <class Scalar, std::size_t N>
+cfe::State<Scalar, N> read(const cfe::Field<Scalar, N>& state, std::size_t cell)
 {
-  cfe::State<Scalar, kN> q;
-  for (std::size_t c = 0; c < kN; ++c) q[c] = state(cell, c);
+  cfe::State<Scalar, N> q;
+  for (std::size_t c = 0; c < N; ++c) q[c] = state(cell, c);
   return q;
 }
 
 }  // namespace
 
-CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides)
+template <class Scalar>
+void check_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides(double tol)
 {
+  using Field = cfe::EulerField<Scalar, 2>;
+  constexpr std::size_t kN = 4;
+
   // block1: upstream, full tunnel height (ny=10, step at local j=2 ->
   // real y=0.2). block2: downstream, post-step height (ny=8), covering
   // block1's local j=2..9.
-  auto grid1 = make_block(6, 10, 0.0, 0.0);
-  auto grid2 = make_block(24, 8, 0.6, 0.2);
+  auto grid1 = make_block<Scalar>(6, 10, Scalar(0.0), Scalar(0.0));
+  auto grid2 = make_block<Scalar>(24, 8, Scalar(0.6), Scalar(0.2));
 
   Field field{};  // gamma = 1.4 default
 
@@ -114,9 +135,9 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
   fill_smooth_state(state2, grid2, field);
 
   cfe::Vector<Scalar, 2> inflow_velocity;
-  inflow_velocity[0] = 3.0;
-  inflow_velocity[1] = 0.0;
-  const cfe::State<Scalar, kN> inflow = field.conserved_from_primitive(1.4, inflow_velocity, 1.0);
+  inflow_velocity[0] = Scalar(3.0);
+  inflow_velocity[1] = Scalar(0.0);
+  const cfe::State<Scalar, kN> inflow = field.conserved_from_primitive(Scalar(1.4), inflow_velocity, Scalar(1.0));
 
   cfe::BlockInterfaceBoundary<Scalar, Field, cfe::Side::High> boundary1{
       .domain_edge_value = inflow,
@@ -185,9 +206,18 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
         numerical_flux(left_of_left, right_of_left, cfe::Axis::X, field);
 
     for (std::size_t c = 0; c < kN; ++c) {
-      CFE_CHECK_NEAR(flux_from_block1[c], flux_from_block2[c], 1e-13);
+      CFE_CHECK_NEAR(static_cast<double>(flux_from_block1[c]), static_cast<double>(flux_from_block2[c]), tol);
     }
   }
+}
+
+CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides_double)
+{
+  check_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides<double>(1e-13);
+}
+CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides_float)
+{
+  check_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sides<float>(1e-4);
 }
 
 // Dynamic companion to the static flux-agreement check above: runs the
@@ -216,7 +246,8 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
 // `dM/dt = 4.2 - 3.36 = 0.84`, constant, so
 // `total_mass(t_final) - total_mass(0) == 0.84 * t_final` exactly (to
 // floating-point roundoff) -- not merely "roughly conserved."
-CFE_TEST(test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time)
+template <class Scalar>
+void check_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time(double tol)
 {
   // t_final=0.05 is well inside the "outlet still undisturbed" window:
   // the fastest signal from the step corner (x=0.6) needs to cross the
@@ -224,6 +255,15 @@ CFE_TEST(test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_f
   // order of 4-5 (M=3 freestream, speed of sound 1, plus whatever a
   // compression adds) -- roughly 0.5-0.6 time units, a >10x margin over
   // the 0.05 used here.
+  // `total_mass()` always accumulates its running sum in `double`
+  // regardless of `Scalar` (forward_step_setup.hpp, unchanged by this
+  // task) -- a higher-precision accumulator technique for summing many
+  // per-cell terms without the sum itself magnifying roundoff, NOT the
+  // same thing as `kInletFlux`/`kOutletFlux`/`expected_change` below
+  // being plain `double` (those are the oracle -- a reference value
+  // independent of `Scalar`, see sod_shock_tube_exact.hpp's header
+  // comment for that convention). Both end up `double` here, but for
+  // two different reasons.
   cfe_verification::ForwardStepBlocks<Scalar, 2> blocks(40);
   const double initial_mass = blocks.total_mass();
   blocks.run_to(Scalar(0.05), Scalar(0.4));
@@ -233,5 +273,14 @@ CFE_TEST(test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_f
   constexpr double kOutletFlux = 1.4 * 3.0 * 0.8;  // rho * u * post-step height
   const double expected_change = (kInletFlux - kOutletFlux) * 0.05;
 
-  CFE_CHECK_NEAR(final_mass - initial_mass, expected_change, 1e-10);
+  CFE_CHECK_NEAR(final_mass - initial_mass, expected_change, tol);
+}
+
+CFE_TEST(test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time_double)
+{
+  check_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time<double>(1e-10);
+}
+CFE_TEST(test_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time_float)
+{
+  check_forward_step_mass_change_matches_exact_inlet_outlet_flux_balance_for_short_time<float>(1e-6);
 }
