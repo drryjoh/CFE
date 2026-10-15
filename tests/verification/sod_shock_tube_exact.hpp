@@ -13,6 +13,16 @@
 // solution for validating the solver, not part of the physics/numerics
 // the solver itself ships.
 //
+// Every value here is plain `double`, regardless of what `Scalar` the
+// solver/field UNDER TEST happens to be instantiated at (`float` or
+// `double` -- see `AGENTS.md` #11, `docs/adr/0014-dual-precision-
+// verification-requirement.md`): this is a reference answer, not
+// simulation state, so it is computed once, at the tightest precision
+// readily available, and compared against regardless of which
+// precision is being verified. See any `tests/verification/test_euler_*
+// .cpp` file's own header comment for a worked example of this
+// convention at a call site.
+//
 // The constants this solver produces for the classic Sod parameters
 // (rho_L=1, u_L=0, p_L=1, rho_R=0.125, u_R=0, p_R=0.1, gamma=1.4) were
 // independently cross-checked with a standalone Python re-implementation
