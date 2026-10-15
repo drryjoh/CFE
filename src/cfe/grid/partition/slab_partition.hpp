@@ -24,7 +24,8 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstddef>
+
+#include "cfe/core/types.hpp"
 
 namespace cfe {
 
@@ -35,8 +36,8 @@ struct SlabPartition
   // via periodic wraparound".
   static constexpr int kNoNeighbor = -1;
 
-  std::size_t local_nx = 0;
-  std::size_t global_offset_x = 0;
+  Index local_nx = 0;
+  Index global_offset_x = 0;
   int left_rank = kNoNeighbor;
   int right_rank = kNoNeighbor;
 };
@@ -55,16 +56,16 @@ struct SlabPartition
 // handled by whatever per-rank boundary the caller supplies for the
 // non-periodic case (not expressible as a single process-wide boundary
 // type, since only the two edge ranks have one).
-inline SlabPartition make_slab_partition(std::size_t global_nx, int rank, int size, bool periodic)
+inline SlabPartition make_slab_partition(Index global_nx, int rank, int size, bool periodic)
 {
   assert(size > 0 && "size must be a positive rank count");
   assert(rank >= 0 && rank < size && "rank must be in [0, size)");
-  assert(global_nx >= static_cast<std::size_t>(size) &&
+  assert(global_nx >= static_cast<Index>(size) &&
          "global_nx must be >= size -- a rank with zero cells has no valid CartesianGrid");
 
-  const std::size_t base = global_nx / static_cast<std::size_t>(size);
-  const std::size_t remainder = global_nx % static_cast<std::size_t>(size);
-  const std::size_t rank_u = static_cast<std::size_t>(rank);
+  const Index base = global_nx / static_cast<Index>(size);
+  const Index remainder = global_nx % static_cast<Index>(size);
+  const Index rank_u = static_cast<Index>(rank);
 
   SlabPartition partition;
   partition.local_nx = base + (rank_u < remainder ? 1 : 0);

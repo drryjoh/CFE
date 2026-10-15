@@ -1,6 +1,7 @@
 // Unit tests for cfe::math operations (task spec items 7/13): componentwise
 // operations, contract, and weight.
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
 #include "cfe/math/operations.hpp"
 #include "test_framework.hpp"
@@ -26,11 +27,11 @@ CFE_TEST(test_scalar_multiply_scales_every_component)
 {
   cfe::FixedArray<double, 4> a(2.0);
   auto scaled = a * 3.0;
-  for (std::size_t k = 0; k < scaled.size(); ++k) {
+  for (cfe::Index k = 0; k < scaled.size(); ++k) {
     CFE_CHECK_NEAR(scaled[k], 6.0, 1e-12);
   }
   auto scaled_commutative = 3.0 * a;
-  for (std::size_t k = 0; k < scaled_commutative.size(); ++k) {
+  for (cfe::Index k = 0; k < scaled_commutative.size(); ++k) {
     CFE_CHECK_NEAR(scaled_commutative[k], 6.0, 1e-12);
   }
 }
@@ -55,7 +56,7 @@ CFE_TEST(test_contract_matches_hand_computed_sum_of_products)
   cfe::FixedArray<double, 4> a;
   cfe::FixedArray<double, 4> b;
   double expected = 0.0;
-  for (std::size_t k = 0; k < 4; ++k) {
+  for (cfe::Index k = 0; k < 4; ++k) {
     a[k] = static_cast<double>(k + 1);  // 1,2,3,4
     b[k] = static_cast<double>(4 - k);  // 4,3,2,1
     expected += a[k] * b[k];
@@ -85,7 +86,7 @@ CFE_TEST(test_weight_with_unit_weights_is_identity)
   cfe::FixedArray<double, 5> a(2.5);
   cfe::FixedArray<double, 5> ones(1.0);
   auto weighted = cfe::weight(a, ones);
-  for (std::size_t k = 0; k < weighted.size(); ++k) {
+  for (cfe::Index k = 0; k < weighted.size(); ++k) {
     CFE_CHECK_NEAR(weighted[k], a[k], 1e-12);
   }
 }

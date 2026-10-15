@@ -3,6 +3,7 @@
 // cells resolve to the correct neighbor").
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 #include "test_framework.hpp"
 
@@ -18,7 +19,7 @@ CFE_TEST(test_1d_grid_flat_index_matches_i_when_y_and_z_are_size_one)
   CFE_CHECK(grid.padded_nz() == 1);
   CFE_CHECK(grid.n_cells_total() == 9);
 
-  for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
+  for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
     CFE_CHECK(grid.flat_index(i, 0, 0) == i);
   }
 }
@@ -35,8 +36,8 @@ CFE_TEST(test_2d_grid_flat_index_is_row_major_in_x_then_y)
   CFE_CHECK(grid.padded_ny() == 5);
   CFE_CHECK(grid.n_cells_total() == 30);
 
-  for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
-    for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
+  for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
+    for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
       CFE_CHECK(grid.flat_index(i, j, 0) == i + j * grid.padded_nx());
     }
   }
@@ -51,10 +52,10 @@ CFE_TEST(test_3d_grid_flat_index_covers_all_cells_without_gaps_or_overlap)
   CFE_CHECK(grid.n_cells_total() == 4 * 4 * 4);
 
   std::vector<bool> seen(grid.n_cells_total(), false);
-  for (std::size_t k = 0; k < grid.padded_nz(); ++k) {
-    for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
-      for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
-        const std::size_t idx = grid.flat_index(i, j, k);
+  for (cfe::Index k = 0; k < grid.padded_nz(); ++k) {
+    for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
+      for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
+        const cfe::Index idx = grid.flat_index(i, j, k);
         CFE_CHECK(idx < grid.n_cells_total());
         CFE_CHECK(!seen[idx]);
         seen[idx] = true;
@@ -73,8 +74,8 @@ CFE_TEST(test_grid_ghost_cell_is_adjacent_to_first_and_last_real_cell)
   grid.ngx = 2;
 
   // Real cells occupy padded indices [ngx, ngx + nx) = [2, 7).
-  const std::size_t first_real = grid.ngx;
-  const std::size_t last_real = grid.ngx + grid.nx - 1;
+  const cfe::Index first_real = grid.ngx;
+  const cfe::Index last_real = grid.ngx + grid.nx - 1;
 
   // The ghost cell immediately below the first real cell, and the one
   // immediately above the last real cell, resolve to distinct flat
@@ -86,9 +87,9 @@ CFE_TEST(test_grid_ghost_cell_is_adjacent_to_first_and_last_real_cell)
 
   // Both outer ghost layers (depth ngx=2) are within bounds and distinct
   // from every real cell's flat index.
-  for (std::size_t g = 0; g < grid.ngx; ++g) {
-    const std::size_t low_ghost = grid.flat_index(g, 0, 0);
-    const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, 0, 0);
+  for (cfe::Index g = 0; g < grid.ngx; ++g) {
+    const cfe::Index low_ghost = grid.flat_index(g, 0, 0);
+    const cfe::Index high_ghost = grid.flat_index(grid.ngx + grid.nx + g, 0, 0);
     CFE_CHECK(low_ghost < first_real);
     CFE_CHECK(high_ghost > last_real);
   }

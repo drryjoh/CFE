@@ -705,7 +705,7 @@ roles:
   `cfe::BlockSet<Scalar, NComponents, Layout>` (one `std::vector<Scalar>`
   sized for several blocks at once, `field/block_set.hpp`, see below).
 - **Non-owning view**: `cfe::FieldView<Scalar, NComponents, Layout>` is
-  exactly `(Scalar* data, std::size_t n_cells)` -- trivially copyable,
+  exactly `(Scalar* data, cfe::Index n_cells)` -- trivially copyable,
   with zero assumption that it owns, or sits at the start of, its own
   allocation. This is what every piece of per-cell numerics
   (`FvmSolver::residual()`, every `BoundaryCondition::fill_x/y/z`,

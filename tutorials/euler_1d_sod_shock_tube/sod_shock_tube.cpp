@@ -59,7 +59,7 @@ constexpr Scalar kGamma = Scalar(1.4);
 constexpr Scalar kX0 = Scalar(0.5);
 constexpr Scalar kTFinal = Scalar(0.2);
 constexpr Scalar kCfl = Scalar(0.4);
-const std::vector<std::size_t> kGrids = {100, 200, 400};
+const std::vector<cfe::Index> kGrids = {100, 200, 400};
 
 const cfe_verification::PrimitiveState kLeft{1.0, 0.0, 1.0};
 const cfe_verification::PrimitiveState kRight{0.125, 0.0, 0.1};
@@ -71,7 +71,7 @@ const cfe_verification::PrimitiveState kRight{0.125, 0.0, 0.1};
 // review finding: this used to be duplicated verbatim between the two).
 
 template <class NumericalFlux>
-void run_case(const std::string& flux_name, std::size_t nx, std::ofstream& summary, const fs::path& data_dir)
+void run_case(const std::string& flux_name, cfe::Index nx, std::ofstream& summary, const fs::path& data_dir)
 {
   const cfe_verification::SodProfile<Scalar> profile =
       cfe_verification::run_sod_shock_tube<Scalar, NumericalFlux>(nx, kGamma, kLeft, kRight, kX0, kTFinal, kCfl);
@@ -83,7 +83,7 @@ void run_case(const std::string& flux_name, std::size_t nx, std::ofstream& summa
 
   double l1_rho = 0.0, l1_u = 0.0, l1_p = 0.0;
   const double dx_d = 1.0 / static_cast<double>(nx);
-  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+  for (cfe::Index i = 0; i < profile.x.size(); ++i) {
     const double x = static_cast<double>(profile.x[i]);
     const double rho_num = static_cast<double>(profile.rho[i]);
     const double u_num = static_cast<double>(profile.u[i]);
@@ -108,7 +108,7 @@ void run_case(const std::string& flux_name, std::size_t nx, std::ofstream& summa
       cfe_verification::sample_exact_solution(static_cast<double>(kGamma), kLeft, kRight, star, s_contact_minus).rho;
   const double rho_star_right =
       cfe_verification::sample_exact_solution(static_cast<double>(kGamma), kLeft, kRight, star, s_contact_plus).rho;
-  const std::size_t width = cfe_verification::contact_width_cells(profile, x_contact, rho_star_left, rho_star_right);
+  const cfe::Index width = cfe_verification::contact_width_cells(profile, x_contact, rho_star_left, rho_star_right);
 
   summary << nx << ',' << flux_name << ',' << l1_rho << ',' << l1_u << ',' << l1_p << ',' << width << '\n';
   std::printf("  [nx=%4zu, %-7s] L1(rho)=%.4e  L1(u)=%.4e  L1(p)=%.4e  contact_width=%zu cells\n", nx,
@@ -124,7 +124,7 @@ int main()
   fs::create_directories(data_dir);
   std::ofstream summary(data_dir / "summary.csv");
   summary << "nx,flux,l1_rho,l1_u,l1_p,contact_width_cells\n";
-  for (std::size_t nx : kGrids) {
+  for (cfe::Index nx : kGrids) {
     run_case<cfe::RusanovFlux>("rusanov", nx, summary, data_dir);
     run_case<cfe::HllcFlux>("hllc", nx, summary, data_dir);
   }

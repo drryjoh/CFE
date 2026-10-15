@@ -9,6 +9,7 @@
 #include <cstddef>
 
 #include "cfe/core/macros.hpp"
+#include "cfe/core/types.hpp"
 
 namespace cfe {
 
@@ -27,13 +28,13 @@ class FixedArray
   CFE_HOST_DEVICE
   explicit FixedArray(const Scalar& fill)
   {
-    for (std::size_t k = 0; k < N; ++k) data_[k] = fill;
+    for (Index k = 0; k < N; ++k) data_[k] = fill;
   }
 
   CFE_HOST_DEVICE
-  Scalar& operator[](std::size_t k) { return data_[k]; }
+  Scalar& operator[](Index k) { return data_[k]; }
   CFE_HOST_DEVICE
-  const Scalar& operator[](std::size_t k) const { return data_[k]; }
+  const Scalar& operator[](Index k) const { return data_[k]; }
 
   CFE_HOST_DEVICE
   Scalar* data() { return data_; }
@@ -43,28 +44,28 @@ class FixedArray
   CFE_HOST_DEVICE
   FixedArray& operator+=(const FixedArray& other)
   {
-    for (std::size_t k = 0; k < N; ++k) data_[k] += other.data_[k];
+    for (Index k = 0; k < N; ++k) data_[k] += other.data_[k];
     return *this;
   }
 
   CFE_HOST_DEVICE
   FixedArray& operator-=(const FixedArray& other)
   {
-    for (std::size_t k = 0; k < N; ++k) data_[k] -= other.data_[k];
+    for (Index k = 0; k < N; ++k) data_[k] -= other.data_[k];
     return *this;
   }
 
   CFE_HOST_DEVICE
   FixedArray& operator*=(const Scalar& s)
   {
-    for (std::size_t k = 0; k < N; ++k) data_[k] *= s;
+    for (Index k = 0; k < N; ++k) data_[k] *= s;
     return *this;
   }
 
   CFE_HOST_DEVICE
   FixedArray& operator/=(const Scalar& s)
   {
-    for (std::size_t k = 0; k < N; ++k) data_[k] /= s;
+    for (Index k = 0; k < N; ++k) data_[k] /= s;
     return *this;
   }
 

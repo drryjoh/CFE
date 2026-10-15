@@ -103,7 +103,7 @@ constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
 // `values` is `Scalar`-precision.
 double find_falling_crossing(const std::vector<Scalar>& values, Scalar x0, Scalar dx, Scalar level)
 {
-  for (std::size_t i = 0; i + 1 < values.size(); ++i) {
+  for (cfe::Index i = 0; i + 1 < values.size(); ++i) {
     if (values[i] >= level && values[i + 1] < level) {
       const Scalar x_i = x0 + static_cast<Scalar>(i) * dx;
       const Scalar x_ip1 = x0 + static_cast<Scalar>(i + 1) * dx;
@@ -122,7 +122,7 @@ std::ofstream open_summary_csv(const fs::path& data_dir)
   return out;
 }
 
-void append_summary_row(std::ofstream& out, const std::string& case_name, std::size_t nx,
+void append_summary_row(std::ofstream& out, const std::string& case_name, cfe::Index nx,
                          const std::string& reconstruction_name, double t, double l1_error,
                          double shock_exact, double shock_numerical, double overshoot, double undershoot,
                          double domain_mean)
@@ -137,7 +137,7 @@ void write_field_csv(const fs::path& path, const std::vector<Scalar>& x, const s
 {
   std::ofstream out(path);
   out << "x,u_numerical,u_exact\n";
-  for (std::size_t i = 0; i < x.size(); ++i) {
+  for (cfe::Index i = 0; i < x.size(); ++i) {
     out << x[i] << ',' << u_num[i] << ',';
     if (i < u_exact.size()) {
       out << u_exact[i];
@@ -156,7 +156,7 @@ constexpr Scalar kShockULeft = Scalar(1.0);
 constexpr Scalar kShockURight = Scalar(0.0);
 constexpr Scalar kShockOrigin = Scalar(0.25);
 constexpr Scalar kShockSpeed = Scalar(0.5) * (kShockULeft + kShockURight);  // Rankine-Hugoniot, exact for Burgers
-const std::vector<std::size_t> kShockGrids = {100, 200, 400};
+const std::vector<cfe::Index> kShockGrids = {100, 200, 400};
 const std::vector<double> kShockOutputTimes = {0.0, 0.25, 0.5, 1.0};
 
 // Exact cell average of the moving step over [x_lo, x_hi] at time t,
@@ -172,7 +172,7 @@ Scalar shock_exact_cell_average(Scalar x_lo, Scalar x_hi, Scalar t)
 }
 
 template <class Reconstruction>
-void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool write_fields,
+void run_shock_case(cfe::Index nx, const std::string& reconstruction_name, bool write_fields,
                      std::ofstream& summary, const fs::path& data_dir)
 {
   cfe::CartesianGrid<Scalar> grid;
@@ -192,7 +192,7 @@ void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool
   // cell-center 0/1 sample -- the IC already contains the discontinuity
   // at x=0.25, so this uses the exact same cut-cell formula the
   // reference solution at later times uses.
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
     const Scalar x_hi = x_lo + grid.dx;
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = shock_exact_cell_average(x_lo, x_hi, Scalar(0.0));
@@ -222,7 +222,7 @@ void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool
     double sum_abs_error = 0.0;
     double max_val = static_cast<double>(state(grid.flat_index(grid.ngx, 0, 0), 0));
     double min_val = max_val;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
       const Scalar x_hi = x_lo + grid.dx;
       const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
@@ -261,7 +261,7 @@ void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool
 
   report(Scalar(0.0));
   Scalar t = Scalar(0.0);
-  for (std::size_t seg = 1; seg < kShockOutputTimes.size(); ++seg) {
+  for (cfe::Index seg = 1; seg < kShockOutputTimes.size(); ++seg) {
     const Scalar t_target = static_cast<Scalar>(kShockOutputTimes[seg]);
     const Scalar dt_target = kCfl * grid.dx / kShockULeft;
     const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));
@@ -278,7 +278,7 @@ void run_shock_case(std::size_t nx, const std::string& reconstruction_name, bool
 void run_case_shock(std::ofstream& summary, const fs::path& data_dir)
 {
   std::printf("=== Case A: moving shock ===\n");
-  for (std::size_t nx : kShockGrids) {
+  for (cfe::Index nx : kShockGrids) {
     // Finest grid only -- written for BOTH reconstructions (not just
     // second-order) specifically so plot_results.py's shock-capturing
     // zoom-in can compare them directly at matching resolution.
@@ -301,7 +301,7 @@ constexpr Scalar kSteepeningDomainLength = Scalar(1.0);
 // -> t_s = 1/(2*pi*amplitude) = 1/pi for amplitude=0.5, matching the spec's own stated value.
 constexpr Scalar kSteepeningBreakTime = Scalar(1.0) / (Scalar(2.0) * kPi * kSteepeningAmplitude);
 const std::vector<double> kSteepeningOutputTimes = {0.0, 0.15, 0.30, 0.40, 0.60};
-constexpr std::size_t kSteepeningGrid = 400;
+constexpr cfe::Index kSteepeningGrid = 400;
 
 Scalar steepening_ic(Scalar x) { return kSteepeningBackground + kSteepeningAmplitude * std::sin(Scalar(2.0) * kPi * x); }
 
@@ -361,7 +361,7 @@ void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
   cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
   Scalar max_abs_u0 = Scalar(0.0);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x = grid.x_center(grid.ngx + i);
     const Scalar value = steepening_ic(x);
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = value;
@@ -391,7 +391,7 @@ void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
     double max_val = static_cast<double>(state(grid.flat_index(grid.ngx, 0, 0), 0));
     double min_val = max_val;
     double domain_integral = 0.0;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
       x[i] = grid.x_center(grid.ngx + i);
       u_num[i] = value;
@@ -423,7 +423,7 @@ void run_case_steepening(std::ofstream& summary, const fs::path& data_dir)
 
   report(Scalar(0.0));
   Scalar t = Scalar(0.0);
-  for (std::size_t seg = 1; seg < kSteepeningOutputTimes.size(); ++seg) {
+  for (cfe::Index seg = 1; seg < kSteepeningOutputTimes.size(); ++seg) {
     const Scalar t_target = static_cast<Scalar>(kSteepeningOutputTimes[seg]);
     const Scalar dt_target = kCfl * grid.dx / max_abs_u0;
     const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));
@@ -445,7 +445,7 @@ constexpr Scalar kRarefactionULeft = Scalar(-1.0);
 constexpr Scalar kRarefactionURight = Scalar(1.0);
 constexpr Scalar kRarefactionOrigin = Scalar(5.0);
 constexpr Scalar kRarefactionDomainLength = Scalar(10.0);
-constexpr std::size_t kRarefactionGrid = 400;
+constexpr cfe::Index kRarefactionGrid = 400;
 const std::vector<double> kRarefactionOutputTimes = {0.0, 1.0, 2.0};  // fan spans [3,7] at t=2.0 --
                                                                        // 3.0 of margin either side of [0,10]
 
@@ -483,7 +483,7 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
   cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
     const Scalar x_hi = x_lo + grid.dx;
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = rarefaction_exact_cell_average(
@@ -519,7 +519,7 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
     double max_val = static_cast<double>(state(grid.flat_index(grid.ngx, 0, 0), 0));
     double min_val = max_val;
     double domain_integral = 0.0;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
       const Scalar x_hi = x_lo + grid.dx;
       const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
@@ -549,7 +549,7 @@ void run_case_rarefaction(std::ofstream& summary, const fs::path& data_dir)
 
   report(Scalar(0.0));
   Scalar t = Scalar(0.0);
-  for (std::size_t seg = 1; seg < kRarefactionOutputTimes.size(); ++seg) {
+  for (cfe::Index seg = 1; seg < kRarefactionOutputTimes.size(); ++seg) {
     const Scalar t_target = static_cast<Scalar>(kRarefactionOutputTimes[seg]);
     const Scalar dt_target = kCfl * grid.dx / max_speed;
     const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));

@@ -3,6 +3,7 @@
 // domain edges").
 #include <stdexcept>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/ghost/ghost_fill.hpp"
@@ -11,7 +12,7 @@
 
 namespace {
 
-cfe::CartesianGrid<double> make_1d_grid(std::size_t nx, std::size_t ngx)
+cfe::CartesianGrid<double> make_1d_grid(cfe::Index nx, cfe::Index ngx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = nx;
@@ -28,7 +29,7 @@ CFE_TEST(test_periodic_boundary_wraps_ghost_cells_to_opposite_real_boundary)
   cfe::Field<double, 1> state(grid.n_cells_total());
 
   // Real cells at padded index 2..6 get values 10, 20, 30, 40, 50.
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = static_cast<double>((i + 1) * 10);
   }
 
@@ -54,7 +55,7 @@ CFE_TEST(test_static_boundary_writes_fixed_value_into_every_ghost_cell)
   cfe::StaticBoundary<double, 1> bc(cfe::State<double, 1>(-1.0), cfe::State<double, 1>(99.0));
   cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::X, bc);
 
-  for (std::size_t g = 0; g < grid.ngx; ++g) {
+  for (cfe::Index g = 0; g < grid.ngx; ++g) {
     CFE_CHECK_NEAR(state(grid.flat_index(g, 0, 0), 0), -1.0, 1e-12);
     CFE_CHECK_NEAR(state(grid.flat_index(grid.ngx + grid.nx + g, 0, 0), 0), 99.0, 1e-12);
   }
@@ -75,9 +76,9 @@ CFE_TEST(test_static_boundary_is_generic_over_component_count)
   cfe::StaticBoundary<double, 3> bc(low, high);
   cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::X, bc);
 
-  const std::size_t low_ghost = grid.flat_index(0, 0, 0);
-  const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx, 0, 0);
-  for (std::size_t c = 0; c < 3; ++c) {
+  const cfe::Index low_ghost = grid.flat_index(0, 0, 0);
+  const cfe::Index high_ghost = grid.flat_index(grid.ngx + grid.nx, 0, 0);
+  for (cfe::Index c = 0; c < 3; ++c) {
     CFE_CHECK_NEAR(state(low_ghost, c), low[c], 1e-12);
     CFE_CHECK_NEAR(state(high_ghost, c), high[c], 1e-12);
   }
@@ -93,8 +94,8 @@ CFE_TEST(test_periodic_boundary_fills_y_axis_ghost_cells_in_2d_grid)
   cfe::Field<double, 1> state(grid.n_cells_total());
 
   // Real cells at padded j = 1..4 get values 100*j for a fixed i.
-  const std::size_t i = grid.ngx;
-  for (std::size_t j = 0; j < grid.ny; ++j) {
+  const cfe::Index i = grid.ngx;
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
     state(grid.flat_index(i, grid.ngy + j, 0), 0) = static_cast<double>((j + 1) * 100);
   }
 
@@ -168,7 +169,7 @@ CFE_TEST(test_inflow_outflow_boundary_fixes_low_end_and_extrapolates_high_end)
 
   // Real cells (padded index 2..5) get values 10, 20, 30, 40 -- the
   // nearest-to-high-boundary real cell is 40.
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = static_cast<double>((i + 1) * 10);
   }
 
@@ -176,12 +177,12 @@ CFE_TEST(test_inflow_outflow_boundary_fixes_low_end_and_extrapolates_high_end)
   cfe::fill_ghost_cells(state.view(), grid, cfe::Axis::X, bc);
 
   // Low end: every ghost layer gets the fixed inflow value.
-  for (std::size_t g = 0; g < grid.ngx; ++g) {
+  for (cfe::Index g = 0; g < grid.ngx; ++g) {
     CFE_CHECK_NEAR(state(grid.flat_index(g, 0, 0), 0), -7.0, 1e-12);
   }
   // High end: every ghost layer copies the SAME single nearest real cell
   // (40) -- zero-order extrapolation, not a mirror/reflection.
-  for (std::size_t g = 0; g < grid.ngx; ++g) {
+  for (cfe::Index g = 0; g < grid.ngx; ++g) {
     CFE_CHECK_NEAR(state(grid.flat_index(grid.ngx + grid.nx + g, 0, 0), 0), 40.0, 1e-12);
   }
 }

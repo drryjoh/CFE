@@ -37,7 +37,8 @@
 // still-open against Phase 3's "Rusanov and/or HLLC" acceptance
 // criterion) would resolve the contact far more sharply.
 #include <cmath>
-#include <cstddef>
+
+#include "cfe/core/types.hpp"
 
 #include "sod_shock_tube_exact.hpp"
 #include "sod_shock_tube_runner.hpp"
@@ -59,7 +60,7 @@ const cfe_verification::PrimitiveState kRight{0.125, 0.0, 0.1};
 // arguments every time. The actual simulation is
 // cfe_verification::run_sod_shock_tube (tests/verification/
 // sod_shock_tube_runner.hpp), shared with tutorials/euler_1d_sod_shock_tube/.
-cfe_verification::SodProfile<Scalar> run_sod(std::size_t nx)
+cfe_verification::SodProfile<Scalar> run_sod(cfe::Index nx)
 {
   return cfe_verification::run_sod_shock_tube<Scalar>(nx, kGamma, kLeft, kRight, kX0, kTFinal, kCfl);
 }
@@ -69,9 +70,9 @@ double density_at(const cfe_verification::SodProfile<Scalar>& r, Scalar x_query)
   // Nearest-cell lookup (grid is uniform and x_query is always chosen
   // well inside a plateau region, never within one dx of a wave) --
   // exact interpolation is not needed for the tolerances used below.
-  std::size_t best = 0;
+  cfe::Index best = 0;
   double best_dist = 1e300;
-  for (std::size_t i = 0; i < r.x.size(); ++i) {
+  for (cfe::Index i = 0; i < r.x.size(); ++i) {
     const double d = std::fabs(static_cast<double>(r.x[i]) - static_cast<double>(x_query));
     if (d < best_dist) {
       best_dist = d;
@@ -182,11 +183,11 @@ CFE_TEST(test_sod_shock_tube_density_l1_error_decreases_with_resolution)
     return cfe_verification::sample_exact_solution(kGamma, kLeft, kRight, star, s).rho;
   };
 
-  auto l1_error = [&](std::size_t nx) {
+  auto l1_error = [&](cfe::Index nx) {
     const cfe_verification::SodProfile<Scalar> r = run_sod(nx);
     double err = 0.0;
     const double dx = 1.0 / static_cast<double>(nx);
-    for (std::size_t i = 0; i < r.x.size(); ++i) {
+    for (cfe::Index i = 0; i < r.x.size(); ++i) {
       err += std::fabs(static_cast<double>(r.rho[i]) - exact_density_at(static_cast<double>(r.x[i]))) * dx;
     }
     return err;

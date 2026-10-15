@@ -32,6 +32,7 @@
 
 #include "cfe/backend/mpi/mpi_environment.hpp"
 #include "cfe/backend/mpi/mpi_reduce.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -51,11 +52,11 @@ constexpr double kBackground = 1.0;
 constexpr double kAmplitude = 0.5;
 constexpr double kCfl = 0.4;
 constexpr double kFinalTime = 0.5;  // past the analytic breaking time (~0.318): a real shock exists
-constexpr std::size_t kGlobalNx = 400;
+constexpr cfe::Index kGlobalNx = 400;
 
 double ic(double x) { return kBackground + kAmplitude * std::sin(2.0 * kPi * x / kDomainLength); }
 
-double cell_center(std::size_t global_i, double dx) { return (static_cast<double>(global_i) + 0.5) * dx; }
+double cell_center(cfe::Index global_i, double dx) { return (static_cast<double>(global_i) + 0.5) * dx; }
 
 // Lands exactly on kFinalTime with a CFL-respecting step count, from
 // the GLOBAL (Allreduce-synchronized, or trivially global in the
@@ -69,7 +70,7 @@ void compute_steps(double dx, double global_max_abs_u, int& n_steps, double& dt)
 
 // Full global problem on ONE (virtual) rank, entirely locally, no MPI
 // involved -- the reference the decomposed run must match bit-for-bit.
-std::vector<double> run_reference(std::size_t global_nx)
+std::vector<double> run_reference(cfe::Index global_nx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = global_nx;
@@ -81,7 +82,7 @@ std::vector<double> run_reference(std::size_t global_nx)
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
   double max_abs_u = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double value = ic(cell_center(i, grid.dx));
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = value;
     max_abs_u = std::max(max_abs_u, std::abs(value));
@@ -105,7 +106,7 @@ std::vector<double> run_reference(std::size_t global_nx)
   }
 
   std::vector<double> result(global_nx);
-  for (std::size_t i = 0; i < global_nx; ++i) {
+  for (cfe::Index i = 0; i < global_nx; ++i) {
     result[i] = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
   }
   return result;
@@ -118,7 +119,7 @@ std::vector<double> run_reference(std::size_t global_nx)
 // whose local block does not contain the IC's peak would size its `dt`
 // from a smaller, wrong maximum, desynchronizing it from the other
 // ranks (see this file's header comment for the concrete numbers).
-std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartition& partition)
+std::vector<double> run_decomposed(cfe::Index global_nx, const cfe::SlabPartition& partition)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = partition.local_nx;
@@ -133,8 +134,8 @@ std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartiti
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
   double local_max_abs_u = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t global_i = partition.global_offset_x + i;
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index global_i = partition.global_offset_x + i;
     const double value = ic(cell_center(global_i, grid.dx));
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = value;
     local_max_abs_u = std::max(local_max_abs_u, std::abs(value));
@@ -160,7 +161,7 @@ std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartiti
   }
 
   std::vector<double> result(grid.nx);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     result[i] = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
   }
   return result;
@@ -179,8 +180,8 @@ int main(int argc, char** argv)
   const std::vector<double> decomposed = run_decomposed(kGlobalNx, partition);
 
   int local_failures = 0;
-  for (std::size_t i = 0; i < decomposed.size(); ++i) {
-    const std::size_t global_i = partition.global_offset_x + i;
+  for (cfe::Index i = 0; i < decomposed.size(); ++i) {
+    const cfe::Index global_i = partition.global_offset_x + i;
     if (decomposed[i] != reference[global_i]) {
       std::fprintf(stderr, "[rank %d] MISMATCH at global cell %zu: decomposed=%.17g reference=%.17g\n", rank,
                    global_i, decomposed[i], reference[global_i]);

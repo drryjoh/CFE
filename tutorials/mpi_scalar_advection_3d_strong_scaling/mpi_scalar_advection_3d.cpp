@@ -46,6 +46,7 @@
 #include <string>
 
 #include "cfe/backend/mpi/mpi_environment.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/mpi_halo_boundary.hpp"
@@ -59,7 +60,7 @@ namespace {
 
 using Scalar = double;
 
-constexpr std::size_t kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
+constexpr cfe::Index kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
 constexpr Scalar kVelocity = 1.0;      // same speed on all three axes
 constexpr Scalar kCfl = 0.4;
 constexpr Scalar kFinalTime = 0.3;
@@ -144,9 +145,9 @@ int main(int argc, char** argv)
   cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<Scalar, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const Scalar x = grid.x_center(grid.ngx + i);
         const Scalar y = grid.y_center(grid.ngy + j);
         const Scalar z = grid.z_center(grid.ngz + k);

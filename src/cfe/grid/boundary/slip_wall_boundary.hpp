@@ -34,7 +34,7 @@
 // confirmed against that distinction with Amelia/Violet before
 // implementation; see docs/adr/0010-euler-field-and-shock-capturing.md.
 //
-// Works for any Field exposing `static constexpr std::size_t
+// Works for any Field exposing `static constexpr Index
 // momentum_index(Axis)` (currently just EulerField, fields/euler/field.hpp)
 // -- nothing here is Euler-specific by name.
 #pragma once
@@ -56,24 +56,24 @@ struct SlipWallBoundary
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngx == 0) return;
-    constexpr std::size_t normal_component = Field::momentum_index(Axis::X);
-    const std::size_t py = grid.padded_ny();
-    const std::size_t pz = grid.padded_nz();
-    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngx;
-      const std::size_t rem = idx / grid.ngx;
-      const std::size_t j = rem % py;
-      const std::size_t k = rem / py;
+    constexpr Index normal_component = Field::momentum_index(Axis::X);
+    const Index py = grid.padded_ny();
+    const Index pz = grid.padded_nz();
+    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(Index idx) mutable {
+      const Index g = idx % grid.ngx;
+      const Index rem = idx / grid.ngx;
+      const Index j = rem % py;
+      const Index k = rem / py;
 
       // Mirror image about the wall face: ghost layer g (0 = nearest
       // the wall) reads the real cell g layers in from the wall on the
       // interior side.
-      const std::size_t low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
-      const std::size_t low_source = grid.flat_index(grid.ngx + g, j, k);
-      const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
-      const std::size_t high_source = grid.flat_index(grid.ngx + grid.nx - 1 - g, j, k);
+      const Index low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
+      const Index low_source = grid.flat_index(grid.ngx + g, j, k);
+      const Index high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
+      const Index high_source = grid.flat_index(grid.ngx + grid.nx - 1 - g, j, k);
 
-      for (std::size_t c = 0; c < N; ++c) {
+      for (Index c = 0; c < N; ++c) {
         const Scalar sign = (c == normal_component) ? Scalar(-1) : Scalar(1);
         field(low_ghost, c) = sign * field(low_source, c);
         field(high_ghost, c) = sign * field(high_source, c);
@@ -85,21 +85,21 @@ struct SlipWallBoundary
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngy == 0) return;
-    constexpr std::size_t normal_component = Field::momentum_index(Axis::Y);
-    const std::size_t px = grid.padded_nx();
-    const std::size_t pz = grid.padded_nz();
-    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngy;
-      const std::size_t rem = idx / grid.ngy;
-      const std::size_t i = rem % px;
-      const std::size_t k = rem / px;
+    constexpr Index normal_component = Field::momentum_index(Axis::Y);
+    const Index px = grid.padded_nx();
+    const Index pz = grid.padded_nz();
+    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(Index idx) mutable {
+      const Index g = idx % grid.ngy;
+      const Index rem = idx / grid.ngy;
+      const Index i = rem % px;
+      const Index k = rem / px;
 
-      const std::size_t low_ghost = grid.flat_index(i, grid.ngy - 1 - g, k);
-      const std::size_t low_source = grid.flat_index(i, grid.ngy + g, k);
-      const std::size_t high_ghost = grid.flat_index(i, grid.ngy + grid.ny + g, k);
-      const std::size_t high_source = grid.flat_index(i, grid.ngy + grid.ny - 1 - g, k);
+      const Index low_ghost = grid.flat_index(i, grid.ngy - 1 - g, k);
+      const Index low_source = grid.flat_index(i, grid.ngy + g, k);
+      const Index high_ghost = grid.flat_index(i, grid.ngy + grid.ny + g, k);
+      const Index high_source = grid.flat_index(i, grid.ngy + grid.ny - 1 - g, k);
 
-      for (std::size_t c = 0; c < N; ++c) {
+      for (Index c = 0; c < N; ++c) {
         const Scalar sign = (c == normal_component) ? Scalar(-1) : Scalar(1);
         field(low_ghost, c) = sign * field(low_source, c);
         field(high_ghost, c) = sign * field(high_source, c);
@@ -111,21 +111,21 @@ struct SlipWallBoundary
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
     if (grid.ngz == 0) return;
-    constexpr std::size_t normal_component = Field::momentum_index(Axis::Z);
-    const std::size_t px = grid.padded_nx();
-    const std::size_t py = grid.padded_ny();
-    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngz;
-      const std::size_t rem = idx / grid.ngz;
-      const std::size_t i = rem % px;
-      const std::size_t j = rem / px;
+    constexpr Index normal_component = Field::momentum_index(Axis::Z);
+    const Index px = grid.padded_nx();
+    const Index py = grid.padded_ny();
+    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(Index idx) mutable {
+      const Index g = idx % grid.ngz;
+      const Index rem = idx / grid.ngz;
+      const Index i = rem % px;
+      const Index j = rem / px;
 
-      const std::size_t low_ghost = grid.flat_index(i, j, grid.ngz - 1 - g);
-      const std::size_t low_source = grid.flat_index(i, j, grid.ngz + g);
-      const std::size_t high_ghost = grid.flat_index(i, j, grid.ngz + grid.nz + g);
-      const std::size_t high_source = grid.flat_index(i, j, grid.ngz + grid.nz - 1 - g);
+      const Index low_ghost = grid.flat_index(i, j, grid.ngz - 1 - g);
+      const Index low_source = grid.flat_index(i, j, grid.ngz + g);
+      const Index high_ghost = grid.flat_index(i, j, grid.ngz + grid.nz + g);
+      const Index high_source = grid.flat_index(i, j, grid.ngz + grid.nz - 1 - g);
 
-      for (std::size_t c = 0; c < N; ++c) {
+      for (Index c = 0; c < N; ++c) {
         const Scalar sign = (c == normal_component) ? Scalar(-1) : Scalar(1);
         field(low_ghost, c) = sign * field(low_source, c);
         field(high_ghost, c) = sign * field(high_source, c);

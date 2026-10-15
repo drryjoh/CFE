@@ -59,7 +59,7 @@ struct ScalarAdvectionField
   CFE_HOST_DEVICE
   Scalar physical_flux(Scalar state, Axis axis) const
   {
-    return velocity[static_cast<std::size_t>(axis)] * state;
+    return velocity[static_cast<Index>(axis)] * state;
   }
 
   // The wave speed a numerical-flux combinator uses to pick an upwind
@@ -70,7 +70,7 @@ struct ScalarAdvectionField
   CFE_HOST_DEVICE
   Scalar wave_speed(Scalar /*state_left*/, Scalar /*state_right*/, Axis axis) const
   {
-    return velocity[static_cast<std::size_t>(axis)];
+    return velocity[static_cast<Index>(axis)];
   }
 };
 

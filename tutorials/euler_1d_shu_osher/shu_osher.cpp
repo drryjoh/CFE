@@ -44,8 +44,8 @@ namespace {
 
 constexpr Scalar kTFinal = Scalar(1.8);
 constexpr Scalar kCfl = Scalar(0.4);
-constexpr std::size_t kFineNx = 2000;
-const std::vector<std::size_t> kGrids = {100, 200, 400};
+constexpr cfe::Index kFineNx = 2000;
+const std::vector<cfe::Index> kGrids = {100, 200, 400};
 
 // density_at/wake_l1_error/max_ahead_deviation/count_extrema used to be
 // duplicated here verbatim from test_euler_shu_osher.cpp -- moved into
@@ -59,7 +59,7 @@ void write_profile_csv(const fs::path& path, const cfe_verification::ShuOsherPro
 {
   std::ofstream csv(path);
   csv << "x,rho,u,p,rho_exact_ahead\n";
-  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+  for (cfe::Index i = 0; i < profile.x.size(); ++i) {
     const double x = static_cast<double>(profile.x[i]);
     csv << x << ',' << profile.rho[i] << ',' << profile.u[i] << ',' << profile.p[i] << ','
         << cfe_verification::shu_osher_exact_ahead_density(x) << '\n';
@@ -105,7 +105,7 @@ int main()
   const double extrema_x_lo = front - 3.0;
   const double extrema_x_hi = front - 0.5;
 
-  for (std::size_t nx : kGrids) {
+  for (cfe::Index nx : kGrids) {
     const auto rusanov = cfe_verification::run_shu_osher<Scalar, cfe::RusanovFlux>(nx, kTFinal, kCfl);
     const auto hllc = cfe_verification::run_shu_osher<Scalar, cfe::HllcFlux>(nx, kTFinal, kCfl);
     write_profile_csv(data_dir / ("case_nx" + std::to_string(nx) + "_rusanov.csv"), rusanov);

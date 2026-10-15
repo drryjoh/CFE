@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "cfe/core/macros.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/layout.hpp"
 
 namespace cfe {
@@ -28,21 +29,21 @@ class FieldView
   CFE_HOST_DEVICE
   FieldView() : data_(nullptr), n_cells_(0) {}
   CFE_HOST_DEVICE
-  FieldView(Scalar* data, std::size_t n_cells) : data_(data), n_cells_(n_cells) {}
+  FieldView(Scalar* data, Index n_cells) : data_(data), n_cells_(n_cells) {}
 
   CFE_HOST_DEVICE
-  std::size_t n_cells() const { return n_cells_; }
+  Index n_cells() const { return n_cells_; }
   CFE_HOST_DEVICE
-  std::size_t size() const { return n_cells_ * NComponents; }
+  Index size() const { return n_cells_ * NComponents; }
 
   CFE_HOST_DEVICE
-  Scalar& operator()(std::size_t cell, std::size_t component)
+  Scalar& operator()(Index cell, Index component)
   {
     return data_[Layout::index(cell, component, n_cells_, NComponents)];
   }
 
   CFE_HOST_DEVICE
-  const Scalar& operator()(std::size_t cell, std::size_t component) const
+  const Scalar& operator()(Index cell, Index component) const
   {
     return data_[Layout::index(cell, component, n_cells_, NComponents)];
   }
@@ -54,7 +55,7 @@ class FieldView
 
  private:
   Scalar* data_;
-  std::size_t n_cells_;
+  Index n_cells_;
 };
 
 // Owning host-side storage. Allocation happens only in the constructor,
@@ -70,18 +71,18 @@ class Field
   // view() const below.
   using ConstView = FieldView<const Scalar, NComponents, Layout>;
 
-  explicit Field(std::size_t n_cells) : n_cells_(n_cells), storage_(n_cells * NComponents) {}
+  explicit Field(Index n_cells) : n_cells_(n_cells), storage_(n_cells * NComponents) {}
 
-  std::size_t n_cells() const { return n_cells_; }
+  Index n_cells() const { return n_cells_; }
   static constexpr std::size_t n_components() { return NComponents; }
-  std::size_t size() const { return storage_.size(); }
+  Index size() const { return storage_.size(); }
 
-  Scalar& operator()(std::size_t cell, std::size_t component)
+  Scalar& operator()(Index cell, Index component)
   {
     return storage_[Layout::index(cell, component, n_cells_, NComponents)];
   }
 
-  const Scalar& operator()(std::size_t cell, std::size_t component) const
+  const Scalar& operator()(Index cell, Index component) const
   {
     return storage_[Layout::index(cell, component, n_cells_, NComponents)];
   }
@@ -96,7 +97,7 @@ class Field
   ConstView view() const { return ConstView(storage_.data(), n_cells_); }
 
  private:
-  std::size_t n_cells_;
+  Index n_cells_;
   std::vector<Scalar> storage_;
 };
 

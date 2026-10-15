@@ -88,7 +88,7 @@ State<Scalar, N> rusanov_flux(const State<Scalar, N>& left_state, const State<Sc
   const State<Scalar, N> flux_right = field.physical_flux(right_state, axis);
 
   State<Scalar, N> flux;
-  for (std::size_t c = 0; c < N; ++c) {
+  for (Index c = 0; c < N; ++c) {
     flux[c] =
         Scalar(0.5) * (flux_left[c] + flux_right[c]) - Scalar(0.5) * alpha * (right_state[c] - left_state[c]);
   }

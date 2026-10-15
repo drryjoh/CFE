@@ -56,8 +56,8 @@ using Scalar = cfe::scalar;
 // picks its looping strategy at compile time, not at run time.
 struct SerialBackend
 {
-  template <class Index, class Functor>
-  static void run(Index n, Functor f)
+  template <class IndexT, class Functor>
+  static void run(IndexT n, Functor f)
   {
     cfe::backend::serial::parallel_for(n, f);
   }
@@ -67,8 +67,8 @@ struct SerialBackend
 // across multiple CPU threads instead of looping on just one.
 struct ThreadedBackend
 {
-  template <class Index, class Functor>
-  static void run(Index n, Functor f)
+  template <class IndexT, class Functor>
+  static void run(IndexT n, Functor f)
   {
     cfe::backend::threaded::parallel_for(n, f);
   }
@@ -85,7 +85,7 @@ constexpr int kRepetitions = 7;
 // prints one CSV row with the result. Called once per (backend, nx)
 // combination from main() below.
 template <class Backend>
-void run_case(const char* backend_name, std::size_t nx)
+void run_case(const char* backend_name, cfe::Index nx)
 {
   // Build a 1D grid of `nx` cells, each `grid.dx` wide, covering [0,1].
   // `ngx = 2` ghost cells pad each end -- needed because the solver's
@@ -107,7 +107,7 @@ void run_case(const char* backend_name, std::size_t nx)
   // the same formula a numpy one-liner `offset + wave*np.sin(2*np.pi*x)`
   // would compute. Also remember the largest |value| seen, needed below
   // to pick a stable time-step size.
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x = grid.x_center(grid.ngx + i);
     const Scalar value = kAmplitudeOffset + kAmplitudeWave * std::sin(Scalar(2.0) * kPi * x);
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = value;
@@ -181,8 +181,8 @@ void run_case(const char* backend_name, std::size_t nx)
 int main()
 {
   std::printf("backend,n_cells,repetitions,median_ms,cell_updates_per_s\n");
-  for (std::size_t nx : {std::size_t(10'000), std::size_t(100'000), std::size_t(1'000'000),
-                        std::size_t(10'000'000)}) {
+  for (cfe::Index nx : {cfe::Index(10'000), cfe::Index(100'000), cfe::Index(1'000'000),
+                        cfe::Index(10'000'000)}) {
     run_case<SerialBackend>("serial", nx);
     run_case<ThreadedBackend>("threaded", nx);
   }
