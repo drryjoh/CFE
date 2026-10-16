@@ -16,6 +16,13 @@
 // call-site dispatch (fill_ghost_cells(field, grid, axis, boundary))
 // that is this project's actual "swappable neighbor provider" seam --
 // see that file for the AMR/MPI-readiness reasoning.
+//
+// `fill_x`/`fill_y`/`fill_z` below are thin calls into
+// `grid/boundary/cartesian_fill.hpp`'s `cartesian_fill<Axis>` (PR #6
+// cleanup task, see agent_history.md): that header owns the shared
+// "decode a flat index into (g, o1, o2), dispatch through `Backend`"
+// skeleton every type here needs; each `fill_x/y/z` below supplies only
+// its own per-component transform as a callback.
 #pragma once
 
 #include <cstddef>
@@ -25,6 +32,7 @@
 #include "cfe/backend/parallel_for.hpp"
 #include "cfe/core/macros.hpp"
 #include "cfe/field/field.hpp"
+#include "cfe/grid/boundary/cartesian_fill.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 #include "cfe/math/fixed_array.hpp"
 
@@ -75,16 +83,9 @@ struct PeriodicBoundary
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngx == 0) return;
-    detail::require_periodic_extent_covers_ghost_depth(grid.nx, grid.ngx, "x");
-    const std::size_t py = grid.padded_ny();
-    const std::size_t pz = grid.padded_nz();
-    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngx;
-      const std::size_t rem = idx / grid.ngx;
-      const std::size_t j = rem % py;
-      const std::size_t k = rem / py;
-
+    if (grid.ngx != 0) detail::require_periodic_extent_covers_ghost_depth(grid.nx, grid.ngx, "x");
+    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t j,
+                                                                std::size_t k) mutable {
       const std::size_t low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
       const std::size_t low_source = grid.flat_index(grid.ngx + grid.nx - 1 - g, j, k);
       const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
@@ -100,16 +101,9 @@ struct PeriodicBoundary
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngy == 0) return;
-    detail::require_periodic_extent_covers_ghost_depth(grid.ny, grid.ngy, "y");
-    const std::size_t px = grid.padded_nx();
-    const std::size_t pz = grid.padded_nz();
-    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngy;
-      const std::size_t rem = idx / grid.ngy;
-      const std::size_t i = rem % px;
-      const std::size_t k = rem / px;
-
+    if (grid.ngy != 0) detail::require_periodic_extent_covers_ghost_depth(grid.ny, grid.ngy, "y");
+    cartesian_fill<Axis::Y, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t i,
+                                                                std::size_t k) mutable {
       const std::size_t low_ghost = grid.flat_index(i, grid.ngy - 1 - g, k);
       const std::size_t low_source = grid.flat_index(i, grid.ngy + grid.ny - 1 - g, k);
       const std::size_t high_ghost = grid.flat_index(i, grid.ngy + grid.ny + g, k);
@@ -125,16 +119,9 @@ struct PeriodicBoundary
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngz == 0) return;
-    detail::require_periodic_extent_covers_ghost_depth(grid.nz, grid.ngz, "z");
-    const std::size_t px = grid.padded_nx();
-    const std::size_t py = grid.padded_ny();
-    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngz;
-      const std::size_t rem = idx / grid.ngz;
-      const std::size_t i = rem % px;
-      const std::size_t j = rem / px;
-
+    if (grid.ngz != 0) detail::require_periodic_extent_covers_ghost_depth(grid.nz, grid.ngz, "z");
+    cartesian_fill<Axis::Z, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t i,
+                                                                std::size_t j) mutable {
       const std::size_t low_ghost = grid.flat_index(i, j, grid.ngz - 1 - g);
       const std::size_t low_source = grid.flat_index(i, j, grid.ngz + grid.nz - 1 - g);
       const std::size_t high_ghost = grid.flat_index(i, j, grid.ngz + grid.nz + g);
@@ -166,17 +153,10 @@ struct StaticBoundary
   template <class Backend = CpuParallelFor, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngx == 0) return;
-    const std::size_t py = grid.padded_ny();
-    const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngx;
-      const std::size_t rem = idx / grid.ngx;
-      const std::size_t j = rem % py;
-      const std::size_t k = rem / py;
-
+    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t j,
+                                                                std::size_t k) mutable {
       const std::size_t low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
       const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
 
@@ -190,17 +170,10 @@ struct StaticBoundary
   template <class Backend = CpuParallelFor, class Layout>
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngy == 0) return;
-    const std::size_t px = grid.padded_nx();
-    const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngy;
-      const std::size_t rem = idx / grid.ngy;
-      const std::size_t i = rem % px;
-      const std::size_t k = rem / px;
-
+    cartesian_fill<Axis::Y, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t i,
+                                                                std::size_t k) mutable {
       const std::size_t low_ghost = grid.flat_index(i, grid.ngy - 1 - g, k);
       const std::size_t high_ghost = grid.flat_index(i, grid.ngy + grid.ny + g, k);
 
@@ -214,17 +187,10 @@ struct StaticBoundary
   template <class Backend = CpuParallelFor, class Layout>
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngz == 0) return;
-    const std::size_t px = grid.padded_nx();
-    const std::size_t py = grid.padded_ny();
     const State<Scalar, N> low = low_value;
     const State<Scalar, N> high = high_value;
-    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngz;
-      const std::size_t rem = idx / grid.ngz;
-      const std::size_t i = rem % px;
-      const std::size_t j = rem / px;
-
+    cartesian_fill<Axis::Z, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t i,
+                                                                std::size_t j) mutable {
       const std::size_t low_ghost = grid.flat_index(i, j, grid.ngz - 1 - g);
       const std::size_t high_ghost = grid.flat_index(i, j, grid.ngz + grid.nz + g);
 
@@ -263,17 +229,10 @@ struct InflowOutflowBoundary
   template <class Backend = CpuParallelFor, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngx == 0) return;
-    const std::size_t py = grid.padded_ny();
-    const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> inflow = inflow_value;
     const std::size_t nearest_real = grid.ngx + grid.nx - 1;
-    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngx;
-      const std::size_t rem = idx / grid.ngx;
-      const std::size_t j = rem % py;
-      const std::size_t k = rem / py;
-
+    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t j,
+                                                                std::size_t k) mutable {
       const std::size_t low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
       const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
       const std::size_t high_source = grid.flat_index(nearest_real, j, k);
@@ -288,17 +247,10 @@ struct InflowOutflowBoundary
   template <class Backend = CpuParallelFor, class Layout>
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngy == 0) return;
-    const std::size_t px = grid.padded_nx();
-    const std::size_t pz = grid.padded_nz();
     const State<Scalar, N> inflow = inflow_value;
     const std::size_t nearest_real = grid.ngy + grid.ny - 1;
-    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngy;
-      const std::size_t rem = idx / grid.ngy;
-      const std::size_t i = rem % px;
-      const std::size_t k = rem / px;
-
+    cartesian_fill<Axis::Y, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t i,
+                                                                std::size_t k) mutable {
       const std::size_t low_ghost = grid.flat_index(i, grid.ngy - 1 - g, k);
       const std::size_t high_ghost = grid.flat_index(i, grid.ngy + grid.ny + g, k);
       const std::size_t high_source = grid.flat_index(i, nearest_real, k);
@@ -313,17 +265,10 @@ struct InflowOutflowBoundary
   template <class Backend = CpuParallelFor, class Layout>
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngz == 0) return;
-    const std::size_t px = grid.padded_nx();
-    const std::size_t py = grid.padded_ny();
     const State<Scalar, N> inflow = inflow_value;
     const std::size_t nearest_real = grid.ngz + grid.nz - 1;
-    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % grid.ngz;
-      const std::size_t rem = idx / grid.ngz;
-      const std::size_t i = rem % px;
-      const std::size_t j = rem / px;
-
+    cartesian_fill<Axis::Z, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t i,
+                                                                std::size_t j) mutable {
       const std::size_t low_ghost = grid.flat_index(i, j, grid.ngz - 1 - g);
       const std::size_t high_ghost = grid.flat_index(i, j, grid.ngz + grid.nz + g);
       const std::size_t high_source = grid.flat_index(i, j, nearest_real);

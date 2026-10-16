@@ -7,12 +7,15 @@ one is added; do not let it drift from the code. It is a reference, not
 a tutorial: for the reasoning behind a design, see the relevant ADR under
 `docs/adr/`.
 
-*Covers through task 0011's HLLC addition: Phase 1's scalar-advection
-solver (grid, boundary conditions, interface-value/numerical-flux,
-SSP-RK2, the `ScalarAdvectionField`/`FvmSolver` split), Phase 2's
-Burgers/MPI-decomposition work, Phase 3's `EulerField`,
-`SlipWallBoundary`, and the vector (system) `RusanovFlux` overload, and
-task 0011's `HllcFlux` (`docs/adr/0012-hllc-numerical-flux.md`).*
+*Covers through the PR #6 cleanup task (tasks/0014-pr6-cleanup.md):
+Phase 1's scalar-advection solver (grid, boundary conditions,
+interface-value/numerical-flux, SSP-RK2, the
+`ScalarAdvectionField`/`FvmSolver` split), Phase 2's Burgers/MPI-
+decomposition work, Phase 3's `EulerField`, `SlipWallBoundary`, and the
+vector (system) `RusanovFlux` overload, task 0011's `HllcFlux`
+(`docs/adr/0012-hllc-numerical-flux.md`), Phase 4's forward-step/
+Shu-Osher/propagating-shock work, and the cleanup task's
+`cfe::abs_value` and `cfe::cartesian_fill`.*
 
 ## `cfe::core` — precision, indexing, host/device macros
 
@@ -39,6 +42,7 @@ task 0011's `HllcFlux` (`docs/adr/0012-hllc-numerical-flux.md`).*
 | `operator+`, `operator-`, `operator*`, `operator/`, `componentwise_multiply` | `math/operations.hpp` | Componentwise arithmetic on `FixedArray`. |
 | `cfe::contract(a, b)` | `math/operations.hpp` | Full contraction to a scalar: `sum_k a[k]*b[k]` (generalized dot product). |
 | `cfe::weight(a, w)` | `math/operations.hpp` | Componentwise scaling of `a` by `w`; returns a `FixedArray`, not a scalar (unlike `contract`). |
+| `cfe::abs_value<Scalar>(x)` | `math/scalar_ops.hpp` | Host/device absolute value, `x < 0 ? -x : x`. Added (PR #6 cleanup task) to collect five independent hand-rolled copies of this exact ternary (`BurgersField`/`EulerField::wave_speed`, both `rusanov_flux` overloads, `BlockInterfaceBoundary::detail::close`) into one primitive. Named `abs_value`, not `abs`, to avoid colliding with `std::abs`'s mixed integer/floating-point overload set. |
 
 ## `cfe::field` — contiguous storage
 
@@ -70,7 +74,8 @@ task 0011's `HllcFlux` (`docs/adr/0012-hllc-numerical-flux.md`).*
 | Type / function | File | What it is |
 |---|---|---|
 | `cfe::CartesianGrid<Scalar>` | `grid/structured/cartesian_grid.hpp` | Describes one block: real cell counts, ghost-layer depth (`std::size_t`), and spacing (`dx`/`dy`/`dz`, type `Scalar`) per dimension, plus interior origin. Templated on `Scalar` (not hardcoded `double`) so a `float`-precision solver carries no hidden conversion for its grid spacing. `flat_index(i,j,k)` is the *only* place `(i,j,k)` becomes the flat `cell` index `Field`/`FieldView` expect — ghost cells live in the same contiguous array as real cells, at padded indices outside `[n_ghost, n_ghost+n_cells)`. Spacing/extents are scoped to this one object (not global) so a second block at a different resolution — fixed-block AMR — doesn't require redesigning this type. |
-| `cfe::PeriodicBoundary` | `grid/boundary/boundary_condition.hpp` | Wraps one axis's ghost layer from the opposite real boundary. `fill_x<Backend=CpuParallelFor>`/`fill_y<...>`/`fill_z<...>`, each dispatched through `Backend::run`. `Backend` is the *first* template parameter (Scalar/N/Layout are deduced from the `FieldView` argument after it), specifically so `fill_ghost_cells` can override just `Backend` explicitly. Stateless. |
+| `cfe::cartesian_fill<Axis, Backend=CpuParallelFor>(grid, transform)` (PR #6 cleanup task) | `grid/boundary/cartesian_fill.hpp` | The shared ghost-fill iteration skeleton every axis-aligned `BoundaryCondition::fill_x/fill_y/fill_z` below needs: decodes a flat index into `(g, o1, o2)` (`g` = position within the ghost layer, `o1`/`o2` = the other two axes' padded indices, same `if constexpr`-dispatched convention `MpiHaloBoundary::exchange<Axis>` already established) and dispatches one `Backend::run` call over it. `transform(g, o1, o2)` — an ordinary host/device-callable lambda supplied at each `fill_x`/`fill_y`/`fill_z` call site — owns everything specific to one `BoundaryCondition` type (how many source indices to compute, any sign flip, any neighbor-validity branching); this function has no notion of boundary physics beyond the decode. Used by `PeriodicBoundary`/`StaticBoundary`/`InflowOutflowBoundary`/`SlipWallBoundary` for their whole body, and by `BlockInterfaceBoundary` for just this decode/dispatch (its neighbor-read branching stays local — not forced into the same callback shape). Does not touch `MpiHaloBoundary`, which packs/exchanges/unpacks whole slabs across MPI ranks, a different problem already unified on its own terms. |
+| `cfe::PeriodicBoundary` | `grid/boundary/boundary_condition.hpp` | Wraps one axis's ghost layer from the opposite real boundary. `fill_x<Backend=CpuParallelFor>`/`fill_y<...>`/`fill_z<...>`, each a thin call into `cartesian_fill<Axis>` passing its own per-component transform. `Backend` is the *first* template parameter (Scalar/N/Layout are deduced from the `FieldView` argument after it), specifically so `fill_ghost_cells` can override just `Backend` explicitly. Stateless. |
 | `cfe::StaticBoundary<Scalar, N>` | `grid/boundary/boundary_condition.hpp` | Writes a fixed `State<Scalar,N>` into every ghost cell on the low/high side of one axis (the two sides may differ). Same `fill_x<Backend>`/`fill_y<Backend>`/`fill_z<Backend>` shape as `PeriodicBoundary` — duck-typed, no common base (AGENTS.md #12: no virtual functions inside kernels). |
 | `cfe::InflowOutflowBoundary<Scalar, N>` (Phase 2) | `grid/boundary/boundary_condition.hpp` | Fixed Dirichlet (`inflow_value`) on the low end of one axis, zero-order extrapolation (copies the single nearest real cell into every ghost layer on that end) on the high end. Same `fill_x`/`fill_y`/`fill_z` shape as the other two. First real implementation of AGENTS.md #17's named "extrapolation/outflow" BC category — explicitly the simple zero-order kind, not the characteristic-based partial-specification version AGENTS.md reserves for Phase 3's compressible Euler work. Added for `tutorials/burgers_1d_shock_and_steepening/`'s moving-shock case. |
 | `cfe::fill_ghost_cells<Scalar,N,Layout,Boundary,Backend=CpuParallelFor>(field, grid, axis, boundary)` | `grid/ghost/ghost_fill.hpp` | The single call site solver code uses to fill ghost cells. This is the actual swappable seam: solver code never touches `(i,j,k)±1` indexing directly, so a future MPI halo-exchange or coarse-fine-AMR-interpolation provider is a new `boundary` type at this same call shape, not a redesign. Forwards `Backend` to `boundary.template fill_x<Backend>(...)` etc. Note: this one function is instantiated per `Boundary` type with a runtime `switch` over all three axes, so any `Boundary` passed to it at all must implement `fill_x`/`fill_y`/`fill_z` — even a 2D-only type whose `fill_z` is never reached at runtime still needs one that compiles (see `tutorials/burgers_2d_diagonal_shock/burgers_2d.cpp`'s `DiagonalShockExactBoundary` for a worked example of this gotcha). |
