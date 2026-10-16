@@ -45,7 +45,26 @@ each as blocking or optional.
 
 ## Accumulated knowledge
 
-Nothing recorded yet. See `CLAUDE.md`'s "Updating agent knowledge"
-section for how this should grow -- recurring places students get
-confused, explanations that worked well, with a reference to the
-tutorial/code they apply to.
+- **An idiom explained at every *use* site but never at its *origin*
+  site still leaves a student stuck if they land on the origin first.**
+  A dual-precision test pattern (`template<Scalar>` check function plus
+  two separate `CFE_TEST` registrations, one per precision) was
+  explained well in every new test file that used it, but neither the
+  macro it's built on (`CFE_TEST` in `test_framework.hpp`) nor the file
+  that first established the pattern (`test_fixed_array.cpp`) explained
+  *why* it takes this shape (the macro can only wrap one ordinary
+  function per registry entry, so instantiating a template at two types
+  has to be written out by hand). A student who opens the origin file
+  first, which is plausible, gets no answer there -- check the
+  definition site, not just the newest call sites (task 0017).
+- **A new RAII class needs the *pattern* explained, not just its
+  purpose, the first time it appears somewhere a CPU-only student would
+  actually open it.** A file-handle wrapper's comment said what it was
+  for ("so every throw path still closes the file") but not that this
+  is C++'s general RAII idiom -- tying a resource's release to an
+  object's destructor, including during exception unwinding, the
+  nearest analogy being Python's `with`-block except enforced by the
+  language rather than relying on the caller. The project's only other
+  hand-written RAII class was gated behind an MPI-only `#ifdef`, so this
+  was genuinely this idiom's first unguarded appearance (task 0016,
+  `src/cfe/io/restart_file.hpp`'s `FileHandle`).
