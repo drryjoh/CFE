@@ -36,7 +36,7 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_1d)
   const cfe::State<Scalar, 3> q = field.conserved_from_primitive(Scalar(1.0), velocity, Scalar(1.0));
   const cfe::State<Scalar, 3> flux = cfe::hllc_flux(q, q, cfe::Axis::X, field);
   const cfe::State<Scalar, 3> expected = field.physical_flux(q, cfe::Axis::X);
-  for (std::size_t c = 0; c < 3; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
+  for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
 }
 
 CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d)
@@ -55,7 +55,7 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangentia
   for (cfe::Axis axis : {cfe::Axis::X, cfe::Axis::Y}) {
     const cfe::State<Scalar, 4> flux = cfe::hllc_flux(q, q, axis, field);
     const cfe::State<Scalar, 4> expected = field.physical_flux(q, axis);
-    for (std::size_t c = 0; c < 4; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
+    for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
   }
 }
 
@@ -70,7 +70,7 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_3d)
   for (cfe::Axis axis : {cfe::Axis::X, cfe::Axis::Y, cfe::Axis::Z}) {
     const cfe::State<Scalar, 5> flux = cfe::hllc_flux(q, q, axis, field);
     const cfe::State<Scalar, 5> expected = field.physical_flux(q, axis);
-    for (std::size_t c = 0; c < 5; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
+    for (cfe::Index c = 0; c < 5; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
   }
 }
 
@@ -318,7 +318,7 @@ CFE_TEST(test_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forwar
   CFE_CHECK(static_cast<double>(field.pressure(left)) < 0.02);  // confirm this really is the near-vacuum case
 
   const cfe::State<Scalar, 4> flux = cfe::hllc_flux(left, right, cfe::Axis::Y, field);
-  for (std::size_t c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
+  for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
 }
 
 CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative)
@@ -336,7 +336,7 @@ CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative)
 
   const cfe::State<Scalar, 3> q_star = cfe::detail::hllc_star_state(q, Scalar(1.0), Scalar(2.0), cfe::Axis::X, field);
   CFE_CHECK(static_cast<double>(q_star[0]) > 0.0);  // floored, not negative
-  for (std::size_t c = 0; c < 3; ++c) CFE_CHECK(std::isfinite(static_cast<double>(q_star[c])));
+  for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK(std::isfinite(static_cast<double>(q_star[c])));
 }
 
 // --- Robustness at the PVRS estimate's documented weak point -----------
@@ -359,7 +359,7 @@ CFE_TEST(test_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction)
   const cfe::State<Scalar, 3> q_right = field.conserved_from_primitive(Scalar(1.0), vR, Scalar(0.4));
 
   const cfe::State<Scalar, 3> flux = cfe::hllc_flux(q_left, q_right, cfe::Axis::X, field);
-  for (std::size_t c = 0; c < 3; ++c) {
+  for (cfe::Index c = 0; c < 3; ++c) {
     CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
   }
 
@@ -404,7 +404,7 @@ CFE_TEST(test_hllc_wave_speeds_stays_finite_and_correctly_signed_at_float_precis
   CFE_CHECK(waves.s_l < 0.0f);  // the specific sign the double-precision regression test above also checks
 
   const cfe::State<float, 4> flux = cfe::hllc_flux(qL, qR, cfe::Axis::X, field);
-  for (std::size_t c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
+  for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
 }
 
 CFE_TEST(test_hllc_flux_stays_finite_at_float_precision_near_vacuum_asymmetric_face)
@@ -423,5 +423,5 @@ CFE_TEST(test_hllc_flux_stays_finite_at_float_precision_near_vacuum_asymmetric_f
   CFE_CHECK(static_cast<double>(field.pressure(left)) < 0.02);  // confirm this is still the near-vacuum case at float
 
   const cfe::State<float, 4> flux = cfe::hllc_flux(left, right, cfe::Axis::Y, field);
-  for (std::size_t c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
+  for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
 }

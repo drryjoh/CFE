@@ -12,6 +12,8 @@
 #include <cmath>
 #include <cstddef>
 
+#include "cfe/core/types.hpp"
+
 #include "forward_step_setup.hpp"
 #include "test_framework.hpp"
 
@@ -20,22 +22,22 @@ namespace {
 using Scalar = double;
 
 template <std::size_t Dim>
-void run_short_sanity_check(std::size_t nz_cells)
+void run_short_sanity_check(cfe::Index nz_cells)
 {
   cfe_verification::ForwardStepBlocks<Scalar, Dim> blocks(10, nz_cells, Scalar(0.2));
   const double initial_mass = blocks.total_mass();
   CFE_CHECK(initial_mass > 0.0);
 
-  const std::size_t steps = blocks.run_to(Scalar(0.05), Scalar(0.4));
+  const cfe::Index steps = blocks.run_to(Scalar(0.05), Scalar(0.4));
   CFE_CHECK(steps > 0);
 
   auto check_finite_and_physical = [&](const auto& state, const auto& grid) {
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+    for (cfe::Index k = 0; k < grid.nz; ++k) {
+      for (cfe::Index j = 0; j < grid.ny; ++j) {
+        for (cfe::Index i = 0; i < grid.nx; ++i) {
+          const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
           cfe::State<Scalar, cfe::EulerField<Scalar, Dim>::n_components> q;
-          for (std::size_t c = 0; c < cfe::EulerField<Scalar, Dim>::n_components; ++c) q[c] = state(cell, c);
+          for (cfe::Index c = 0; c < cfe::EulerField<Scalar, Dim>::n_components; ++c) q[c] = state(cell, c);
           const double rho = blocks.field.density(q);
           const double p = blocks.field.pressure(q);
           CFE_CHECK(std::isfinite(rho));

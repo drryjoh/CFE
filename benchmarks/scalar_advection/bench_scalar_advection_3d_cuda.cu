@@ -17,6 +17,7 @@
 
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
+#include "cfe/core/types.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
@@ -31,7 +32,7 @@ constexpr double kUy = 0.6;
 constexpr double kUz = 0.3;
 constexpr int kRepetitions = 10;
 
-void run_case(std::size_t n_per_axis)
+void run_case(cfe::Index n_per_axis)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = n_per_axis;
@@ -45,9 +46,9 @@ void run_case(std::size_t n_per_axis)
   grid.dz = grid.dx;
 
   std::vector<double> host_ic(grid.n_cells_total(), 0.0);
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const double x = grid.x_center(grid.ngx + i);
         const double y = grid.y_center(grid.ngy + j);
         const double z = grid.z_center(grid.ngz + k);
@@ -107,8 +108,8 @@ void run_case(std::size_t n_per_axis)
 int main()
 {
   std::printf("backend,dim,n_per_axis,n_cells,repetitions,median_ms,cell_updates_per_s\n");
-  for (std::size_t n : {std::size_t(64), std::size_t(128), std::size_t(256), std::size_t(400),
-                        std::size_t(512)}) {
+  for (cfe::Index n : {cfe::Index(64), cfe::Index(128), cfe::Index(256), cfe::Index(400),
+                        cfe::Index(512)}) {
     run_case(n);
   }
   return 0;

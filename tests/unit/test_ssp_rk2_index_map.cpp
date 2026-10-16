@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <set>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 #include "cfe/solver/explicit/fvm_solver.hpp"
@@ -49,15 +50,15 @@ CFE_TEST(test_cartesian_real_cell_index_map_is_a_bijection_for_rectangular_2d_gr
 
   cfe::detail::CartesianRealCellIndexMap<double, 2> index_map{grid};
 
-  std::set<std::size_t> visited;
-  for (std::size_t r = 0; r < grid.nx * grid.ny; ++r) {
-    const std::size_t cell = index_map(r);
+  std::set<cfe::Index> visited;
+  for (cfe::Index r = 0; r < grid.nx * grid.ny; ++r) {
+    const cfe::Index cell = index_map(r);
     CFE_CHECK(visited.insert(cell).second);  // never the same storage index twice
   }
 
-  std::set<std::size_t> expected_real_cells;
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+  std::set<cfe::Index> expected_real_cells;
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       expected_real_cells.insert(grid.flat_index(grid.ngx + i, grid.ngy + j, 0));
     }
   }
@@ -76,16 +77,16 @@ CFE_TEST(test_cartesian_real_cell_index_map_is_a_bijection_for_rectangular_3d_gr
 
   cfe::detail::CartesianRealCellIndexMap<double, 3> index_map{grid};
 
-  std::set<std::size_t> visited;
-  for (std::size_t r = 0; r < grid.nx * grid.ny * grid.nz; ++r) {
-    const std::size_t cell = index_map(r);
+  std::set<cfe::Index> visited;
+  for (cfe::Index r = 0; r < grid.nx * grid.ny * grid.nz; ++r) {
+    const cfe::Index cell = index_map(r);
     CFE_CHECK(visited.insert(cell).second);
   }
 
-  std::set<std::size_t> expected_real_cells;
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  std::set<cfe::Index> expected_real_cells;
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         expected_real_cells.insert(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k));
       }
     }
@@ -102,20 +103,20 @@ CFE_TEST(test_ssp_rk2_step_leaves_ghost_state_and_ghost_residual_exactly_untouch
   grid.ngy = 2;
   grid.dx = 1.0;
   grid.dy = 1.0;
-  const std::size_t n_total = grid.n_cells_total();
-  const std::size_t n_active = grid.nx * grid.ny;
+  const cfe::Index n_total = grid.n_cells_total();
+  const cfe::Index n_active = grid.nx * grid.ny;
 
   cfe::Field<double, 1> state(n_total);
   cfe::Field<double, 1> stage1(n_total);
   cfe::Field<double, 1> residual_scratch(n_total);
 
   constexpr double kGhostSentinel = -999.0;
-  for (std::size_t idx = 0; idx < n_total; ++idx) {
+  for (cfe::Index idx = 0; idx < n_total; ++idx) {
     state.data()[idx] = kGhostSentinel;
     residual_scratch.data()[idx] = kGhostSentinel;
   }
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       state(grid.flat_index(grid.ngx + i, grid.ngy + j, 0), 0) =
           static_cast<double>(i * 10 + j + 1);
     }
@@ -128,8 +129,8 @@ CFE_TEST(test_ssp_rk2_step_leaves_ghost_state_and_ghost_residual_exactly_untouch
   // code path that legitimately writes ghost cells, so any ghost-cell
   // change observed below can only have come from ssp_rk2_step itself.
   auto residual = [&](cfe::FieldView<double, 1> in, cfe::FieldView<double, 1> out) {
-    for (std::size_t r = 0; r < n_active; ++r) {
-      const std::size_t cell = index_map(r);
+    for (cfe::Index r = 0; r < n_active; ++r) {
+      const cfe::Index cell = index_map(r);
       out(cell, 0) = -in(cell, 0);
     }
   };
@@ -138,9 +139,9 @@ CFE_TEST(test_ssp_rk2_step_leaves_ghost_state_and_ghost_residual_exactly_untouch
   cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual,
                              n_active, index_map);
 
-  for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
-    for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
-      const std::size_t idx = grid.flat_index(i, j, 0);
+  for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
+    for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
+      const cfe::Index idx = grid.flat_index(i, j, 0);
       const bool is_real = (i >= grid.ngx && i < grid.ngx + grid.nx) &&
                             (j >= grid.ngy && j < grid.ngy + grid.ny);
       if (!is_real) {
@@ -166,31 +167,31 @@ void run_multi_component_case()
   grid.ngx = 2;
   grid.dx = 1.0;
   constexpr std::size_t N = 3;
-  const std::size_t n_total = grid.n_cells_total();
-  const std::size_t n_active = grid.nx;
+  const cfe::Index n_total = grid.n_cells_total();
+  const cfe::Index n_active = grid.nx;
 
   cfe::Field<double, N, Layout> state(n_total);
   cfe::Field<double, N, Layout> stage1(n_total);
   cfe::Field<double, N, Layout> residual_scratch(n_total);
 
   constexpr double kGhostSentinel = -777.0;
-  for (std::size_t idx = 0; idx < n_total; ++idx) {
-    for (std::size_t c = 0; c < N; ++c) {
+  for (cfe::Index idx = 0; idx < n_total; ++idx) {
+    for (cfe::Index c = 0; c < N; ++c) {
       state(idx, c) = kGhostSentinel;
       residual_scratch(idx, c) = kGhostSentinel;
     }
   }
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    for (std::size_t c = 0; c < N; ++c) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    for (cfe::Index c = 0; c < N; ++c) {
       state(grid.flat_index(grid.ngx + i, 0, 0), c) = static_cast<double>((i + 1) * 10 + c);
     }
   }
 
   cfe::detail::CartesianRealCellIndexMap<double, 1> index_map{grid};
   auto residual = [&](cfe::FieldView<double, N, Layout> in, cfe::FieldView<double, N, Layout> out) {
-    for (std::size_t r = 0; r < n_active; ++r) {
-      const std::size_t cell = index_map(r);
-      for (std::size_t c = 0; c < N; ++c) out(cell, c) = -in(cell, c);
+    for (cfe::Index r = 0; r < n_active; ++r) {
+      const cfe::Index cell = index_map(r);
+      for (cfe::Index c = 0; c < N; ++c) out(cell, c) = -in(cell, c);
     }
   };
 
@@ -198,10 +199,10 @@ void run_multi_component_case()
   cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), dt, residual,
                              n_active, index_map);
 
-  for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
+  for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
     const bool is_real = (i >= grid.ngx && i < grid.ngx + grid.nx);
-    const std::size_t idx = grid.flat_index(i, 0, 0);
-    for (std::size_t c = 0; c < N; ++c) {
+    const cfe::Index idx = grid.flat_index(i, 0, 0);
+    for (cfe::Index c = 0; c < N; ++c) {
       if (!is_real) {
         CFE_CHECK_NEAR(state(idx, c), kGhostSentinel, 0.0);
       } else {

@@ -13,9 +13,10 @@
 #pragma once
 
 #include <cmath>
-#include <cstddef>
 #include <stdexcept>
 #include <vector>
+
+#include "cfe/core/types.hpp"
 
 namespace cfe_verification {
 
@@ -53,7 +54,7 @@ double locate_shock_position(const std::vector<Scalar>& x, const std::vector<Sca
   const double mid = 0.5 * (rho_behind + rho_ahead);
   const bool behind_is_higher = rho_behind > rho_ahead;
 
-  for (std::size_t i = 0; i + 1 < rho.size(); ++i) {
+  for (cfe::Index i = 0; i + 1 < rho.size(); ++i) {
     const double a = static_cast<double>(rho[i]);
     const double b = static_cast<double>(rho[i + 1]);
     const bool crosses = behind_is_higher ? (a >= mid && b < mid) : (a <= mid && b > mid);
@@ -76,9 +77,9 @@ inline double least_squares_slope(const std::vector<double>& times, const std::v
   if (times.size() != positions.size() || times.size() < 2) {
     throw std::invalid_argument("least_squares_slope: times/positions must be parallel vectors of size >= 2");
   }
-  const std::size_t n = times.size();
+  const cfe::Index n = times.size();
   double sum_t = 0.0, sum_x = 0.0, sum_tt = 0.0, sum_tx = 0.0;
-  for (std::size_t i = 0; i < n; ++i) {
+  for (cfe::Index i = 0; i < n; ++i) {
     sum_t += times[i];
     sum_x += positions[i];
     sum_tt += times[i] * times[i];

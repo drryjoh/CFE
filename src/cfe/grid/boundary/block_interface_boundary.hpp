@@ -175,8 +175,8 @@ struct BlockInterfaceBoundary
   // spanning the shared-height band). Outside that band, the riser-face
   // fallback applies instead -- see this file's header comment.
   long j_offset_to_neighbor = 0;
-  std::size_t j_valid_lo = 0;
-  std::size_t j_valid_hi = 0;
+  Index j_valid_lo = 0;
+  Index j_valid_hi = 0;
 
   template <class Backend = CpuParallelFor>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
@@ -184,18 +184,18 @@ struct BlockInterfaceBoundary
     if (grid.ngx == 0) return;
     detail::require_matching_block_resolution(grid, neighbor_grid);
 
-    constexpr std::size_t normal_component = Field::momentum_index(Axis::X);
+    constexpr Index normal_component = Field::momentum_index(Axis::X);
 
     const State<Scalar, N> domain_edge = domain_edge_value;
     const FieldView<Scalar, N, Layout> neighbor = neighbor_field;
     const CartesianGrid<Scalar> ngrid = neighbor_grid;
     const long j_offset = j_offset_to_neighbor;
-    const std::size_t j_lo = j_valid_lo;
-    const std::size_t j_hi = j_valid_hi;
+    const Index j_lo = j_valid_lo;
+    const Index j_hi = j_valid_hi;
     // Only meaningful when InterfaceSide == Side::Low (the extrapolated
     // high/outlet end); computed unconditionally since it is cheap and
     // this lambda must be the same for both `if constexpr` branches.
-    const std::size_t nearest_real_high = grid.ngx + grid.nx - 1;
+    const Index nearest_real_high = grid.ngx + grid.nx - 1;
 
     // Only the shared decode/dispatch skeleton is reused here
     // (grid/boundary/cartesian_fill.hpp, PR #6 cleanup task) -- the
@@ -204,15 +204,15 @@ struct BlockInterfaceBoundary
     // InflowOutflowBoundary/SlipWallBoundary's shared callback shape, so
     // they are NOT forced through a common transform signature; this
     // type just supplies its own (much larger) callback body.
-    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(std::size_t g, std::size_t j,
-                                                                std::size_t k) mutable {
+    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(Index g, Index j,
+                                                                Index k) mutable {
       const bool neighbor_valid = (j >= j_lo && j < j_hi);
-      const std::size_t neighbor_j = static_cast<std::size_t>(static_cast<long>(j) + j_offset);
+      const Index neighbor_j = static_cast<Index>(static_cast<long>(j) + j_offset);
 
       if constexpr (InterfaceSide == Side::High) {
         // Low end: fixed domain value (e.g. the tunnel's supersonic inlet).
-        const std::size_t low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
-        for (std::size_t c = 0; c < N; ++c) field(low_ghost, c) = domain_edge[c];
+        const Index low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
+        for (Index c = 0; c < N; ++c) field(low_ghost, c) = domain_edge[c];
 
         // High end: the interface. Ghost layer g (0 = nearest the
         // interface) reads the neighbor's g-th real cell from ITS own
@@ -220,13 +220,13 @@ struct BlockInterfaceBoundary
         // block's own g-th real cell from ITS high-x real boundary,
         // negating the normal (X) momentum component -- the riser-face
         // reflecting wall.
-        const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
+        const Index high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
         if (neighbor_valid) {
-          const std::size_t neighbor_cell = ngrid.flat_index(ngrid.ngx + g, neighbor_j, k);
-          for (std::size_t c = 0; c < N; ++c) field(high_ghost, c) = neighbor(neighbor_cell, c);
+          const Index neighbor_cell = ngrid.flat_index(ngrid.ngx + g, neighbor_j, k);
+          for (Index c = 0; c < N; ++c) field(high_ghost, c) = neighbor(neighbor_cell, c);
         } else {
-          const std::size_t source = grid.flat_index(grid.ngx + grid.nx - 1 - g, j, k);
-          for (std::size_t c = 0; c < N; ++c) {
+          const Index source = grid.flat_index(grid.ngx + grid.nx - 1 - g, j, k);
+          for (Index c = 0; c < N; ++c) {
             const Scalar sign = (c == normal_component) ? Scalar(-1) : Scalar(1);
             field(high_ghost, c) = sign * field(source, c);
           }
@@ -237,13 +237,13 @@ struct BlockInterfaceBoundary
         // high-x real boundary, when valid; otherwise mirrors this
         // block's own g-th real cell from ITS low-x real boundary,
         // negating the normal (X) momentum component.
-        const std::size_t low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
+        const Index low_ghost = grid.flat_index(grid.ngx - 1 - g, j, k);
         if (neighbor_valid) {
-          const std::size_t neighbor_cell = ngrid.flat_index(ngrid.ngx + ngrid.nx - 1 - g, neighbor_j, k);
-          for (std::size_t c = 0; c < N; ++c) field(low_ghost, c) = neighbor(neighbor_cell, c);
+          const Index neighbor_cell = ngrid.flat_index(ngrid.ngx + ngrid.nx - 1 - g, neighbor_j, k);
+          for (Index c = 0; c < N; ++c) field(low_ghost, c) = neighbor(neighbor_cell, c);
         } else {
-          const std::size_t source = grid.flat_index(grid.ngx + g, j, k);
-          for (std::size_t c = 0; c < N; ++c) {
+          const Index source = grid.flat_index(grid.ngx + g, j, k);
+          for (Index c = 0; c < N; ++c) {
             const Scalar sign = (c == normal_component) ? Scalar(-1) : Scalar(1);
             field(low_ghost, c) = sign * field(source, c);
           }
@@ -252,9 +252,9 @@ struct BlockInterfaceBoundary
         // High end: zero-order extrapolation (e.g. the tunnel's
         // supersonic outlet) -- identical formula to
         // `InflowOutflowBoundary`'s own high end.
-        const std::size_t high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
-        const std::size_t high_source = grid.flat_index(nearest_real_high, j, k);
-        for (std::size_t c = 0; c < N; ++c) field(high_ghost, c) = field(high_source, c);
+        const Index high_ghost = grid.flat_index(grid.ngx + grid.nx + g, j, k);
+        const Index high_source = grid.flat_index(nearest_real_high, j, k);
+        for (Index c = 0; c < N; ++c) field(high_ghost, c) = field(high_source, c);
       }
     });
   }

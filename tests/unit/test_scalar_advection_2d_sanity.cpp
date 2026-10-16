@@ -10,8 +10,8 @@
 // 1D problem, which gives a strong, hand-computable-in-spirit check: a 2D
 // solve should match a 1D solve at the same resolution, row for row.
 #include <cmath>
-#include <cstddef>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -28,7 +28,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velocity_is_zero)
 {
-  constexpr std::size_t kNx = 40;
+  constexpr cfe::Index kNx = 40;
   constexpr double kSpeed = 1.0;
   constexpr double kDx = 1.0 / static_cast<double>(kNx);
   constexpr double kDt = 0.4 * kDx / kSpeed;
@@ -43,7 +43,7 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
   cfe::Field<double, 1> state_1d(grid_1d.n_cells_total());
   cfe::Field<double, 1> stage1_1d(grid_1d.n_cells_total());
   cfe::Field<double, 1> scratch_1d(grid_1d.n_cells_total());
-  for (std::size_t i = 0; i < grid_1d.nx; ++i) {
+  for (cfe::Index i = 0; i < grid_1d.nx; ++i) {
     const double x = grid_1d.x_center(grid_1d.ngx + i);
     state_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x);
   }
@@ -71,8 +71,8 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
   cfe::Field<double, 1> state_2d(grid_2d.n_cells_total());
   cfe::Field<double, 1> stage1_2d(grid_2d.n_cells_total());
   cfe::Field<double, 1> scratch_2d(grid_2d.n_cells_total());
-  for (std::size_t j = 0; j < grid_2d.ny; ++j) {
-    for (std::size_t i = 0; i < grid_2d.nx; ++i) {
+  for (cfe::Index j = 0; j < grid_2d.ny; ++j) {
+    for (cfe::Index i = 0; i < grid_2d.nx; ++i) {
       const double x = grid_2d.x_center(grid_2d.ngx + i);
       state_2d(grid_2d.flat_index(grid_2d.ngx + i, grid_2d.ngy + j, 0), 0) = std::sin(2.0 * kPi * x);
     }
@@ -95,8 +95,8 @@ CFE_TEST(test_scalar_advection_2d_solve_matches_1d_solve_row_for_row_when_y_velo
   // Every row of the 2D solve should match the 1D reference exactly (both
   // used the same dt/dx/steps, so this is not just "close", it's the same
   // arithmetic repeated).
-  for (std::size_t j = 0; j < grid_2d.ny; ++j) {
-    for (std::size_t i = 0; i < grid_2d.nx; ++i) {
+  for (cfe::Index j = 0; j < grid_2d.ny; ++j) {
+    for (cfe::Index i = 0; i < grid_2d.nx; ++i) {
       const double value_1d = state_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0);
       const double value_2d = state_2d(grid_2d.flat_index(grid_2d.ngx + i, grid_2d.ngy + j, 0), 0);
       CFE_CHECK_NEAR(value_2d, value_1d, 1e-12);

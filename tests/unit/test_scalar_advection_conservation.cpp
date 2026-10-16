@@ -6,8 +6,8 @@
 // would mean a real bug in the residual assembly, independent of whatever
 // the convergence study shows.
 #include <cmath>
-#include <cstddef>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -21,7 +21,7 @@ namespace {
 double total_quantity(const cfe::Field<double, 1>& state, const cfe::CartesianGrid<double>& grid)
 {
   double sum = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     sum += state(grid.flat_index(grid.ngx + i, 0, 0), 0);
   }
   return sum * grid.dx;
@@ -44,7 +44,7 @@ CFE_TEST(test_scalar_advection_conserves_total_quantity_over_periodic_domain)
 
   // An asymmetric (not just a pure sine) smooth profile, so this isn't
   // accidentally testing a special-case symmetry.
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x) + 0.3 * std::cos(4.0 * kPi * x);
   }

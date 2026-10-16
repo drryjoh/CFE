@@ -23,6 +23,7 @@
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/layout.hpp"
 
 namespace {
@@ -40,21 +41,21 @@ const char* layout_name<cfe::SoALayout>()
   return "SoA";
 }
 
-constexpr std::size_t kTargetBytesPerField = 64ull * 1024ull * 1024ull;
+constexpr cfe::Index kTargetBytesPerField = 64ull * 1024ull * 1024ull;
 constexpr int kRepetitions = 7;
 
 template <class Scalar, std::size_t N, class Layout>
 void run_case(const char* precision_name)
 {
-  const std::size_t n_cells =
-      std::max<std::size_t>(1024, kTargetBytesPerField / (N * sizeof(Scalar)));
+  const cfe::Index n_cells =
+      std::max<cfe::Index>(1024, kTargetBytesPerField / (N * sizeof(Scalar)));
 
   cfe::backend::cuda::DeviceField<Scalar, N, Layout> q(n_cells);
   cfe::backend::cuda::DeviceField<Scalar, N, Layout> q_new(n_cells);
 
   std::vector<Scalar> host_q(n_cells * N);
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < N; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < N; ++k) {
       host_q[Layout::index(i, k, n_cells, N)] = static_cast<Scalar>((i % 97) + k) * Scalar(0.01);
     }
   }
@@ -63,8 +64,8 @@ void run_case(const char* precision_name)
   auto q_view = q.view();
   auto out_view = q_new.view();
   auto run_pass = [=]() mutable {
-    cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(std::size_t i) mutable {
-      for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
+    cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(cfe::Index i) mutable {
+      for (cfe::Index k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
     });
     // parallel_for is asynchronous: without this, the timed region below
     // would measure launch/enqueue latency instead of actual kernel

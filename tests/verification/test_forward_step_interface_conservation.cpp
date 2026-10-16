@@ -48,7 +48,7 @@ using Scalar = double;
 using Field = cfe::EulerField<Scalar, 2>;
 constexpr std::size_t kN = 4;
 
-cfe::CartesianGrid<Scalar> make_block(std::size_t nx, std::size_t ny, Scalar origin_x, Scalar origin_y)
+cfe::CartesianGrid<Scalar> make_block(cfe::Index nx, cfe::Index ny, Scalar origin_x, Scalar origin_y)
 {
   cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
@@ -80,19 +80,19 @@ cfe::State<Scalar, kN> state_at(const Field& field, Scalar x, Scalar y)
 
 void fill_smooth_state(cfe::Field<Scalar, kN>& state, const cfe::CartesianGrid<Scalar>& grid, const Field& field)
 {
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
       const cfe::State<Scalar, kN> q = state_at(field, grid.x_center(grid.ngx + i), grid.y_center(grid.ngy + j));
-      for (std::size_t c = 0; c < kN; ++c) state(cell, c) = q[c];
+      for (cfe::Index c = 0; c < kN; ++c) state(cell, c) = q[c];
     }
   }
 }
 
-cfe::State<Scalar, kN> read(const cfe::Field<Scalar, kN>& state, std::size_t cell)
+cfe::State<Scalar, kN> read(const cfe::Field<Scalar, kN>& state, cfe::Index cell)
 {
   cfe::State<Scalar, kN> q;
-  for (std::size_t c = 0; c < kN; ++c) q[c] = state(cell, c);
+  for (cfe::Index c = 0; c < kN; ++c) q[c] = state(cell, c);
   return q;
 }
 
@@ -143,14 +143,14 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
   // j=2..9 <-> block2 local j=0..7), not just one -- a row-dependent
   // offset bug would only show up away from whichever single row a
   // smaller test happened to pick.
-  for (std::size_t j1 = 2; j1 < grid1.ny; ++j1) {
-    const std::size_t j2 = j1 - 2;
+  for (cfe::Index j1 = 2; j1 < grid1.ny; ++j1) {
+    const cfe::Index j2 = j1 - 2;
 
     // --- Block1's own view of the flux at its right (interface) face.
-    const std::size_t m1 = grid1.flat_index(grid1.ngx + grid1.nx - 2, j1, 0);
-    const std::size_t c1 = grid1.flat_index(grid1.ngx + grid1.nx - 1, j1, 0);
-    const std::size_t p1_ghost = grid1.flat_index(grid1.ngx + grid1.nx, j1, 0);
-    const std::size_t p2_ghost = grid1.flat_index(grid1.ngx + grid1.nx + 1, j1, 0);
+    const cfe::Index m1 = grid1.flat_index(grid1.ngx + grid1.nx - 2, j1, 0);
+    const cfe::Index c1 = grid1.flat_index(grid1.ngx + grid1.nx - 1, j1, 0);
+    const cfe::Index p1_ghost = grid1.flat_index(grid1.ngx + grid1.nx, j1, 0);
+    const cfe::Index p2_ghost = grid1.flat_index(grid1.ngx + grid1.nx + 1, j1, 0);
 
     const cfe::State<Scalar, kN> q_m1 = read(state1, m1);
     const cfe::State<Scalar, kN> q_c1 = read(state1, c1);
@@ -158,7 +158,7 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
     const cfe::State<Scalar, kN> q_p2 = read(state1, p2_ghost);
 
     cfe::State<Scalar, kN> left_of_right, right_of_right;
-    for (std::size_t c = 0; c < kN; ++c) {
+    for (cfe::Index c = 0; c < kN; ++c) {
       left_of_right[c] = reconstruction.right(q_m1[c], q_c1[c], q_p1[c]);
       right_of_right[c] = reconstruction.left(q_c1[c], q_p1[c], q_p2[c]);
     }
@@ -166,10 +166,10 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
         numerical_flux(left_of_right, right_of_right, cfe::Axis::X, field);
 
     // --- Block2's own view of the flux at its left (interface) face.
-    const std::size_t m2_ghost = grid2.flat_index(grid2.ngx - 2, j2, 0);
-    const std::size_t m1_ghost = grid2.flat_index(grid2.ngx - 1, j2, 0);
-    const std::size_t c2 = grid2.flat_index(grid2.ngx, j2, 0);
-    const std::size_t p1 = grid2.flat_index(grid2.ngx + 1, j2, 0);
+    const cfe::Index m2_ghost = grid2.flat_index(grid2.ngx - 2, j2, 0);
+    const cfe::Index m1_ghost = grid2.flat_index(grid2.ngx - 1, j2, 0);
+    const cfe::Index c2 = grid2.flat_index(grid2.ngx, j2, 0);
+    const cfe::Index p1 = grid2.flat_index(grid2.ngx + 1, j2, 0);
 
     const cfe::State<Scalar, kN> r_m2 = read(state2, m2_ghost);
     const cfe::State<Scalar, kN> r_m1 = read(state2, m1_ghost);
@@ -177,14 +177,14 @@ CFE_TEST(test_forward_step_block_interface_flux_agrees_bit_exactly_from_both_sid
     const cfe::State<Scalar, kN> r_p1 = read(state2, p1);
 
     cfe::State<Scalar, kN> left_of_left, right_of_left;
-    for (std::size_t c = 0; c < kN; ++c) {
+    for (cfe::Index c = 0; c < kN; ++c) {
       left_of_left[c] = reconstruction.right(r_m2[c], r_m1[c], r_c[c]);
       right_of_left[c] = reconstruction.left(r_m1[c], r_c[c], r_p1[c]);
     }
     const cfe::State<Scalar, kN> flux_from_block2 =
         numerical_flux(left_of_left, right_of_left, cfe::Axis::X, field);
 
-    for (std::size_t c = 0; c < kN; ++c) {
+    for (cfe::Index c = 0; c < kN; ++c) {
       CFE_CHECK_NEAR(flux_from_block1[c], flux_from_block2[c], 1e-13);
     }
   }

@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "cfe/core/types.hpp"
 #include "cfe/numerics/numerical_flux/hllc.hpp"
 #include "sod_shock_tube_runner.hpp"
 #include "test_framework.hpp"
@@ -38,7 +39,7 @@ constexpr Scalar kGamma = Scalar(1.4);
 constexpr Scalar kX0 = Scalar(0.5);
 constexpr Scalar kTFinal = Scalar(0.5);
 constexpr Scalar kCfl = Scalar(0.4);
-constexpr std::size_t kNx = 100;
+constexpr cfe::Index kNx = 100;
 
 // Equal pressure, equal (zero) velocity, different density -- the one
 // isolated contact wave, nothing else.
@@ -53,7 +54,7 @@ CFE_TEST(test_isolated_contact_hllc_keeps_density_step_exactly_in_place)
       cfe_verification::run_sod_shock_tube<Scalar, cfe::HllcFlux>(kNx, kGamma, kLeft, kRight, kX0, kTFinal, kCfl);
 
   double max_abs_deviation = 0.0;
-  for (std::size_t i = 0; i < r.x.size(); ++i) {
+  for (cfe::Index i = 0; i < r.x.size(); ++i) {
     const double expected = (static_cast<double>(r.x[i]) < static_cast<double>(kX0)) ? kLeft.rho : kRight.rho;
     max_abs_deviation = std::max(max_abs_deviation, std::fabs(static_cast<double>(r.rho[i]) - expected));
   }
@@ -72,7 +73,7 @@ CFE_TEST(test_isolated_contact_rusanov_visibly_smears_the_same_density_step)
       cfe_verification::run_sod_shock_tube<Scalar>(kNx, kGamma, kLeft, kRight, kX0, kTFinal, kCfl);
 
   double max_abs_deviation = 0.0;
-  for (std::size_t i = 0; i < r.x.size(); ++i) {
+  for (cfe::Index i = 0; i < r.x.size(); ++i) {
     const double expected = (static_cast<double>(r.x[i]) < static_cast<double>(kX0)) ? kLeft.rho : kRight.rho;
     max_abs_deviation = std::max(max_abs_deviation, std::fabs(static_cast<double>(r.rho[i]) - expected));
   }

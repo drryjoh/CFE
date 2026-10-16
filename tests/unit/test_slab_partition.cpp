@@ -1,6 +1,7 @@
 // Unit tests for SlabPartition (task spec 0004): pure index arithmetic,
 // no MPI toolchain needed -- runs in the ordinary single-process
 // cfe_unit_tests binary.
+#include "cfe/core/types.hpp"
 #include "cfe/grid/partition/slab_partition.hpp"
 #include "test_framework.hpp"
 
@@ -10,7 +11,7 @@ CFE_TEST(test_slab_partition_splits_evenly_divisible_global_count)
   for (int rank = 0; rank < 4; ++rank) {
     const auto p = cfe::make_slab_partition(100, rank, 4, /*periodic=*/true);
     CFE_CHECK(p.local_nx == 25);
-    CFE_CHECK(p.global_offset_x == static_cast<std::size_t>(rank) * 25);
+    CFE_CHECK(p.global_offset_x == static_cast<cfe::Index>(rank) * 25);
   }
 }
 

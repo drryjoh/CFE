@@ -9,6 +9,7 @@
 #include "cfe/backend/cpu/serial.hpp"
 #include "cfe/backend/cpu/threaded.hpp"
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "test_framework.hpp"
 
@@ -54,12 +55,12 @@ CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise)
   // this is compiler-permitted FP contraction, not a backend or memory bug.
   // Clang's default (-ffp-contract=on, single-expression only) never
   // triggers it, which is why this didn't show up in prior development.
-  constexpr std::size_t n_cells = 5000;
+  constexpr cfe::Index n_cells = 5000;
   constexpr std::size_t n_components = 5;
 
   cfe::Field<double, n_components> q(n_cells);
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       q(i, k) = static_cast<double>(i + k) * 0.001;
     }
   }
@@ -71,20 +72,20 @@ CFE_TEST(test_threaded_backend_matches_serial_backend_bitwise)
   auto out_serial = q_new_serial.view();
   auto out_threaded = q_new_threaded.view();
 
-  cfe::backend::serial::parallel_for(n_cells, [=](std::size_t i) mutable {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  cfe::backend::serial::parallel_for(n_cells, [=](cfe::Index i) mutable {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       out_serial(i, k) = q_view(i, k) * q_view(i, k);
     }
   });
 
-  cfe::backend::threaded::parallel_for(n_cells, [=](std::size_t i) mutable {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  cfe::backend::threaded::parallel_for(n_cells, [=](cfe::Index i) mutable {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       out_threaded(i, k) = q_view(i, k) * q_view(i, k);
     }
   });
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       CFE_CHECK(out_serial(i, k) == out_threaded(i, k));
       // 1e-12 absolute is still four orders of magnitude tighter than the
       // largest value in range here (~25) warrants for a real correctness
@@ -99,22 +100,22 @@ CFE_TEST(test_all_cell_square_update_compiles_and_runs_for_all_required_componen
 {
   cfe::for_each_component_count([](auto n_components) {
     constexpr std::size_t N = decltype(n_components)::value;
-    constexpr std::size_t n_cells = 256;
+    constexpr cfe::Index n_cells = 256;
 
     cfe::Field<double, N> q(n_cells);
-    for (std::size_t i = 0; i < n_cells; ++i) {
-      for (std::size_t k = 0; k < N; ++k) q(i, k) = static_cast<double>(i + k + 1);
+    for (cfe::Index i = 0; i < n_cells; ++i) {
+      for (cfe::Index k = 0; k < N; ++k) q(i, k) = static_cast<double>(i + k + 1);
     }
     cfe::Field<double, N> q_new(n_cells);
 
     auto q_view = q.view();
     auto out_view = q_new.view();
-    cfe::backend::serial::parallel_for(n_cells, [=](std::size_t i) mutable {
-      for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
+    cfe::backend::serial::parallel_for(n_cells, [=](cfe::Index i) mutable {
+      for (cfe::Index k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
     });
 
-    for (std::size_t i = 0; i < n_cells; ++i) {
-      for (std::size_t k = 0; k < N; ++k) {
+    for (cfe::Index i = 0; i < n_cells; ++i) {
+      for (cfe::Index k = 0; k < N; ++k) {
         const double expected = q(i, k) * q(i, k);
         CFE_CHECK_NEAR(q_new(i, k), expected, 1e-9);
       }

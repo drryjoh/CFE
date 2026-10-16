@@ -23,11 +23,11 @@ namespace cfe {
 namespace backend {
 namespace cuda {
 
-template <class Index, class Functor>
-CFE_GLOBAL void parallel_for_kernel(Index n, Functor f)
+template <class IndexT, class Functor>
+CFE_GLOBAL void parallel_for_kernel(IndexT n, Functor f)
 {
-  const Index i = static_cast<Index>(blockIdx.x) * static_cast<Index>(blockDim.x) +
-                  static_cast<Index>(threadIdx.x);
+  const IndexT i = static_cast<IndexT>(blockIdx.x) * static_cast<IndexT>(blockDim.x) +
+                   static_cast<IndexT>(threadIdx.x);
   if (i < n) {
     f(i);
   }
@@ -43,14 +43,14 @@ CFE_GLOBAL void parallel_for_kernel(Index n, Functor f)
 //
 // `block_size` is a simple, unmeasured default (256); it should be revisited
 // once occupancy/register data is available (see scripts/profile_cuda.sh).
-template <class Index, class Functor>
-void parallel_for(Index n,
+template <class IndexT, class Functor>
+void parallel_for(IndexT n,
                   Functor f,
                   int block_size = 256)
 {
   if (n <= 0) return;
   const int grid_size = static_cast<int>((static_cast<long long>(n) + block_size - 1) / block_size);
-  parallel_for_kernel<Index, Functor><<<grid_size, block_size>>>(n, f);
+  parallel_for_kernel<IndexT, Functor><<<grid_size, block_size>>>(n, f);
   // Catches launch-configuration errors (e.g. an invalid grid/block size or
   // an over-resourced kernel); it does not itself wait for the kernel body
   // to finish executing -- that is what synchronize() is for.
@@ -83,8 +83,8 @@ inline void synchronize()
 // codebase.
 struct CudaParallelFor
 {
-  template <class Index, class Functor>
-  static void run(Index n, Functor f)
+  template <class IndexT, class Functor>
+  static void run(IndexT n, Functor f)
   {
     cfe::backend::cuda::parallel_for(n, f);
   }

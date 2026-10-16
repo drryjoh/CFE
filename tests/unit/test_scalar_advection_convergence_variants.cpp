@@ -9,9 +9,9 @@
 // error directly) -- templated here on `Scalar` and parametrized on
 // `speed` so both variants share one implementation.
 #include <cmath>
-#include <cstddef>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -31,7 +31,7 @@ Scalar exact_solution(Scalar x, Scalar t, Scalar speed)
 }
 
 template <class Scalar>
-double run_and_measure_l2_error(std::size_t nx, Scalar speed, Scalar final_time, Scalar cfl)
+double run_and_measure_l2_error(cfe::Index nx, Scalar speed, Scalar final_time, Scalar cfl)
 {
   cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
@@ -42,8 +42,8 @@ double run_and_measure_l2_error(std::size_t nx, Scalar speed, Scalar final_time,
   cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<Scalar, 1> residual_scratch(grid.n_cells_total());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     state(cell, 0) = exact_solution(grid.x_center(grid.ngx + i), Scalar(0.0), speed);
   }
 
@@ -64,8 +64,8 @@ double run_and_measure_l2_error(std::size_t nx, Scalar speed, Scalar final_time,
   }
 
   double sum_sq_error = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     const Scalar exact = exact_solution(grid.x_center(grid.ngx + i), final_time, speed);
     const double error = static_cast<double>(state(cell, 0) - exact);
     sum_sq_error += error * error;
@@ -82,12 +82,12 @@ CFE_TEST(test_scalar_advection_second_order_convergence_negative_velocity)
   // opposite face for a negative wave speed (numerics/numerical_flux/upwind.hpp),
   // so this exercises a genuinely different code path, not just a
   // relabeling of the same one.
-  const std::vector<std::size_t> resolutions = {20, 40, 80, 160};
+  const std::vector<cfe::Index> resolutions = {20, 40, 80, 160};
   std::vector<double> errors;
-  for (std::size_t nx : resolutions) {
+  for (cfe::Index nx : resolutions) {
     errors.push_back(run_and_measure_l2_error<double>(nx, -1.0, 0.7, 0.4));
   }
-  for (std::size_t k = 0; k + 1 < errors.size(); ++k) {
+  for (cfe::Index k = 0; k + 1 < errors.size(); ++k) {
     CFE_CHECK(errors[k + 1] > 0.0);
     const double ratio = errors[k] / errors[k + 1];
     CFE_CHECK(ratio > 3.5);
@@ -104,12 +104,12 @@ CFE_TEST(test_scalar_advection_second_order_convergence_float_precision)
   // start competing with truncation error at the finer resolutions/
   // longer integration times the double case uses, which would corrupt
   // the ratio check for reasons unrelated to the scheme's actual order.
-  const std::vector<std::size_t> resolutions = {10, 20, 40, 80};
+  const std::vector<cfe::Index> resolutions = {10, 20, 40, 80};
   std::vector<double> errors;
-  for (std::size_t nx : resolutions) {
+  for (cfe::Index nx : resolutions) {
     errors.push_back(run_and_measure_l2_error<float>(nx, 1.0f, 0.3f, 0.4f));
   }
-  for (std::size_t k = 0; k + 1 < errors.size(); ++k) {
+  for (cfe::Index k = 0; k + 1 < errors.size(); ++k) {
     CFE_CHECK(errors[k + 1] > 0.0);
     const double ratio = errors[k] / errors[k + 1];
     CFE_CHECK(ratio > 3.3);

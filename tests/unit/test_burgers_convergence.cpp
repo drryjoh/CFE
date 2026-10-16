@@ -58,10 +58,10 @@
 // test's band is actually built around, not the nominal 2.
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -114,7 +114,7 @@ double exact_solution(double x, double t)
 // Runs the Burgers solver (MusclMinmodReconstruction + RusanovFlux) on
 // an `nx`-cell periodic grid from t=0 to t=kFinalTime and returns the L2
 // error against the exact characteristics solution.
-double run_and_measure_l2_error(std::size_t nx)
+double run_and_measure_l2_error(cfe::Index nx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = nx;
@@ -127,8 +127,8 @@ double run_and_measure_l2_error(std::size_t nx)
   cfe::Field<double, 1> residual_scratch(grid.n_cells_total());
 
   double max_abs_u0 = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     const double value = initial_condition(grid.x_center(grid.ngx + i));
     state(cell, 0) = value;
     max_abs_u0 = std::max(max_abs_u0, std::abs(value));
@@ -153,8 +153,8 @@ double run_and_measure_l2_error(std::size_t nx)
   }
 
   double sum_sq_error = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     const double exact = exact_solution(grid.x_center(grid.ngx + i), kFinalTime);
     const double error = state(cell, 0) - exact;
     sum_sq_error += error * error;
@@ -184,10 +184,10 @@ CFE_TEST(test_burgers_characteristics_breaking_time_is_positive_and_finite)
 // this specific scheme on this specific problem actually demonstrates.
 CFE_TEST(test_burgers_smooth_convergence_order_reduced_from_nominal_by_minmod_clipping)
 {
-  const std::vector<std::size_t> resolutions = {40, 80, 160, 320};
+  const std::vector<cfe::Index> resolutions = {40, 80, 160, 320};
   std::vector<double> errors;
   errors.reserve(resolutions.size());
-  for (std::size_t nx : resolutions) {
+  for (cfe::Index nx : resolutions) {
     errors.push_back(run_and_measure_l2_error(nx));
   }
 
@@ -201,7 +201,7 @@ CFE_TEST(test_burgers_smooth_convergence_order_reduced_from_nominal_by_minmod_cl
       "Burgers smooth-convergence sweep (u0 = %.1f + %.1f*sin(2*pi*x), t=%.6f, strictly before "
       "breaking time %.6f):\n",
       kAmplitudeOffset, kAmplitudeWave, kFinalTime, kBreakingTime);
-  for (std::size_t k = 0; k + 1 < errors.size(); ++k) {
+  for (cfe::Index k = 0; k + 1 < errors.size(); ++k) {
     CFE_CHECK(errors[k + 1] > 0.0);
     const double ratio = errors[k] / errors[k + 1];
     const double observed_order = std::log2(ratio);

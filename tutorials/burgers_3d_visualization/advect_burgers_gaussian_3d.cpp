@@ -56,7 +56,7 @@ namespace {
 // currently is (`float` or `double` -- see this file's header comment).
 using Scalar = cfe::scalar;
 
-constexpr std::size_t kN = 64;
+constexpr cfe::Index kN = 64;
 constexpr Scalar kDx = Scalar(1.0) / static_cast<Scalar>(kN);
 constexpr Scalar kCfl = Scalar(0.3);
 constexpr int kTotalSteps = 500;
@@ -112,9 +112,9 @@ int main()
   // Also remember the largest |value| seen, needed below to pick a
   // stable time-step size.
   Scalar max_abs_u0 = Scalar(0.0);
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const Scalar x = grid.x_center(grid.ngx + i);
         const Scalar y = grid.y_center(grid.ngy + j);
         const Scalar z = grid.z_center(grid.ngz + k);
@@ -173,9 +173,9 @@ int main()
     // frame.
     Scalar min_value = state(grid.flat_index(grid.ngx, grid.ngy, grid.ngz), 0);
     Scalar max_value = min_value;
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index k = 0; k < grid.nz; ++k) {
+      for (cfe::Index j = 0; j < grid.ny; ++j) {
+        for (cfe::Index i = 0; i < grid.nx; ++i) {
           const Scalar value = state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0);
           min_value = std::min(min_value, value);
           max_value = std::max(max_value, value);

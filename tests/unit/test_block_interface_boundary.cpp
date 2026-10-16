@@ -16,7 +16,6 @@
 // momentum_x, momentum_y, energy all different) so a bug that mixed up
 // an axis, a component, or a row offset would be caught, not masked by
 // coincidentally-equal values.
-#include <cstddef>
 
 #include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
@@ -29,7 +28,7 @@ namespace {
 
 using Field = cfe::EulerField<double, 2>;  // n_components = 4
 
-cfe::CartesianGrid<double> make_block(std::size_t nx, std::size_t ny, double origin_x, double origin_y)
+cfe::CartesianGrid<double> make_block(cfe::Index nx, cfe::Index ny, double origin_x, double origin_y)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = nx;
@@ -45,9 +44,9 @@ cfe::CartesianGrid<double> make_block(std::size_t nx, std::size_t ny, double ori
 
 void fill_distinct(cfe::Field<double, 4>& state, const cfe::CartesianGrid<double>& grid, double base)
 {
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
       const double tag = base + 100.0 * static_cast<double>(j) + static_cast<double>(i);
       state(cell, 0) = 2.0 + tag;    // density
       state(cell, 1) = 3.0 + tag;    // momentum_x (normal to this interface)
@@ -88,10 +87,10 @@ CFE_TEST(test_block_interface_boundary_high_side_reads_neighbor_in_shared_band)
   boundary.fill_x(state1.view(), grid1);
 
   // Low end: fixed inflow value on every row.
-  for (std::size_t j = 0; j < grid1.ny; ++j) {
-    for (std::size_t g = 0; g < grid1.ngx; ++g) {
-      const std::size_t ghost = grid1.flat_index(grid1.ngx - 1 - g, j, 0);
-      for (std::size_t c = 0; c < 4; ++c) {
+  for (cfe::Index j = 0; j < grid1.ny; ++j) {
+    for (cfe::Index g = 0; g < grid1.ngx; ++g) {
+      const cfe::Index ghost = grid1.flat_index(grid1.ngx - 1 - g, j, 0);
+      for (cfe::Index c = 0; c < 4; ++c) {
         CFE_CHECK_NEAR(state1(ghost, c), inflow[c], 1e-12);
       }
     }
@@ -99,12 +98,12 @@ CFE_TEST(test_block_interface_boundary_high_side_reads_neighbor_in_shared_band)
 
   // High end, shared band (block1 local j=2,3,4 <-> block2 local j=0,1,2):
   // ghost layer g reads block2's g-th real cell from ITS own low-x face.
-  for (std::size_t local_j = 2; local_j < 5; ++local_j) {
-    const std::size_t neighbor_j = local_j - 2;
-    for (std::size_t g = 0; g < grid1.ngx; ++g) {
-      const std::size_t ghost = grid1.flat_index(grid1.ngx + grid1.nx + g, local_j, 0);
-      const std::size_t source = grid2.flat_index(grid2.ngx + g, neighbor_j, 0);
-      for (std::size_t c = 0; c < 4; ++c) {
+  for (cfe::Index local_j = 2; local_j < 5; ++local_j) {
+    const cfe::Index neighbor_j = local_j - 2;
+    for (cfe::Index g = 0; g < grid1.ngx; ++g) {
+      const cfe::Index ghost = grid1.flat_index(grid1.ngx + grid1.nx + g, local_j, 0);
+      const cfe::Index source = grid2.flat_index(grid2.ngx + g, neighbor_j, 0);
+      for (cfe::Index c = 0; c < 4; ++c) {
         CFE_CHECK_NEAR(state1(ghost, c), state2(source, c), 1e-12);
       }
     }
@@ -112,10 +111,10 @@ CFE_TEST(test_block_interface_boundary_high_side_reads_neighbor_in_shared_band)
 
   // High end, below the shared band (block1 local j=0,1 -- the riser
   // face): local slip-wall mirror, normal (X) momentum negated.
-  for (std::size_t local_j = 0; local_j < 2; ++local_j) {
-    for (std::size_t g = 0; g < grid1.ngx; ++g) {
-      const std::size_t ghost = grid1.flat_index(grid1.ngx + grid1.nx + g, local_j, 0);
-      const std::size_t source = grid1.flat_index(grid1.ngx + grid1.nx - 1 - g, local_j, 0);
+  for (cfe::Index local_j = 0; local_j < 2; ++local_j) {
+    for (cfe::Index g = 0; g < grid1.ngx; ++g) {
+      const cfe::Index ghost = grid1.flat_index(grid1.ngx + grid1.nx + g, local_j, 0);
+      const cfe::Index source = grid1.flat_index(grid1.ngx + grid1.nx - 1 - g, local_j, 0);
       CFE_CHECK_NEAR(state1(ghost, 0), state1(source, 0), 1e-12);
       CFE_CHECK_NEAR(state1(ghost, 1), -state1(source, 1), 1e-12);  // normal: negated
       CFE_CHECK_NEAR(state1(ghost, 2), state1(source, 2), 1e-12);   // tangential: unchanged
@@ -150,12 +149,12 @@ CFE_TEST(test_block_interface_boundary_low_side_reads_neighbor_and_extrapolates_
   // Low end: every row reads block1's g-th real cell from ITS own
   // high-x face, offset up by 2 rows (block2 local j -> block1 local
   // j+2).
-  for (std::size_t local_j = 0; local_j < grid2.ny; ++local_j) {
-    const std::size_t neighbor_j = local_j + 2;
-    for (std::size_t g = 0; g < grid2.ngx; ++g) {
-      const std::size_t ghost = grid2.flat_index(grid2.ngx - 1 - g, local_j, 0);
-      const std::size_t source = grid1.flat_index(grid1.ngx + grid1.nx - 1 - g, neighbor_j, 0);
-      for (std::size_t c = 0; c < 4; ++c) {
+  for (cfe::Index local_j = 0; local_j < grid2.ny; ++local_j) {
+    const cfe::Index neighbor_j = local_j + 2;
+    for (cfe::Index g = 0; g < grid2.ngx; ++g) {
+      const cfe::Index ghost = grid2.flat_index(grid2.ngx - 1 - g, local_j, 0);
+      const cfe::Index source = grid1.flat_index(grid1.ngx + grid1.nx - 1 - g, neighbor_j, 0);
+      for (cfe::Index c = 0; c < 4; ++c) {
         CFE_CHECK_NEAR(state2(ghost, c), state1(source, c), 1e-12);
       }
     }
@@ -163,12 +162,12 @@ CFE_TEST(test_block_interface_boundary_low_side_reads_neighbor_and_extrapolates_
 
   // High end: zero-order extrapolation (outlet), identical to
   // InflowOutflowBoundary's own high end.
-  for (std::size_t local_j = 0; local_j < grid2.ny; ++local_j) {
-    const std::size_t nearest_real = grid2.ngx + grid2.nx - 1;
-    const std::size_t source = grid2.flat_index(nearest_real, local_j, 0);
-    for (std::size_t g = 0; g < grid2.ngx; ++g) {
-      const std::size_t ghost = grid2.flat_index(grid2.ngx + grid2.nx + g, local_j, 0);
-      for (std::size_t c = 0; c < 4; ++c) {
+  for (cfe::Index local_j = 0; local_j < grid2.ny; ++local_j) {
+    const cfe::Index nearest_real = grid2.ngx + grid2.nx - 1;
+    const cfe::Index source = grid2.flat_index(nearest_real, local_j, 0);
+    for (cfe::Index g = 0; g < grid2.ngx; ++g) {
+      const cfe::Index ghost = grid2.flat_index(grid2.ngx + grid2.nx + g, local_j, 0);
+      for (cfe::Index c = 0; c < 4; ++c) {
         CFE_CHECK_NEAR(state2(ghost, c), state2(source, c), 1e-12);
       }
     }
@@ -207,10 +206,10 @@ CFE_TEST(test_block_interface_boundary_low_side_fallback_branch_is_reachable_and
   boundary.fill_x(state_self.view(), grid_self);
 
   // Rows 0,1: fallback -- local slip-wall mirror, normal (X) momentum negated.
-  for (std::size_t local_j = 0; local_j < 2; ++local_j) {
-    for (std::size_t g = 0; g < grid_self.ngx; ++g) {
-      const std::size_t ghost = grid_self.flat_index(grid_self.ngx - 1 - g, local_j, 0);
-      const std::size_t source = grid_self.flat_index(grid_self.ngx + g, local_j, 0);
+  for (cfe::Index local_j = 0; local_j < 2; ++local_j) {
+    for (cfe::Index g = 0; g < grid_self.ngx; ++g) {
+      const cfe::Index ghost = grid_self.flat_index(grid_self.ngx - 1 - g, local_j, 0);
+      const cfe::Index source = grid_self.flat_index(grid_self.ngx + g, local_j, 0);
       CFE_CHECK_NEAR(state_self(ghost, 0), state_self(source, 0), 1e-12);
       CFE_CHECK_NEAR(state_self(ghost, 1), -state_self(source, 1), 1e-12);  // normal: negated
       CFE_CHECK_NEAR(state_self(ghost, 2), state_self(source, 2), 1e-12);   // tangential: unchanged
@@ -219,13 +218,13 @@ CFE_TEST(test_block_interface_boundary_low_side_fallback_branch_is_reachable_and
   }
 
   // Rows 2,3: real neighbor read.
-  for (std::size_t local_j = 2; local_j < 4; ++local_j) {
-    const std::size_t neighbor_j = local_j - 2;
-    for (std::size_t g = 0; g < grid_self.ngx; ++g) {
-      const std::size_t ghost = grid_self.flat_index(grid_self.ngx - 1 - g, local_j, 0);
-      const std::size_t source = grid_neighbor.flat_index(grid_neighbor.ngx + grid_neighbor.nx - 1 - g,
+  for (cfe::Index local_j = 2; local_j < 4; ++local_j) {
+    const cfe::Index neighbor_j = local_j - 2;
+    for (cfe::Index g = 0; g < grid_self.ngx; ++g) {
+      const cfe::Index ghost = grid_self.flat_index(grid_self.ngx - 1 - g, local_j, 0);
+      const cfe::Index source = grid_neighbor.flat_index(grid_neighbor.ngx + grid_neighbor.nx - 1 - g,
                                                            neighbor_j, 0);
-      for (std::size_t c = 0; c < 4; ++c) {
+      for (cfe::Index c = 0; c < 4; ++c) {
         CFE_CHECK_NEAR(state_self(ghost, c), state_neighbor(source, c), 1e-12);
       }
     }

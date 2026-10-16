@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/field/layout.hpp"
 #include "test_framework.hpp"
@@ -26,17 +27,17 @@ CFE_TEST(test_soa_layout_packs_each_component_contiguously_across_cells)
 
 CFE_TEST(test_field_write_then_read_round_trips_every_cell_and_component)
 {
-  constexpr std::size_t n_cells = 16;
+  constexpr cfe::Index n_cells = 16;
   constexpr std::size_t n_components = 5;
   cfe::Field<double, n_components, cfe::AoSLayout> field(n_cells);
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       field(i, k) = static_cast<double>(i * 100 + k);
     }
   }
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       CFE_CHECK_NEAR(field(i, k), static_cast<double>(i * 100 + k), 1e-12);
     }
   }
@@ -56,20 +57,20 @@ CFE_TEST(test_field_view_shares_storage_with_owning_field)
 
 CFE_TEST(test_aos_and_soa_fields_are_index_equivalent_despite_different_physical_layout)
 {
-  constexpr std::size_t n_cells = 6;
+  constexpr cfe::Index n_cells = 6;
   constexpr std::size_t n_components = 4;
   cfe::Field<double, n_components, cfe::AoSLayout> aos(n_cells);
   cfe::Field<double, n_components, cfe::SoALayout> soa(n_cells);
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       const double value = static_cast<double>(i) * 10.0 + static_cast<double>(k);
       aos(i, k) = value;
       soa(i, k) = value;
     }
   }
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       CFE_CHECK_NEAR(aos(i, k), soa(i, k), 1e-12);
     }
   }
@@ -77,12 +78,12 @@ CFE_TEST(test_aos_and_soa_fields_are_index_equivalent_despite_different_physical
 
 CFE_TEST(test_const_field_view_is_read_only_and_matches_mutable_field)
 {
-  constexpr std::size_t n_cells = 8;
+  constexpr cfe::Index n_cells = 8;
   constexpr std::size_t n_components = 3;
   cfe::Field<double, n_components, cfe::AoSLayout> field(n_cells);
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       field(i, k) = static_cast<double>(i * 10 + k);
     }
   }
@@ -104,8 +105,8 @@ CFE_TEST(test_const_field_view_is_read_only_and_matches_mutable_field)
   static_assert(std::is_const<std::remove_reference<decltype(view(0, 0))>::type>::value,
                 "operator() on a ConstView must return a const reference");
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       CFE_CHECK_NEAR(view(i, k), field(i, k), 1e-12);
     }
   }
