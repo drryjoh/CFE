@@ -35,3 +35,11 @@ __pycache__/
 # already-committed files).
 tutorials/euler_2d_forward_step/data/**/*.vtk
 tutorials/euler_3d_forward_step_extrusion/data/**/*.vtk
+
+# Checkpoint/restart files (task 0016, tutorials/euler_2d_forward_step/
+# forward_step_2d_restart_demo.cpp): same policy as the VTK frames
+# above -- large, regenerable-by-running-the-tutorial binary output, not
+# committed; only the small *_summary.csv files (same role as
+# data/*/summary.csv above) are tracked. Regenerate via
+# tutorials/euler_2d_forward_step/regenerate_restart_checkpoints.sh.
+tutorials/euler_2d_forward_step/data/**/*.cferst

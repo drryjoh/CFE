@@ -1,0 +1,2 @@
+resolution,total_steps,checkpoint_at_step,wall_total_s,wall_tail_inprocess_s,final_mass
+288,12000,11000,886.214,79.0332,6.31903

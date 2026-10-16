@@ -1,0 +1,2 @@
+resolution,resumed_from_step,steps_run,wall_construct_s,wall_read_restart_s,wall_run_s,wall_total_s,final_mass
+288,11000,1000,0.00225137,0.00257137,78.016,78.0208,6.31903

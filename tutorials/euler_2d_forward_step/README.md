@@ -306,6 +306,110 @@ still sharpen or otherwise change its character further; per Amelia's
 pre-implementation recommendation, pulling PPM forward is not
 independently justified by this result and remains deferred.
 
+## Checkpoint/restart
+
+Task 0016 (`tasks/0016-checkpoint-restart.md`): re-verifying a change
+against this tutorial's full sweep means re-running every case from
+`t=0`, including the most expensive one (res288_hllc, ~12,000 steps),
+even when the change being verified provably cannot affect physics
+(e.g. a pure rename). `src/cfe/io/restart_file.hpp` adds a versioned
+binary checkpoint format -- see `docs/adr/0013-checkpoint-restart-
+format.md` for the full design and
+`forward_step_setup.hpp::ForwardStepBlocks::write_restart`/
+`read_restart` for how this case uses it.
+
+**This is a separate, standalone demonstration, not literally "resuming
+this tutorial's own sweep."** `forward_step_2d.cpp`'s sweep above runs
+each case with `run_to` (TIME-bounded: step until `t_final=4`, with the
+last step's size clamped to land exactly on it). The checkpoint demo
+(`forward_step_2d_restart_demo.cpp`) instead uses `ForwardStepBlocks::
+run_n_steps` (STEP-COUNT-bounded: take exactly N adaptive-CFL steps, no
+time target) to a fixed `kDemoTotalSteps=12000` -- chosen only to be
+*the same order* as this sweep's own res288_hllc step count to `t=4`,
+not a literal reproduction of that exact run. Why the difference:
+`run_to`'s time-based clamping depends on the exact accumulated
+simulation time, which would need restoring (not just the grid state)
+to resume bit-identically; `run_n_steps` sidesteps that by never
+depending on elapsed time at all, which is what makes it safely
+restart-resumable with no extra bookkeeping (see `run_n_steps`'s own
+doc comment in `forward_step_setup.hpp` for the full reasoning). **You
+cannot currently use a `forward_step_2d_restart_demo` checkpoint to skip
+part of `forward_step_2d.cpp`'s own sweep** -- that would need a
+`t_start`-aware variant of `run_to`, not built in this task (see
+`docs/adr/0013-...md`'s Consequences section).
+
+**The non-negotiable correctness property:** a continuous run of N
+steps must produce the IDENTICAL final state (bit-for-bit) to running
+(N-1000) steps, writing a checkpoint, reading it back into a fresh
+object, and running the remaining 1000 steps. Checked directly,
+end-to-end, against this real two-block case (both Dim=2 and Dim=3) in
+`tests/unit/test_forward_step_restart.cpp` -- including a direct check
+(snapshot-before/after, not inferred) that loading a checkpoint leaves
+every ghost-cell case (fixed inflow, slip wall, cross-block interface,
+riser-face fallback) completely untouched, since ghost cells are
+excluded from the file and are always refilled by `FvmSolver::
+residual()` before they are next read, restart or not.
+
+**Real measured speedup** (`forward_step_2d_restart_demo.cpp`,
+`--mode=checkpoint` then `--mode=resume` as two SEPARATE process
+invocations, res288_hllc, this development machine, threaded backend,
+machine under real concurrent load from other work at the time -- real
+numbers from runs executed for this task, not an estimate; see
+`tutorials/euler_2d_forward_step/data/res288_hllc_restart/
+checkpoint_mode_summary.csv` / `resume_mode_summary.csv` for the raw
+data):
+
+| | steps | wall-clock |
+|---|---:|---:|
+| Full run from scratch (`--mode=checkpoint`, includes writing the checkpoint 1000 steps before the end, then continuing to completion) | 12,000 | **886.21s** (~14.8 min) |
+| Resume from checkpoint (`--mode=resume`, fresh process: construct 0.002s + load checkpoint 0.003s + run 1000 steps) | 1,000 | **78.02s** |
+
+Re-verifying the tail end of this case via restart was **~11.4x
+faster** (886.21s / 78.02s) than redoing the whole run from scratch --
+exactly the workflow this feature exists to make practical: once a
+checkpoint exists, checking that the last 1000 steps still come out the
+same costs about a minute and a half instead of about fifteen minutes.
+`final_mass` matched between the two paths to the printed precision
+(6.319028 both ways -- `--mode=checkpoint`'s own in-process continuation
+past its checkpoint write, and `--mode=resume`'s fully separate process
+loading that same checkpoint from disk), consistent with (though, per
+Violet's review, not a substitute for) the dedicated bit-for-bit unit
+test above. Checkpoint file size: 6.68 MB (two blocks' real cells, 4
+Euler components each, double precision) -- reading it back took
+0.0026s, a few percent of even a SINGLE simulation step's own cost at
+this resolution/flux (886.21s/12,000 steps = ~74ms/step) and, more to
+the point, under 0.01% of the 79s those 1000 steps actually cost to
+run -- confirming the checkpoint I/O itself is negligible relative to
+the computation it lets a developer skip re-running, not just assumed
+to be.
+
+**Usage:**
+
+```bash
+cmake --build build --target cfe_euler_2d_forward_step_restart_demo -j
+cd tutorials/euler_2d_forward_step
+../../build/tutorials/euler_2d_forward_step/cfe_euler_2d_forward_step_restart_demo --mode=checkpoint   # expensive, once
+../../build/tutorials/euler_2d_forward_step/cfe_euler_2d_forward_step_restart_demo --mode=resume        # cheap, repeat as needed
+```
+
+**Intended day-to-day/nightly workflow**
+(`regenerate_restart_checkpoints.sh`): the full from-scratch sweep and
+checkpoint generation is meant to run unattended overnight on PSC
+Bridges-2 (no one needs to babysit a remote job); local development then
+re-verifies just the tail end using the resulting checkpoint file, as
+measured above. **This task did not SSH into Bridges-2 or set up a live
+cron job** -- that remains separate, explicit follow-up work the user
+would need to request and supervise directly; `regenerate_restart_
+checkpoints.sh` documents the intended shape of that workflow and can be
+run manually (locally or on any machine) in the meantime.
+
+Not built in this task (explicit scope decision, see
+`tasks/0016-checkpoint-restart.md`'s Motivation section): MPI-aware
+restart for a multi-block/multi-rank decomposition of this case. MPI in
+this codebase today only connects to `BurgersField`/
+`ScalarAdvectionField`; it has never touched `EulerField` or this
+two-block forward-step assembly, and this task did not change that.
+
 ## Known limitations
 
 - Componentwise (not characteristic) reconstruction -- an already-
@@ -334,3 +438,9 @@ independently justified by this result and remains deferred.
   CPU "see it work" extrusion, and `docs/adr/0011-...md` / `agent_history.md`
   for why a CUDA 3D-correctness/at-scale benchmark remains a separate,
   still-outstanding requirement for this multi-block mechanism.
+- Checkpoint/restart (task 0016, above): the restart file format is not
+  portable across machines/builds (same `sizeof(Scalar)`, component
+  count, and exact grid shape required), and only covers this case's
+  existing CPU/serial-or-threaded backend -- no MPI-aware multi-block
+  restart, no CUDA restart path. See `docs/adr/0013-checkpoint-restart-
+  format.md`'s Revisit criteria.

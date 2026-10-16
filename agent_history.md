@@ -5017,3 +5017,208 @@ downstream cells, insert upstream cells, preserve indexing/
 communication consistency) can now reuse this task's
 `locate_shock_position`/`least_squares_slope` utilities directly for its
 own periodic speed re-estimate, per their own stated reuse intent.
+
+## 2026-10-15 — Task 0016: Checkpoint/restart for the forward-step resolution sweep
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective: re-verifying a change against `tutorials/euler_2d_forward_step`'s
+full resolution sweep requires re-running every case from `t=0`,
+including the most expensive case (`res288_hllc`, ~12,000 steps, tens
+of minutes), even when the change being verified provably cannot
+affect physics (e.g. a pure rename). Add checkpoint/restart so the
+expensive tail of a long run can be re-verified from a checkpoint taken
+shortly before a target, instead of the whole run from scratch.
+Explicit user scope decision: CPU-only (serial/threaded backend); do
+**not** wire MPI into Euler/`BlockInterfaceBoundary`/forward-step in
+this task (that is separate, already-named future work, "Task B:
+MPI-aware multi-block interface boundary," still unstarted); do **not**
+actually SSH into PSC Bridges-2 or set up live cron automation
+(documentation/script only).
+
+Worktree: `/tmp/CFE-restart` (branch `cfe/development/restart-
+checkpoint`), based on `origin/main` @ `f2f81d2`. Confirmed via `gh pr
+list` + each open PR's own `tasks/` directory that 0014 (PR #7) and
+0015 (the in-flight `cfe::Index` rename, `/tmp/CFE-index-type`, not yet
+merged) were both already taken before picking 0016.
+
+Files changed/new:
+- `src/cfe/io/restart_file.hpp` (new): a versioned binary checkpoint
+  format. Writes/reads, per block: `RestartBlockShape<Scalar>` (grid
+  extents/ghost depth/spacing/origin, exact-equality-checked against
+  the caller's own grid on read) and every REAL cell's raw conserved
+  state, every component -- ghost cells excluded. File-level: format
+  version, `sizeof(Scalar)`, component count, step count, simulation
+  time, block count. `RestartCheckpointInfo<Scalar>{step, time}`
+  returned by value from `read_restart_checkpoint` (an early draft
+  split `step`/`time` across an out-parameter and a return value;
+  Snorlax's review caught this as unnecessary split-across-two-channels
+  and it was merged into one struct before this entry was written).
+  Ghost-cell exclusion rests on one stated, traced, and tested
+  assumption: `FvmSolver::residual()` (`solver/explicit/fvm_solver.hpp`)
+  calls `fill_ghost_cells()` at the START of every call, before reading
+  any state, so a ghost cell is never state that must survive a
+  restart -- see Violet's review below for the independent trace that
+  confirmed this, not just the header comment's own claim of it.
+- `tests/verification/forward_step_setup.hpp` (modified):
+  `ForwardStepBlocks` gained `run_n_steps(n_steps, cfl)` (step-count-
+  bounded adaptive-CFL advance -- deliberately NOT `run_to`'s time-
+  bounded clamping, which depends on the exact accumulated simulation
+  time and would need restoring to resume bit-identically; see that
+  method's own doc comment), `write_restart(path, step, time) const`,
+  `read_restart(path) -> RestartInfo{step, time}`.
+- `tests/unit/test_restart_file.cpp` (new): 8 format-level tests --
+  round-trip (single- and multi-block, with ghost cells deliberately
+  poisoned with DIFFERENT sentinels on each side to prove exclusion, not
+  just infer it), plus 5 reject-path tests (mismatched grid shape,
+  component count, format version, `sizeof(Scalar)`, block count, and a
+  truncated/short-read file) -- the last four added specifically in
+  response to Violet's review (the header already implemented all of
+  these checks; only 2 of 5 had a test before her finding).
+- `tests/unit/test_forward_step_restart.cpp` (new): the core property.
+  Continuous run of 60 steps vs. 40 steps + write_restart + read_restart
+  into a FRESH object + 20 more steps, checked bit-for-bit (`==`, not
+  tolerance) over every real cell of both blocks plus `total_mass()`,
+  at Dim=2 (`RusanovFlux` and, added per Violet's review, `HllcFlux` --
+  the actual flux the motivating `res288_hllc` case uses) and Dim=3.
+  Also a direct (snapshot-before/after `read_restart`, not inferred)
+  check that 4 distinct ghost-cell cases (fixed inflow, slip wall,
+  cross-block interface, riser-face fallback) are left completely
+  untouched.
+- `tutorials/euler_2d_forward_step/forward_step_2d_restart_demo.cpp`
+  (new): a separate small CLI (`--mode=checkpoint` / `--mode=resume`),
+  not a modification of the existing sweep's `main()` (Snorlax: the
+  sweep's `main()` takes no CLI args and has a fundamentally different,
+  batch shape; a separate executable was the lower-complexity option,
+  not speculative generality). `--mode=checkpoint` runs `res288_hllc`
+  from scratch (`kDemoTotalSteps=12000`, chosen as the same order as the
+  real sweep's own res288_hllc step count to `t=4`, not a literal
+  reproduction of that time-bounded run), writes a checkpoint 1000 steps
+  before the end, continues to completion. `--mode=resume` loads that
+  checkpoint fresh and runs just the remaining 1000 steps. `main()`
+  wraps both in `try/catch` (added per Sally's review -- an
+  uncommitted-exception path previously reached the user as a raw
+  `libc++abi: terminating...` abort instead of a clean one-line error).
+  Timer split into construct/read_restart/run phases (per Enzo's review
+  -- a bundled "load" number had attributed ~30-50% of its own time to
+  `ForwardStepBlocks` construction, not `read_restart`'s own I/O cost).
+- `tutorials/euler_2d_forward_step/regenerate_restart_checkpoints.sh`
+  (new): documents (does not execute remotely) the intended PSC-
+  Bridges-2-overnight-full-sweep / local-fast-tail-reverify workflow,
+  currently covering exactly the one `res288_hllc` case.
+- `docs/adr/0013-checkpoint-restart-format.md` (new): why a new bespoke
+  format rather than extending `io/vtk_writer.hpp`; the ghost-exclusion
+  and step/time-as-bookkeeping-not-solver-state decisions; the
+  non-portability scope boundary.
+- `docs/type-reference.md`, `presentations/0016-checkpoint-restart.md`,
+  `tasks/0016-checkpoint-restart.md` (new/updated per AGENTS.md #26/#27).
+- `.gitignore`: added `tutorials/euler_2d_forward_step/data/**/*.cferst`
+  -- the generated 6.68 MB checkpoint binary itself is NOT committed
+  (same policy this project already applies to VTK frames: only the
+  small `*_summary.csv` files are tracked).
+
+Real measured evidence (not an estimate -- both runs executed this
+session, numbers taken directly from the committed
+`data/res288_hllc_restart/{checkpoint,resume}_mode_summary.csv`):
+
+| | steps | wall-clock | final_mass |
+|---|---:|---:|---:|
+| Full run from scratch (`--mode=checkpoint`) | 12,000 | 886.21s (~14.8 min) | 6.319028 |
+| Resume from checkpoint (`--mode=resume`, fresh process) | 1,000 | 78.02s (construct 0.002s + read_restart 0.003s + run 78.02s) | 6.319028 |
+
+**~11.4x speedup** (886.21s / 78.02s) re-verifying the tail via restart
+vs. redoing the whole run from scratch -- the exact workflow motivating
+this task. Checkpoint file: 6.68 MB; reading it back cost 0.0026s,
+under 0.01% of the 1000 steps (78s) it lets a developer skip
+re-running. Full CPU unit/verification suite: 169/169 passing (161
+pre-existing plus 8 new file-format tests, 3 new end-to-end restart
+tests -- 2D/Rusanov, 2D/HLLC, 3D), zero regressions.
+
+Review (full cycle -- touches solver/memory-layout/I-O and a new
+persistent file format, per CLAUDE.md's proportionality rule):
+
+**Violet** (numerical correctness) analytically traced
+`FvmSolver::residual()`'s unconditional `fill_ghost_cells()`-before-read
+ordering and `BlockInterfaceBoundary::fill_x`'s neighbor-real-cell-only
+reads herself (not just accepting the header comment's claim), ran the
+full suite herself (164/164 at the time of her review), and -- finding
+the committed bit-identical test covered only `RusanovFlux` at a toy
+scale -- independently wrote and ran her own scratch spot-check at
+`cells_per_unit_height=40`, 800 steps, `HllcFlux`, lead=250: "Checked
+16128 scalar values, 0 mismatches." Conclusion: the core property is
+genuinely established, not merely claimed. Two optional findings, both
+closed before this entry was written: add tests for the
+format-version/`sizeof(Scalar)`/block-count reject paths (done -- see
+`test_restart_file.cpp` above), and promote her one-off HLLC spot-check
+into a permanent committed test (done -- see
+`test_forward_step_restart.cpp` above). No blocking findings.
+
+**Snorlax** (simplicity/architecture) confirmed the design matches
+established conventions (`vtk_writer.hpp`'s traversal order,
+`block_set.hpp`'s block-count-as-runtime-list shape) rather than
+reinventing one, confirmed `run_n_steps` is a genuinely different
+(simpler) loop than `run_to`, not duplicated logic, and confirmed the
+separate CLI executable was the right call given the existing sweep's
+different shape. One optional finding (the `step`/`time` split-return
+API -- closed, see `restart_file.hpp` above) and one blocking finding:
+the README/ADR/task file all pointed to a "Checkpoint/restart" README
+section that did not exist yet at review time (the real timing run was
+still in progress) -- closed once that run completed and the section
+was written with the real numbers above.
+
+**Enzo** (performance/resource discipline) measured, independently,
+against the real production code (not a reimplementation): checkpoint
+write 1.0-1.2ms, read 0.7-0.85ms, for a 6.68MB/208,754-real-cell payload
+at the actual `res288_hllc` scale -- confirmed the gather-into-buffer +
+one-`fwrite`-per-block design is not just "acceptable" but measurably
+*faster* than the alternative he tested (direct per-row `fwrite`, no
+buffer: 2.8-4.8ms, 2.5-4x slower, dominated by per-call stdio overhead
+at ~518 separate calls). Computed checkpoint I/O as ~2.7% of a single
+simulation step's own cost and ~0.003% of the 1000-step tail it lets a
+developer skip. Confirmed `run_n_steps` adds no per-step overhead
+versus the existing `run_to`/`step()`. One blocking finding (the
+forward-referenced README/`agent_history.md` evidence didn't exist yet
+-- same gap Snorlax caught, closed the same way) and two optional
+findings, both closed: split the demo's "load" timer into
+construct-vs-`read_restart` phases (`ForwardStepBlocks` construction
+alone measured 0.32-0.55ms, 30-50% of what a bundled timer would have
+misattributed to I/O), and document that `restart_file.hpp`'s functions
+assume host-accessible `FieldView`s (no current consequence -- no CUDA
+`Field` backend exists yet -- but worth stating for a future CUDA
+restart path).
+
+**Sally** (usability/explanation) confirmed the header comments
+(ghost-exclusion rationale, `run_n_steps`-vs-`run_to` reasoning) and the
+two test files are strong, adaptable teaching material. Built and ran
+the demo herself at reduced scale (`kResolution=10/12`,
+`kDemoTotalSteps=60`) and confirmed `final_mass` matched bit-for-bit
+between `--mode=checkpoint` and `--mode=resume`. Found one blocking
+issue (a stale `docs/type-reference.md` entry, mid-refactor at her
+review time -- closed as part of the same refactor), one near-blocking
+issue (an uncaught-exception crash on a resolution/shape mismatch --
+closed, `main()` now wraps both modes in `try/catch`), and one optional
+(explain the RAII `FileHandle` idiom explicitly -- closed, added to
+`restart_file.hpp`'s header comment), plus several concrete suggestions
+for the README section's content (now incorporated: the demo is a
+separate standalone run, not literally resuming the sweep's own
+`run_to`-driven execution; why `run_n_steps` instead of `run_to`; the
+non-portability limitation stated plainly, not just in the ADR).
+
+Known limitations (stated, not silently dropped):
+- CPU-only; no CUDA restart path. MPI-aware multi-block restart is
+  explicitly out of scope ("Task B," still unstarted) -- MPI in this
+  codebase today still only connects to `BurgersField`/
+  `ScalarAdvectionField`, unchanged by this task.
+- The restart format is not portable across machines/builds (no byte-
+  swapping; exact `sizeof(Scalar)`/component-count/grid-shape match
+  required) -- versioned so it can evolve, not yet solving cross-
+  machine portability or reacting-flow species metadata.
+- `regenerate_restart_checkpoints.sh` documents the intended PSC
+  Bridges-2 nightly workflow but does not execute it remotely -- no
+  live SSH/cron automation was set up in this task, per the user's own
+  explicit instruction.
+- `run_to`-driven (time-bounded) production runs are not directly
+  restart-resumable as-is (`run_n_steps` is step-count-bounded); a
+  future case wanting that would need a `t_start`-aware `run_to`
+  variant (see `docs/adr/0013-...md`'s Consequences/Revisit criteria).
