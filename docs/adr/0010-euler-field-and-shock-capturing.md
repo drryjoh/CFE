@@ -293,3 +293,37 @@ case (a)) remains unimplemented.
   `docs/adr/0012-hllc-numerical-flux.md`'s Decision 2b/Decision 4.
 - A case needing a genuinely subsonic boundary (motivates the
   characteristic-based partial-specification BC).
+
+## Addendum (PR #6 cleanup task): transcendental-function calling convention settled
+
+Snorlax's review of this ADR's own original slice flagged, but did not
+act on, that `EulerField::sound_speed`'s unqualified `sqrt()` call was
+this codebase's first transcendental-function call, and that a
+`float`/`double` overload-resolution convention decision should be made
+before this pattern spread further (see agent_history.md's entry for
+this ADR). It has since spread -- `hllc.hpp` (task 0011, ADR 0012) calls
+`sqrt`/`pow` unqualified throughout its ANRS-seed and Newton-refinement
+code -- without the decision ever being written down. This addendum is
+that decision, made during the PR #6 cleanup task rather than left open
+any longer:
+
+**Decision: call `sqrt`/`pow` unqualified (e.g. `sqrt(x)`), never
+`std::sqrt`/`std::pow`, anywhere in `CFE_HOST_DEVICE` code.** Unqualified
+lookup already resolves to the right `float`/`double` overload in both
+a host translation unit (via `<cmath>`, included transitively wherever
+needed) and a CUDA device translation unit (via CUDA's own builtin
+device intrinsics) -- `std::sqrt`/`std::pow` are avoided specifically
+because `std::`-qualified calls are not reliably available in CUDA
+device code across this project's supported compiler/toolkit versions,
+while every call site that already exists (`EulerField::sound_speed`,
+every `sqrt`/`pow` in `hllc.hpp`) already follows the unqualified form
+and compiles/runs correctly on both backends (task 0011's CUDA
+correctness/at-scale results, `docs/performance/0008-...md`, exercise
+this code on-device directly). No code changes were needed to adopt
+this decision -- every existing call site already followed it; this
+addendum only makes the convention explicit so it is not
+re-litigated per call site going forward, and documents it at the call
+site itself (`fields/euler/field.hpp::sound_speed`) and in
+`math/scalar_ops.hpp`'s own header comment (the new home for this PR's
+other small scalar utility, `abs_value`, which deliberately does NOT
+also wrap `sqrt`/`pow` -- see that header for why).

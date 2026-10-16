@@ -37,6 +37,13 @@
 // Works for any Field exposing `static constexpr Index
 // momentum_index(Axis)` (currently just EulerField, fields/euler/field.hpp)
 // -- nothing here is Euler-specific by name.
+//
+// `fill_x`/`fill_y`/`fill_z` below are thin calls into
+// `grid/boundary/cartesian_fill.hpp`'s `cartesian_fill<Axis>` (PR #6
+// cleanup task, see agent_history.md) -- see that header for the shared
+// "decode a flat index into (g, o1, o2), dispatch through `Backend`"
+// skeleton every axis-aligned `BoundaryCondition` in this module needs;
+// this type supplies only its own mirror-with-sign-flip transform.
 #pragma once
 
 #include <cstddef>
@@ -45,6 +52,7 @@
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
+#include "cfe/grid/boundary/cartesian_fill.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 
 namespace cfe {
@@ -55,16 +63,9 @@ struct SlipWallBoundary
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_x(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngx == 0) return;
     constexpr Index normal_component = Field::momentum_index(Axis::X);
-    const Index py = grid.padded_ny();
-    const Index pz = grid.padded_nz();
-    Backend::run(grid.ngx * py * pz, [=] CFE_HOST_DEVICE(Index idx) mutable {
-      const Index g = idx % grid.ngx;
-      const Index rem = idx / grid.ngx;
-      const Index j = rem % py;
-      const Index k = rem / py;
-
+    cartesian_fill<Axis::X, Backend>(grid, [=] CFE_HOST_DEVICE(Index g, Index j,
+                                                                Index k) mutable {
       // Mirror image about the wall face: ghost layer g (0 = nearest
       // the wall) reads the real cell g layers in from the wall on the
       // interior side.
@@ -84,16 +85,9 @@ struct SlipWallBoundary
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_y(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngy == 0) return;
     constexpr Index normal_component = Field::momentum_index(Axis::Y);
-    const Index px = grid.padded_nx();
-    const Index pz = grid.padded_nz();
-    Backend::run(grid.ngy * px * pz, [=] CFE_HOST_DEVICE(Index idx) mutable {
-      const Index g = idx % grid.ngy;
-      const Index rem = idx / grid.ngy;
-      const Index i = rem % px;
-      const Index k = rem / px;
-
+    cartesian_fill<Axis::Y, Backend>(grid, [=] CFE_HOST_DEVICE(Index g, Index i,
+                                                                Index k) mutable {
       const Index low_ghost = grid.flat_index(i, grid.ngy - 1 - g, k);
       const Index low_source = grid.flat_index(i, grid.ngy + g, k);
       const Index high_ghost = grid.flat_index(i, grid.ngy + grid.ny + g, k);
@@ -110,16 +104,9 @@ struct SlipWallBoundary
   template <class Backend = CpuParallelFor, class Scalar, std::size_t N, class Layout>
   void fill_z(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    if (grid.ngz == 0) return;
     constexpr Index normal_component = Field::momentum_index(Axis::Z);
-    const Index px = grid.padded_nx();
-    const Index py = grid.padded_ny();
-    Backend::run(grid.ngz * px * py, [=] CFE_HOST_DEVICE(Index idx) mutable {
-      const Index g = idx % grid.ngz;
-      const Index rem = idx / grid.ngz;
-      const Index i = rem % px;
-      const Index j = rem / px;
-
+    cartesian_fill<Axis::Z, Backend>(grid, [=] CFE_HOST_DEVICE(Index g, Index i,
+                                                                Index j) mutable {
       const Index low_ghost = grid.flat_index(i, j, grid.ngz - 1 - g);
       const Index low_source = grid.flat_index(i, j, grid.ngz + g);
       const Index high_ghost = grid.flat_index(i, j, grid.ngz + grid.nz + g);

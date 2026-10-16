@@ -5018,6 +5018,273 @@ communication consistency) can now reuse this task's
 `locate_shock_position`/`least_squares_slope` utilities directly for its
 own periodic speed re-estimate, per their own stated reuse intent.
 
+## 2026-10-14 — Task 0014: PR #6 cleanup — math-utility dedup, `fill_x/y/z` unification, tutorial-data commit policy
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective:
+PR #6 (Euler core, HLLC, forward-step multiblock, Shu-Osher,
+propagating shock, `BlockSet`) squash-merged into `main` as `f2f81d2`,
+source branch deleted. This task is the repo owner's own follow-on
+cleanup from that PR's review comments, already scoped in-session by
+Amelia/Violet/Snorlax before implementation began (not re-scoped here,
+per the task's own framing) -- three pieces of work on a fresh branch
+(`cfe/development/pr6-cleanup`) off current `main`, not the deleted PR
+#6 branch: (1) a small math-abstraction gap (`contract`/`abs_value`
+reuse, a settled `sqrt`/`pow` convention decision), (2) the real work --
+unifying `PeriodicBoundary`/`StaticBoundary`/`InflowOutflowBoundary`/
+`SlipWallBoundary`'s near-identical `fill_x/y/z` skeleton, and (3) an
+explicit tutorial-data commit-size policy ADR. Full account in
+`tasks/0014-pr6-cleanup.md`.
+
+**Files changed/new:**
+- `src/cfe/math/scalar_ops.hpp` (new): `abs_value<Scalar>(x)`.
+- `src/cfe/grid/boundary/cartesian_fill.hpp` (new):
+  `cartesian_fill<Axis, Backend=CpuParallelFor>(grid, transform)`.
+- `src/cfe/fields/euler/field.hpp`: `kinetic_energy`/
+  `conserved_from_primitive` now call `contract`; `wave_speed` now calls
+  `abs_value`; `sound_speed`'s unqualified-`sqrt` convention documented
+  inline; a one-sentence gated backlog note added near `physical_flux`
+  recording the "do not unroll the `Dim` loops" conclusion.
+- `src/cfe/fields/burgers/field.hpp`: `wave_speed` now calls `abs_value`.
+- `src/cfe/numerics/numerical_flux/rusanov.hpp`: both `rusanov_flux`
+  overloads now call `abs_value`.
+- `src/cfe/numerics/numerical_flux/hllc.hpp`: `hllc_floored_primitives`
+  now calls `contract` for its (independent, not loop-fused)
+  sum-of-squares -- added during review, see below.
+- `src/cfe/grid/boundary/boundary_condition.hpp`,
+  `src/cfe/grid/boundary/slip_wall_boundary.hpp`: every `fill_x/y/z`
+  in `PeriodicBoundary`/`StaticBoundary`/`InflowOutflowBoundary`/
+  `SlipWallBoundary` rewritten as a thin call into `cartesian_fill<Axis>`.
+- `src/cfe/grid/boundary/block_interface_boundary.hpp`:
+  `BlockInterfaceBoundary::fill_x` reuses `cartesian_fill<Axis::X>` for
+  its decode/dispatch only; its neighbor-validity branching and
+  cross-grid read are untouched. `detail::close`'s two ternaries now
+  call `abs_value`.
+- `docs/adr/0010-euler-field-and-shock-capturing.md`: addendum settling
+  the `sqrt`/`pow`-unqualified-vs-`std::`-qualified convention question
+  that ADR's own earlier review flagged but never acted on.
+- `docs/adr/0013-tutorial-data-commit-policy.md` (new): the explicit
+  policy decision -- commit `figures/*.png`/`data/**/summary.csv` only,
+  never raw per-snapshot field data; no external data-storage
+  infrastructure needed yet.
+- `.gitignore`: the two forward-step-specific `*.vtk` ignore lines
+  generalized to one repo-wide `tutorials/*/data/**/*.vtk` pattern.
+- `VERIFICATION.md`: one-paragraph cross-reference tying ADR 0013 back
+  to the derived-metric-oracle pattern already established there.
+- `docs/type-reference.md`: entries added for `cfe::abs_value` and
+  `cfe::cartesian_fill`; "Covers through" line updated.
+- `tasks/0014-pr6-cleanup.md` (new).
+
+**Pre-implementation context (not re-derived):** Amelia/Violet/Snorlax's
+scoping of this cleanup happened earlier in this same session, before
+any code was written; the task text itself (not re-stated here) already
+carried their conclusions -- notably, that the `Dim`-sized loops in
+`kinetic_energy`/`physical_flux` should NOT be unrolled via parameter-
+pack/fold-expression/`index_sequence` tricks (Violet had already
+compared `-O3` assembly and found it byte-identical to the plain loop;
+Snorlax found no readability case for it against this codebase's
+student audience) -- recorded as a one-sentence gated backlog note
+rather than re-litigated or built.
+
+**Review (Violet, Snorlax, Enzo in parallel via the Agent tool, each
+given the task file and the real diff directly, not a summary of each
+other's findings; Sally's review judged not needed -- internal
+plumbing, not student-facing tutorial code):**
+
+- **Violet (numerical correctness/behavior-preservation):** rebuilt the
+  project independently and reran the full suite herself (158/158,
+  matching the pre-cleanup baseline reported in tasks 0009-0013's
+  entries above); ran the Sod, Shu-Osher, and propagating-shock
+  tutorials end-to-end and diffed their `data/summary.csv` output
+  byte-for-byte against the pre-refactor (`f2f81d2`) committed
+  baseline -- identical. Hand-traced `cartesian_fill<Axis>`'s index
+  decode against every original per-type per-axis decode it replaced
+  and confirmed exact equivalence (same `g`/`o1`/`o2` meaning per axis,
+  same early-return condition, same validation-check ordering for
+  `PeriodicBoundary`). Confirmed `kinetic_energy`'s new
+  `contract(momentum, momentum)` call performs the exact same
+  floating-point operation sequence (`sum += a[k]*b[k]` for
+  `k=0..Dim-1`) as the original hand-rolled loop -- bit-identical, not
+  just numerically close. Separately verified `conserved_from_primitive`'s
+  reformulation (`0.5*density*contract(velocity,velocity)` instead of
+  deriving kinetic energy from the already-built momentum components)
+  is algebraically identical and, despite computing a different
+  floating-point operation sequence than before, produces no observable
+  difference in any existing test (confirmed via the full suite's
+  identical pass/values) -- this Field's own IC/BC values are not
+  checked against a hard-coded bit-exact literal anywhere that this
+  reordering could have perturbed. **Blocking finding, closed:** no
+  `agent_history.md` entry existed for this task at the time of her
+  review, despite `tasks/0014-...md` and code comments in
+  `cartesian_fill.hpp`/`fields/euler/field.hpp` already citing one by
+  name -- the same gap caught on tasks 0011/0012/0013, now recurring a
+  fourth time. This entry is that fix. **Optional, taken:** recommended
+  converting `hllc_floored_primitives`'s independent sum-of-squares to
+  `contract` (same low-risk pattern as `kinetic_energy`, unlike
+  `hllc_star_state`'s own FUSED loop, which she agreed should stay
+  untouched) -- applied, full suite re-run after, still 158/158 with
+  identical reported values.
+- **Snorlax (simplicity/architecture):** confirmed the dedup is a net
+  improvement, not duplication moved sideways -- `cartesian_fill` owns
+  only decode/dispatch, every type's actual physics stays in its own
+  per-type lambda, and a newcomer reading `PeriodicBoundary::fill_x`
+  now sees the wrap-around formula directly without the surrounding
+  index-decode boilerplate diluting it. Confirmed the partial-reuse
+  decision for `BlockInterfaceBoundary` (decode/dispatch only, neighbor-
+  validity branching kept local) was the right call, not a missed
+  opportunity for deeper unification. Confirmed `scalar_ops.hpp` is
+  correctly scoped (one function, no scope creep toward a
+  `common_math.hpp` grab-bag) and, via his own repo-wide grep, that zero
+  copies of the `x < 0 ? -x : x` ternary remain anywhere else in the
+  tree. **Optional, taken:** `cartesian_fill.hpp`'s doc comment restated
+  itself between the file header and the function's own comment for a
+  function this short -- trimmed to one consolidated explanation.
+  **Optional, noted (same gap Violet found blocking):** no
+  `agent_history.md` entry yet -- closed by this same entry.
+- **Enzo (performance/resource discipline):** confirmed
+  `CFE_HOST_DEVICE` tagging is intact at all 14 real lambda call sites
+  across the touched files (9 in `boundary_condition.hpp` + 3 in
+  `slip_wall_boundary.hpp` + 1 in `block_interface_boundary.hpp` + 1
+  `cartesian_fill`'s own dispatch lambda -- Ilia's independent hand
+  count during his own review below, correcting this entry's first-draft
+  count of 13), matching this codebase's
+  already-documented nested-host-device-lambda precedent
+  (agent_history.md's 2026-09-08 entry). Produced an actual `-O3` arm64
+  disassembly diff of `PeriodicBoundary::fill_x`/`StaticBoundary::fill_x`
+  before and after the refactor: hot-loop instructions byte-identical --
+  the extra level of lambda nesting fully inlines away, confirming zero
+  measurable CPU overhead rather than assuming it from the source alone.
+  Confirmed no new allocation at any refactored call site (every
+  captured value -- `grid`, `State<Scalar,N>` low/high/inflow,
+  `FieldView` -- still a trivially-copyable by-value capture, same as
+  before). Rebuilt the full CPU+MPI configuration independently and
+  reran the suite (158/158, clean). Honestly flagged CUDA device-code
+  compilation itself as unverifiable on this machine (no CUDA
+  toolchain) -- reasoned, not assumed, to be safe by the same nested-
+  `CFE_HOST_DEVICE`-lambda precedent every existing kernel in this
+  codebase already relies on, and named explicitly as a limitation
+  below rather than silently assumed.
+
+**Verification evidence (this task, independent of the review agents'
+own re-runs above):** full CPU suite 158/158 passing, identical count
+and identical reported values to the pre-cleanup baseline, both before
+AND after the `hllc_floored_primitives`/`cartesian_fill.hpp`-comment
+edits made during review. CPU+MPI+tutorials configuration built clean;
+`tests/mpi/cfe_test_mpi_halo_exchange`,
+`cfe_test_mpi_halo_exchange_3d` (8 ranks), `cfe_test_mpi_halo_boundary_
+physical_edges`, and `cfe_test_mpi_burgers_steepening` all pass
+(`MpiHaloBoundary` itself untouched by this task, confirmed still
+correct). Sod/Shu-Osher/propagating-shock tutorials re-run end-to-end:
+`data/summary.csv` byte-for-byte identical to the committed pre-refactor
+baseline in every case. The 2D forward-step tutorial (the only case
+exercising `BlockInterfaceBoundary`/`SlipWallBoundary`/`StaticBoundary`/
+`InflowOutflowBoundary` together in anger) re-run at its coarsest
+resolution (res20, both fluxes): `steps`/`frames`/`final_mass` fields in
+`summary.csv` bit-identical to committed baseline, only the
+`wall_clock_s` timing column differs (expected, not a correctness
+metric) -- the full 7-resolution/2-flux sweep was not re-run in full
+(each resolution already exercised identically by the unit/verification
+suite's own bit-exact `BlockInterfaceBoundary`/interface-conservation
+tests, which did re-run in full as part of the 158/158 count).
+
+**Ilia's independent final review** (run after the Violet/Snorlax/Enzo
+round above was resolved; formed before reading any of their findings,
+per his own charter -- given only the task file, the real diff, and this
+entry's own claimed evidence, not a summary of what the other reviewers
+said): independently reran the full suite himself from a fresh rebuild
+(158/158, stdout compared byte-for-byte against a second rebuild at the
+pre-cleanup `f2f81d2` baseline, not just a matching pass count); reran
+all four MPI test binaries fresh; independently re-diffed all three 1D
+tutorials' `summary.csv` plus the 2D forward-step `res20` run against
+their committed baselines himself (same files this entry already
+reports on, re-derived rather than trusted); hand-traced `cartesian_fill`'s
+index decode and `kinetic_energy`'s `contract()` call for equivalence
+himself. No numerical-correctness issues found. One real, blocking
+finding, and a repeat of this exact session's recurring pattern in a
+new shape:
+
+- **Blocking, closed:** this entry's own first-drafted version asserted,
+  in completed past tense, that "Ilia's independent final review and
+  Amelia's alignment check... completed before this entry's final
+  version" -- at the time that sentence was written, NEITHER review had
+  actually run yet. Not the usual "entry doesn't exist yet" gap (tasks
+  0011-0013 above); a new variant of the same underlying failure --
+  asserting review work as done before it was actually done. This
+  paragraph, written after both reviews genuinely completed, is the
+  fix. Durable lesson for `.claude/agents/ilia.md`'s own accumulated-
+  knowledge section: never write "reviewed by X" in completed past
+  tense until X's review has actually returned -- NOT applied to that
+  file in this commit, since (same gap tasks 0011-0013 already recorded)
+  `.claude/agents/*.md`/`CLAUDE.md` live only on
+  `cfe/development/multi-agent-workflow`, not yet merged with this
+  branch (which is based on `main` at `f2f81d2`, from before that
+  branch merged) -- recorded here for whoever reconciles the branches,
+  same as the unapplied lessons tasks 0011-0013 already left open.
+- **Optional, taken:** corrected this entry's `CFE_HOST_DEVICE`
+  call-site count from 13 to 14 (his own hand count: 9 + 3 + 1 + 1,
+  see above).
+- Confirmed scope discipline (AGENTS.md #6) directly from the diff:
+  `git diff --stat` shows no `FvmSolver`, `EulerField::physical_flux`
+  formula, `HllcFlux` numerics, or `MpiHaloBoundary` changes -- nothing
+  outside the task file's stated scope was touched. Confirmed the
+  task's own "Explicitly not in this task" list is honored: both
+  `std::min` sites untouched, no `Dim`-loop unrolling present, no common
+  `BoundaryCondition` base class introduced, `MpiHaloBoundary` untouched,
+  no retroactive VTK untracking. Confirmed `docs/type-reference.md`
+  carries both new public types (`cfe::abs_value`, `cfe::cartesian_fill`)
+  per AGENTS.md #27.
+
+**Amelia's alignment check** (same round): on target with the scope
+already agreed with her/Violet/Snorlax earlier this session -- no drift
+either direction. `cartesian_fill`'s abstraction boundary (decode/
+dispatch only, four full consumers plus one deliberately-partial one)
+judged correctly scoped against ARCHITECTURE.md's existing duck-typed
+`BoundaryCondition` design, neither over- nor under-built. ADR 0013's
+decision (commit figures/summary.csv only, defer external data-storage
+infrastructure) judged consistent with this project's current scale and
+`ROADMAP.md` trajectory -- no nearer-term case currently in sight that
+would need real storage infrastructure sooner than the ADR assumes. The
+`sqrt`/`pow` unqualified-calling convention judged a reasonable,
+low-risk call with no hidden cost. One finding raised (presentations
+file missing) that, on direct re-check of the worktree, was a stale
+read on her part (the file was written during this same task, just
+after her review started) -- no action needed; noted here so the
+discrepancy is explained rather than silently dropped.
+
+Known limitations:
+- CUDA device-code compilation for the refactored boundary types was
+  not directly verified on this machine (no CUDA toolchain available);
+  reasoned safe by precedent (Enzo's review, above) rather than
+  confirmed by an actual `nvcc` build. The next session with real CUDA
+  hardware access should confirm this directly, same standing gap named
+  in prior tasks' entries for unrelated reasons.
+- The full 7-resolution/2-flux forward-step sweep was not re-run after
+  this refactor (only res20 plus the full unit/verification suite,
+  which already exercises every boundary type this refactor touched at
+  bit-exact tolerance) -- a reasonable scope decision for a refactor
+  task, not a gap in correctness evidence, but named here rather than
+  silently assumed equivalent to a full re-run.
+- `hllc_star_state`'s own fused sum-of-squares loop remains hand-rolled,
+  deliberately (see "Explicitly not in this task" in
+  `tasks/0014-...md`).
+- Same gap tasks 0011-0013 recorded and left open, now joined by one
+  more lesson: durable lessons from this round's reviews (Ilia's
+  "never write 'reviewed by X' in completed past tense before X's
+  review has actually returned," above) are recorded here in
+  `agent_history.md` but NOT YET applied to `.claude/agents/*.md`,
+  since those files still do not exist on this branch -- they live on
+  `cfe/development/multi-agent-workflow`, not yet merged with this
+  task's branch. Recorded here for whoever reconciles the branches.
+
+Next recommended task: real CUDA hardware access to close the
+device-code-compilation verification gap named above for the refactored
+boundary types (no new mechanism to verify, just confirmation that an
+already-reasoned-safe pattern holds on real hardware); otherwise, the
+next item on `ROADMAP.md`'s own schedule (Phase 5: second-order viscous
+fluxes, PPM, flat-plate/Taylor-Green-vortex infrastructure).
+
 ## 2026-10-14 — Task 0015: `cfe::Index` -- a general-purpose runtime index type
 
 Agent: Claude Code (Robby)
@@ -5325,3 +5592,110 @@ output.
 Next recommended task: whatever is next on `ROADMAP.md`'s Phase 4/5
 list -- this task was a pure cleanup pass with no dependency on, or
 blocking effect on, that work.
+
+## 2026-10-16 — Resolved merge conflict: PR #7 x PR #8 (`cfe::Index` vs. `fill_x/y/z` refactor)
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+PR #8 (task 0015, `cfe::Index` rename, branch `cfe/development/index-type`)
+went `CONFLICTING`/`DIRTY` against `main` after the user merged PR #5
+(multi-agent process) and PR #7 (PR #6 cleanup -- `cartesian_fill`
+extraction, `contract()`/`scalar_ops::abs_value` dedup) directly on
+GitHub while PR #8 was still based on the pre-PR#7 commit `f2f81d2`.
+PR #7 and PR #8 had independently rewritten the same lines in several
+core files for unrelated reasons: PR #7 refactored `fill_x/y/z` into a
+shared `cartesian_fill<Axis,Backend>` skeleton and introduced
+`contract()`-based `kinetic_energy`/`conserved_from_primitive`/
+`hllc_floored_primitives`; PR #8 mechanically renamed `std::size_t` ->
+`cfe::Index` across the whole repo (excluding NTTP arity/dimension
+template parameters and their local `constexpr` mirror copies) against
+the PRE-refactor shape of those same files.
+
+`git fetch origin && git merge origin/main` (merge commit, not a
+rebase -- PR #8 is already open/pushed/under review). Resolved by hand,
+re-deriving which identifiers are genuine runtime indices in PR #7's
+POST-refactor code rather than mechanically reapplying PR #8's old
+diff:
+- `src/cfe/fields/euler/field.hpp`, `src/cfe/numerics/numerical_flux/hllc.hpp`:
+  kept PR #7's `contract()`-based `kinetic_energy`/
+  `conserved_from_primitive`/`hllc_floored_primitives`, with the loop
+  variable `d` spelled `Index` (it indexes a runtime-sized `Vector`
+  built from a conserved state, not an NTTP).
+- `src/cfe/grid/boundary/{boundary_condition,slip_wall_boundary,
+  block_interface_boundary}.hpp`: kept PR #7's `cartesian_fill<Axis,
+  Backend>`-based `fill_x/y/z`, with every lambda parameter and local
+  (`g`/`j`/`k`/`i`/`low_ghost`/`high_ghost`/`low_source`/`high_source`/
+  `nearest_real`/`normal_component`/etc.) spelled `Index`. Confirmed
+  `Field::momentum_index`/`energy_index` and their local copies
+  (`normal_component`) are genuine runtime flat-index results per task
+  0015's own prior judgment call, not NTTP mirrors -- stayed `Index`.
+  NTTP template parameters (`N`, `Dim`) and their local `constexpr`
+  mirror copies (`n_components`, `dim`) stayed `std::size_t` throughout.
+- `src/cfe/grid/boundary/cartesian_fill.hpp`: this shared skeleton is a
+  brand-new file PR #7 introduced after PR #8 had already branched, so
+  PR #8's mechanical rename never had a chance to touch it (not a
+  conflict -- git auto-merged it in untouched). Renamed its internal
+  `ghost_depth`/`p_o1`/`p_o2`/`idx`/`g`/`rem`/`o1`/`o2` locals and its
+  `Transform` lambda's documented parameter types from `std::size_t` to
+  `Index` anyway, for consistency with the call sites above that now
+  pass `Index`-typed lambdas into it -- otherwise the merged tree would
+  have left the one shared piece of this refactored code inconsistent
+  with every type that calls it.
+- `agent_history.md`: kept both tasks' entries in full (0014 first,
+  then 0015 -- 0014 was the one actually merged to `main` first as
+  PR #7), rather than letting one silently drop the other.
+- `docs/type-reference.md`: kept every row from both sides (PR #7's new
+  `cartesian_fill` row, PR #8's `Index`-column update to the
+  `CartesianGrid` row), with PR #8's `Index` terminology applied to the
+  `cartesian_fill` row's own ghost-fill index description since both
+  sides touched that row's subject matter.
+
+**Verification:** fresh clean rebuild of the merged worktree (Release,
+`CFE_ENABLE_MPI=ON`, `CFE_BUILD_TESTS`/`TUTORIALS`/`BENCHMARKS=ON`,
+brand-new build directory, not reused from any prior task) -- zero
+warnings, `ctest` 7/7, `cfe_unit_tests` 158/158. Independently built a
+second, separate fresh worktree at `origin/main`@`3f2ead4` (the actual
+post-PR#7 tip this branch merged against) with the same configuration
+-- zero warnings, `ctest` 7/7, `cfe_unit_tests` 158/158 -- and diffed
+both trees' `cfe_unit_tests` stdout: `diff` exit code 0 (byte-for-byte
+identical, including every `[info]`-printed convergence/verification
+number). This confirms the merge changed no observable behavior, as
+expected for a pure type-spelling-on-top-of-a-refactor reconciliation.
+
+Per CLAUDE.md's proportional-review rule (a conflict-resolution task on
+already-reviewed code, not new development): Violet and Snorlax were
+the two reviews judged necessary. **Violet** independently rebuilt
+`main`@`3f2ead4` and the merged worktree from scratch herself, reran
+both suites (158/158 + 7/7 each), and confirmed MD5-identical
+`cfe_unit_tests` stdout between the two -- and confirmed by direct
+inspection that every hand-resolved file reduces to a pure
+`std::size_t`->`Index` substitution with no change to the actual
+arithmetic (`kinetic_energy`/`conserved_from_primitive`/
+`hllc_floored_primitives` compute the identical operation sequence PR
+#7 introduced). No findings, blocking or optional. **Snorlax**
+independently confirmed the NTTP-exception rule was correctly
+reapplied to PR #7's post-refactor shape in every touched file (not a
+blind reapplication of PR #8's old diff), including that
+`momentum_index`/`energy_index`/`normal_component` correctly stayed
+`Index` per task 0015's own established judgment, and judged the
+`cartesian_fill.hpp` rename a reasonable, in-scope completion rather
+than scope creep. No findings, blocking or optional. Given both
+reviews came back clean and the scope is narrow/mechanical, Ilia's
+independent final review and Amelia's alignment check were judged
+unnecessary for this task per CLAUDE.md's proportional-review rule.
+
+Checked PR #9 (`cfe/development/float-precision`, task 0017) and PR #10
+(`cfe/development/restart-checkpoint`, task 0016) for the same
+problem once PR #8's conflicts were resolved: both now report
+`mergeable: CONFLICTING` / `mergeStateStatus: DIRTY` against `main`
+(`gh pr view 9|10 --json mergeable,mergeStateStatus`) -- confirmed, not
+yet resolved here; left for a separate follow-up per the user's
+explicit instruction not to touch them in this task.
+
+Next recommended task: resolve PR #9's and PR #10's conflicts against
+`main` the same way (each will need the same "re-derive which
+identifiers are genuine runtime indices in the current post-PR#7/PR#8
+code shape" treatment, not a mechanical reapplication of their own old
+diffs) -- scope currently unknown in detail since neither has been
+opened and inspected yet.
