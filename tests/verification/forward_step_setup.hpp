@@ -78,6 +78,7 @@
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/boundary/slip_wall_boundary.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
+#include "cfe/io/restart_file.hpp"
 #include "cfe/io/vtk_writer.hpp"
 #include "cfe/math/fixed_array.hpp"
 #include "cfe/numerics/fvm/muscl_minmod.hpp"
@@ -385,6 +386,79 @@ struct ForwardStepBlocks
       ++steps;
     }
     return steps;
+  }
+
+  // Runs exactly `n_steps` adaptive-CFL steps from the CURRENT state, with
+  // no `t_final` target/clamping -- unlike `run_to` above, which clamps
+  // its last `dt` to land exactly on `t_final`. This is the
+  // restart-friendly entry point (task tasks/0016-checkpoint-restart.md):
+  // the clamping `run_to` does (`if (t + dt > t_final) dt = t_final - t`)
+  // depends on the ACCUMULATED `t` value, so reproducing a `run_to`-driven
+  // run's exact tail bit-for-bit after a restart would require restoring
+  // that same accumulated `t` and re-deriving the same clamping decision
+  // -- solvable, but unneeded complexity this task does not require (the
+  // user's own description of the workflow is already step-count-based:
+  // "checkpoint ~1000 steps before the target, then only simulate those
+  // last ~1000 steps"). `run_n_steps` sidesteps the question entirely:
+  // every step's `dt` depends only on the CURRENT real-cell state (via
+  // `max_wave_speed()`), never on an absolute elapsed-time value, so a
+  // sequence of `run_n_steps` calls is trivially restart-resumable --
+  // "run N steps" then "run (N-1000) steps, checkpoint, run 1000 more"
+  // take the IDENTICAL sequence of steps/dt's either way, which is
+  // exactly the property `tests/unit/test_forward_step_restart.cpp`
+  // checks bit-for-bit. Returns the elapsed simulated time over those
+  // steps (for the caller's own step/time bookkeeping -- see
+  // `write_restart`'s own comment for why that bookkeeping never feeds
+  // back into the solve itself).
+  Scalar run_n_steps(std::size_t n_steps, Scalar cfl)
+  {
+    Scalar t = Scalar(0);
+    for (std::size_t s = 0; s < n_steps; ++s) {
+      const Scalar speed = max_wave_speed();
+      const Scalar dt = cfl * grid1.dx / speed;
+      step(dt);
+      t += dt;
+    }
+    return t;
+  }
+
+  // Writes both blocks' CURRENT real-cell state, plus the caller-supplied
+  // `step`/`time` bookkeeping pair, to one checkpoint file (see
+  // src/cfe/io/restart_file.hpp for the on-disk format and the ghost-
+  // cell-exclusion assumption this relies on). `step`/`time` are
+  // whatever the caller has been accumulating itself (e.g. the running
+  // total from successive `run_n_steps` calls) -- this struct keeps no
+  // step/time state of its own, since nothing in the solve ever reads it
+  // back; it exists purely so a resumed run can report "resumed at step
+  // 11000, t=3.67" instead of restarting that bookkeeping at zero.
+  void write_restart(const std::string& path, std::size_t step, Scalar time) const
+  {
+    cfe::io::write_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
+        path, {grid1, grid2}, {state_blocks.view(kUpstream), state_blocks.view(kDownstream)}, step, time);
+  }
+
+  // What `read_restart` hands back: the step/time bookkeeping the
+  // checkpoint was written with, for the resuming driver to continue
+  // accumulating from.
+  struct RestartInfo
+  {
+    std::size_t step = 0;
+    Scalar time = Scalar(0);
+  };
+
+  // Loads a checkpoint written by `write_restart` into both blocks'
+  // CURRENT real-cell state (ghost cells are left as-is -- see
+  // src/cfe/io/restart_file.hpp's header comment: the next `step()` call
+  // refills them before reading them regardless). Throws if the file's
+  // format version, scalar size, component count, or either block's grid
+  // shape does not match THIS object's own grids -- i.e. this must be
+  // called on a `ForwardStepBlocks` already constructed at the same
+  // resolution the checkpoint was written for.
+  RestartInfo read_restart(const std::string& path)
+  {
+    const cfe::io::RestartCheckpointInfo<Scalar> file_info = cfe::io::read_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
+        path, {grid1, grid2}, {state_blocks.view(kUpstream), state_blocks.view(kDownstream)});
+    return RestartInfo{file_info.step, file_info.time};
   }
 
   double total_mass() const
