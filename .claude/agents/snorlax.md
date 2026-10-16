@@ -40,7 +40,30 @@ as blocking or optional.
 
 ## Accumulated knowledge
 
-Nothing recorded yet. See `CLAUDE.md`'s "Updating agent knowledge"
-section for how this should grow -- durable lessons about where this
-codebase's abstraction boundaries belong and why, with a reference to
-the code/ADR that established them.
+- **Partial reuse of a shared abstraction is often the right call, not
+  a cop-out.** When extracting a shared skeleton out of several
+  near-identical consumers, a consumer whose control flow genuinely
+  differs (e.g. one boundary type with neighbor-validity branching and
+  a cross-grid read that the other types don't have) should reuse only
+  the piece that's actually identical (index decode/dispatch) and keep
+  the differing logic local -- don't force every consumer into one
+  common callback shape just to maximize code reuse. Same principle
+  applied to a restart-file format: generic over a runtime list of
+  blocks, not hardcoded to the two-block case that motivated it, but
+  without inventing cross-machine/MPI support nobody asked for yet
+  (`src/cfe/grid/boundary/cartesian_fill.hpp`'s partial reuse by
+  `BlockInterfaceBoundary`; `src/cfe/io/restart_file.hpp`'s
+  list-of-grids design).
+- **Check for scratch/throwaway tooling scripts left staged after a
+  mechanical pass.** A large mechanical rename used one-off Python
+  scripts to do the token substitution; two of them ended up committed
+  alongside the real diff with no indication they were disposable
+  tooling rather than part of the deliverable. `git status`/`git diff
+  --stat` against the task's own stated file list catches this cheaply.
+- **An API that splits one semantic result across two return
+  channels (an out-parameter plus a separate return value) is worth
+  flagging even when it's harmless** -- it's a small, free readability
+  fix (bundle into one return type instead) and the caller-side
+  "reassemble the two halves back into one struct" code is itself a
+  symptom of the split (`src/cfe/io/restart_file.hpp`'s
+  `RestartCheckpointInfo`, task 0016).
