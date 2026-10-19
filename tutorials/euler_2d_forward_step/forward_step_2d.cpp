@@ -56,7 +56,7 @@ constexpr Scalar kCfl = Scalar(0.4);
 constexpr Scalar kSnapshotDt = Scalar(0.1);
 
 template <class NumericalFlux>
-void run_resolution(std::size_t cells_per_unit_height, const std::string& flux_name)
+void run_resolution(cfe::Index cells_per_unit_height, const std::string& flux_name)
 {
   const std::string tag = "res" + std::to_string(cells_per_unit_height) + "_" + flux_name;
   const fs::path dir = fs::path("data") / tag;
@@ -70,7 +70,7 @@ void run_resolution(std::size_t cells_per_unit_height, const std::string& flux_n
   auto density_of = [&](const cfe::State<Scalar, 4>& q) { return static_cast<Scalar>(blocks.field.density(q)); };
   auto pressure_of = [&](const cfe::State<Scalar, 4>& q) { return static_cast<Scalar>(blocks.field.pressure(q)); };
 
-  auto write_frame = [&](std::size_t frame) {
+  auto write_frame = [&](cfe::Index frame) {
     char prefix[64];
     std::snprintf(prefix, sizeof(prefix), "frame_%04zu", frame);
     blocks.write_vtk_frame((dir / (std::string(prefix) + "_density")).string(), "density", density_of);
@@ -101,10 +101,10 @@ int main()
   // trailing contact discontinuity that the README's "mild waviness,
   // not dramatic rollup" note says isn't yet visible at lower
   // resolutions with Rusanov.
-  const std::vector<std::size_t> resolutions = {std::size_t(20),  std::size_t(40),  std::size_t(80),
-                                                 std::size_t(96),  std::size_t(144), std::size_t(216),
-                                                 std::size_t(288)};
-  for (std::size_t res : resolutions) run_resolution<cfe::RusanovFlux>(res, "rusanov");
-  for (std::size_t res : resolutions) run_resolution<cfe::HllcFlux>(res, "hllc");
+  const std::vector<cfe::Index> resolutions = {cfe::Index(20),  cfe::Index(40),  cfe::Index(80),
+                                                 cfe::Index(96),  cfe::Index(144), cfe::Index(216),
+                                                 cfe::Index(288)};
+  for (cfe::Index res : resolutions) run_resolution<cfe::RusanovFlux>(res, "rusanov");
+  for (cfe::Index res : resolutions) run_resolution<cfe::HllcFlux>(res, "hllc");
   return 0;
 }

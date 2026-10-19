@@ -9,6 +9,7 @@
 #include <cstddef>
 
 #include "cfe/core/macros.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
 
 namespace cfe {
@@ -65,7 +66,7 @@ FixedArray<Scalar, N> componentwise_multiply(const FixedArray<Scalar, N>& a,
                                                              const FixedArray<Scalar, N>& b)
 {
   FixedArray<Scalar, N> out;
-  for (std::size_t k = 0; k < N; ++k) out[k] = a[k] * b[k];
+  for (Index k = 0; k < N; ++k) out[k] = a[k] * b[k];
   return out;
 }
 
@@ -78,7 +79,7 @@ CFE_HOST_DEVICE
 Scalar contract(const FixedArray<Scalar, N>& a, const FixedArray<Scalar, N>& b)
 {
   Scalar sum = Scalar(0);
-  for (std::size_t k = 0; k < N; ++k) sum += a[k] * b[k];
+  for (Index k = 0; k < N; ++k) sum += a[k] * b[k];
   return sum;
 }
 

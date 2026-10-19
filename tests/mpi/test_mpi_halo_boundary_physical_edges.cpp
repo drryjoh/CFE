@@ -46,14 +46,14 @@
 
 namespace {
 
-constexpr std::size_t kLocalN = 4;
-constexpr std::size_t kGhostDepth = 2;
+constexpr cfe::Index kLocalN = 4;
+constexpr cfe::Index kGhostDepth = 2;
 
 // Deliberately distinguishable from any `value(...)` below (which never
 // goes negative) and component-dependent, so a component-index swap bug
 // in the fix would also be caught.
 template <class Scalar>
-Scalar sentinel(std::size_t c)
+Scalar sentinel(cfe::Index c)
 {
   return static_cast<Scalar>(-999 - 7 * static_cast<int>(c));
 }
@@ -62,7 +62,7 @@ Scalar sentinel(std::size_t c)
 // also used (with the KNOWN neighbor rank 0 or 1, not `rank`) to compute
 // what a neighbor-facing ghost cell must contain after the exchange.
 template <class Scalar>
-Scalar value(int r, std::size_t i, std::size_t c)
+Scalar value(int r, cfe::Index i, cfe::Index c)
 {
   return static_cast<Scalar>(1000 * r + 100 * static_cast<int>(c) + static_cast<int>(i));
 }
@@ -87,21 +87,21 @@ int run_one_case(int rank, cfe::Axis axis, const char* axis_name, const char* sc
       break;
   }
 
-  auto real_index = [&](std::size_t i) -> std::size_t {
+  auto real_index = [&](cfe::Index i) -> cfe::Index {
     switch (axis) {
       case cfe::Axis::X: return grid.flat_index(kGhostDepth + i, 0, 0);
       case cfe::Axis::Y: return grid.flat_index(0, kGhostDepth + i, 0);
       default: return grid.flat_index(0, 0, kGhostDepth + i);
     }
   };
-  auto low_ghost_index = [&](std::size_t d) -> std::size_t {
+  auto low_ghost_index = [&](cfe::Index d) -> cfe::Index {
     switch (axis) {
       case cfe::Axis::X: return grid.flat_index(kGhostDepth - 1 - d, 0, 0);
       case cfe::Axis::Y: return grid.flat_index(0, kGhostDepth - 1 - d, 0);
       default: return grid.flat_index(0, 0, kGhostDepth - 1 - d);
     }
   };
-  auto high_ghost_index = [&](std::size_t d) -> std::size_t {
+  auto high_ghost_index = [&](cfe::Index d) -> cfe::Index {
     switch (axis) {
       case cfe::Axis::X: return grid.flat_index(kGhostDepth + kLocalN + d, 0, 0);
       case cfe::Axis::Y: return grid.flat_index(0, kGhostDepth + kLocalN + d, 0);
@@ -110,11 +110,11 @@ int run_one_case(int rank, cfe::Axis axis, const char* axis_name, const char* sc
   };
 
   cfe::Field<Scalar, N, Layout> field(grid.n_cells_total());
-  for (std::size_t cell = 0; cell < grid.n_cells_total(); ++cell) {
-    for (std::size_t c = 0; c < N; ++c) field(cell, c) = sentinel<Scalar>(c);
+  for (cfe::Index cell = 0; cell < grid.n_cells_total(); ++cell) {
+    for (cfe::Index c = 0; c < N; ++c) field(cell, c) = sentinel<Scalar>(c);
   }
-  for (std::size_t i = 0; i < kLocalN; ++i) {
-    for (std::size_t c = 0; c < N; ++c) field(real_index(i), c) = value<Scalar>(rank, i, c);
+  for (cfe::Index i = 0; i < kLocalN; ++i) {
+    for (cfe::Index c = 0; c < N; ++c) field(real_index(i), c) = value<Scalar>(rank, i, c);
   }
 
   // np=2, non-periodic: rank 0 has no left neighbor, rank 1 has no right
@@ -132,8 +132,8 @@ int run_one_case(int rank, cfe::Axis axis, const char* axis_name, const char* sc
   }
 
   int failures = 0;
-  for (std::size_t d = 0; d < kGhostDepth; ++d) {
-    for (std::size_t c = 0; c < N; ++c) {
+  for (cfe::Index d = 0; d < kGhostDepth; ++d) {
+    for (cfe::Index c = 0; c < N; ++c) {
       const Scalar got_low = field(low_ghost_index(d), c);
       const Scalar want_low =
           (left_rank == cfe::SlabPartition::kNoNeighbor) ? sentinel<Scalar>(c) : value<Scalar>(0, kLocalN - 1 - d, c);

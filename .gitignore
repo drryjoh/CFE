@@ -1,8 +1,12 @@
-# CMake build directories. Both underscore and hyphen variants are
-# ignored (Ilia/Amelia review finding on tasks 0012/0013: ad-hoc build
-# dirs like `build-shuosher/`/`build-ilia/` used only an underscore
-# pattern previously and showed up as untracked cruft).
+# CMake build directories. Underscore, hyphen, and bare-numeric-suffix
+# variants are all ignored (Ilia/Amelia review finding on tasks
+# 0012/0013: ad-hoc build dirs like `build-shuosher/`/`build-ilia/` used
+# only an underscore pattern previously and showed up as untracked
+# cruft; task 0015 review found the same gap for numeric-suffix dirs
+# like `build2/`/`build3/`, used by independent reviewer rebuilds run
+# from this same worktree).
 build/
+build[0-9]*/
 build_*/
 build-*/
 cmake-build-*/

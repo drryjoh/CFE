@@ -101,10 +101,10 @@ struct EulerField
   // constructing a Field instance -- see this file's header comment and
   // grid/boundary/slip_wall_boundary.hpp.
   CFE_HOST_DEVICE
-  static constexpr std::size_t momentum_index(Axis axis) { return 1 + static_cast<std::size_t>(axis); }
+  static constexpr Index momentum_index(Axis axis) { return 1 + static_cast<Index>(axis); }
 
   CFE_HOST_DEVICE
-  static constexpr std::size_t energy_index() { return Dim + 1; }
+  static constexpr Index energy_index() { return Dim + 1; }
 
   // --- semantic accessors (AGENTS.md #12) ---------------------------------
 
@@ -138,7 +138,7 @@ struct EulerField
   Scalar kinetic_energy(const ConservedState& q) const
   {
     Vector<Scalar, Dim> momentum;
-    for (std::size_t d = 0; d < Dim; ++d) momentum[d] = q[1 + d];
+    for (Index d = 0; d < Dim; ++d) momentum[d] = q[1 + d];
     return Scalar(0.5) * contract(momentum, momentum) / density(q);
   }
 
@@ -188,12 +188,12 @@ struct EulerField
   {
     const Scalar u_axis = velocity_component(q, axis);
     const Scalar p = pressure(q);
-    const std::size_t normal_component = momentum_index(axis);
+    const Index normal_component = momentum_index(axis);
 
     ConservedState flux;
     flux[0] = density(q) * u_axis;
-    for (std::size_t d = 0; d < Dim; ++d) {
-      const std::size_t component = 1 + d;
+    for (Index d = 0; d < Dim; ++d) {
+      const Index component = 1 + d;
       flux[component] = q[component] * u_axis + (component == normal_component ? p : Scalar(0));
     }
     flux[energy_index()] = (total_energy(q) + p) * u_axis;
@@ -235,7 +235,7 @@ struct EulerField
   {
     ConservedState q;
     q[0] = density_value;
-    for (std::size_t d = 0; d < Dim; ++d) q[1 + d] = density_value * velocity[d];
+    for (Index d = 0; d < Dim; ++d) q[1 + d] = density_value * velocity[d];
     // kinetic = 0.5*|momentum|^2/density = 0.5*density^2*|velocity|^2/density
     //         = 0.5*density*|velocity|^2 -- computed directly from the
     // already-available `velocity` vector via `contract` (AGENTS.md #13)

@@ -39,10 +39,10 @@
 // advantage than the oscillatory wake comparison this task originally
 // set out to make, and is reported as its own headline finding below.
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/numerics/numerical_flux/hllc.hpp"
 #include "shu_osher_setup.hpp"
 #include "test_framework.hpp"
@@ -52,10 +52,10 @@ namespace {
 using Scalar = double;
 constexpr Scalar kTFinal = Scalar(1.8);
 constexpr Scalar kCfl = Scalar(0.4);
-constexpr std::size_t kFineNx = 2000;
+constexpr cfe::Index kFineNx = 2000;
 
 template <class NumericalFlux>
-cfe_verification::ShuOsherProfile<Scalar> run(std::size_t nx)
+cfe_verification::ShuOsherProfile<Scalar> run(cfe::Index nx)
 {
   return cfe_verification::run_shu_osher<Scalar, NumericalFlux>(nx, kTFinal, kCfl);
 }
@@ -309,7 +309,7 @@ CFE_TEST(test_shu_osher_hllc_resolves_more_fine_structure_than_rusanov_at_matche
   // same resolution -- on top of the separate, more dramatic
   // ahead-of-shock finding above (HLLC exact, Rusanov measurably
   // diffusive).
-  const std::size_t nx = 200;
+  const cfe::Index nx = 200;
   const auto& rusanov_reference = rusanov_fine_reference();
   const auto& hllc_reference = hllc_fine_reference();
   const double cutoff = canonical_shock_front() - 0.5;

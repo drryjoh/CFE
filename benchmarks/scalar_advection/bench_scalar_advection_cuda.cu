@@ -15,6 +15,7 @@
 
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
+#include "cfe/core/types.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
@@ -27,7 +28,7 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kSpeed = 1.0;
 constexpr int kRepetitions = 10;
 
-void run_case(std::size_t nx)
+void run_case(cfe::Index nx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = nx;
@@ -35,7 +36,7 @@ void run_case(std::size_t nx)
   grid.dx = 1.0 / static_cast<double>(nx);
 
   std::vector<double> host_ic(grid.n_cells_total(), 0.0);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
     host_ic[grid.flat_index(grid.ngx + i, 0, 0)] = std::sin(2.0 * kPi * x);
   }
@@ -85,8 +86,8 @@ void run_case(std::size_t nx)
 int main()
 {
   std::printf("backend,n_cells,repetitions,median_ms,cell_updates_per_s\n");
-  for (std::size_t nx : {std::size_t(1'000'000), std::size_t(10'000'000), std::size_t(50'000'000),
-                        std::size_t(100'000'000)}) {
+  for (cfe::Index nx : {cfe::Index(1'000'000), cfe::Index(10'000'000), cfe::Index(50'000'000),
+                        cfe::Index(100'000'000)}) {
     run_case(nx);
   }
   return 0;

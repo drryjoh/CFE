@@ -15,15 +15,16 @@
 #include <cstdio>
 
 #include "cfe/cfe.hpp"
+#include "cfe/core/types.hpp"
 
 namespace {
 
 template <class Field>
 void print_field(const Field& field)
 {
-  for (std::size_t i = 0; i < field.n_cells(); ++i) {
+  for (cfe::Index i = 0; i < field.n_cells(); ++i) {
     std::printf("  cell %zu:", i);
-    for (std::size_t k = 0; k < field.n_components(); ++k) {
+    for (cfe::Index k = 0; k < field.n_components(); ++k) {
       std::printf(" %6.2f", field(i, k));
     }
     std::printf("\n");
@@ -34,7 +35,7 @@ void print_field(const Field& field)
 
 int main()
 {
-  constexpr std::size_t n_cells = 8;
+  constexpr cfe::Index n_cells = 8;
   constexpr std::size_t n_components = 3;
 
   // cfe::parallel_for always resolves to a CPU backend (serial or threaded)
@@ -52,8 +53,8 @@ int main()
   cfe::Field<cfe::scalar, n_components> q(n_cells);
   cfe::Field<cfe::scalar, n_components> q_new(n_cells);
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       q(i, k) = static_cast<cfe::scalar>(i + k + 1);
     }
   }
@@ -65,8 +66,8 @@ int main()
   auto out_view = q_new.view();
 
   const auto t0 = std::chrono::steady_clock::now();
-  cfe::parallel_for(n_cells, [=](std::size_t i) mutable {
-    for (std::size_t k = 0; k < n_components; ++k) {
+  cfe::parallel_for(n_cells, [=](cfe::Index i) mutable {
+    for (cfe::Index k = 0; k < n_components; ++k) {
       out_view(i, k) = q_view(i, k) * q_view(i, k);
     }
   });

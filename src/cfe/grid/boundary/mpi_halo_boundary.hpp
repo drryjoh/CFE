@@ -126,7 +126,7 @@ class MpiHaloBoundary
   template <Axis A, class Backend, class Layout>
   void exchange(FieldView<Scalar, N, Layout> field, const CartesianGrid<Scalar> grid) const
   {
-    std::size_t ghost_depth, axis_extent, p_o1, p_o2;
+    Index ghost_depth, axis_extent, p_o1, p_o2;
     if constexpr (A == Axis::X) {
       ghost_depth = grid.ngx;
       axis_extent = grid.nx;
@@ -152,10 +152,10 @@ class MpiHaloBoundary
     detail::require_periodic_extent_covers_ghost_depth(
         axis_extent, ghost_depth, A == Axis::X ? "x" : (A == Axis::Y ? "y" : "z"));
 
-    const std::size_t ng = ghost_depth;
-    const std::size_t ax_n = axis_extent;
-    const std::size_t slab_cells = ng * p_o1 * p_o2;
-    const std::size_t count = slab_cells * N;
+    const Index ng = ghost_depth;
+    const Index ax_n = axis_extent;
+    const Index slab_cells = ng * p_o1 * p_o2;
+    const Index count = slab_cells * N;
 
     if (send_low_.size() != count) {
       send_low_.resize(count);
@@ -172,13 +172,13 @@ class MpiHaloBoundary
     // cases, matching the adjacency order the unpack step below expects.
     Scalar* send_low = send_low_.data();
     Scalar* send_high = send_high_.data();
-    Backend::run(slab_cells, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % ng;
-      const std::size_t rem = idx / ng;
-      const std::size_t o1 = rem % p_o1;
-      const std::size_t o2 = rem / p_o1;
+    Backend::run(slab_cells, [=] CFE_HOST_DEVICE(Index idx) mutable {
+      const Index g = idx % ng;
+      const Index rem = idx / ng;
+      const Index o1 = rem % p_o1;
+      const Index o2 = rem / p_o1;
 
-      std::size_t low_real, high_real;
+      Index low_real, high_real;
       if constexpr (A == Axis::X) {
         low_real = grid.flat_index(ng + g, o1, o2);
         high_real = grid.flat_index(ng + ax_n - 1 - g, o1, o2);
@@ -190,7 +190,7 @@ class MpiHaloBoundary
         high_real = grid.flat_index(o1, o2, ng + ax_n - 1 - g);
       }
 
-      for (std::size_t c = 0; c < N; ++c) {
+      for (Index c = 0; c < N; ++c) {
         send_low[idx * N + c] = field(low_real, c);
         send_high[idx * N + c] = field(high_real, c);
       }
@@ -234,13 +234,13 @@ class MpiHaloBoundary
     const bool skip_high = (right_rank_ == MPI_PROC_NULL);
     const Scalar* recv_low = recv_low_.data();
     const Scalar* recv_high = recv_high_.data();
-    Backend::run(slab_cells, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-      const std::size_t g = idx % ng;
-      const std::size_t rem = idx / ng;
-      const std::size_t o1 = rem % p_o1;
-      const std::size_t o2 = rem / p_o1;
+    Backend::run(slab_cells, [=] CFE_HOST_DEVICE(Index idx) mutable {
+      const Index g = idx % ng;
+      const Index rem = idx / ng;
+      const Index o1 = rem % p_o1;
+      const Index o2 = rem / p_o1;
 
-      std::size_t low_ghost, high_ghost;
+      Index low_ghost, high_ghost;
       if constexpr (A == Axis::X) {
         low_ghost = grid.flat_index(ng - 1 - g, o1, o2);
         high_ghost = grid.flat_index(ng + ax_n + g, o1, o2);
@@ -253,12 +253,12 @@ class MpiHaloBoundary
       }
 
       if (!skip_low) {
-        for (std::size_t c = 0; c < N; ++c) {
+        for (Index c = 0; c < N; ++c) {
           field(low_ghost, c) = recv_low[idx * N + c];
         }
       }
       if (!skip_high) {
-        for (std::size_t c = 0; c < N; ++c) {
+        for (Index c = 0; c < N; ++c) {
           field(high_ghost, c) = recv_high[idx * N + c];
         }
       }

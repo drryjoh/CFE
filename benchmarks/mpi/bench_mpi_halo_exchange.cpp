@@ -33,6 +33,7 @@
 
 #include "cfe/backend/mpi/mpi_environment.hpp"
 #include "cfe/backend/mpi/mpi_reduce.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/boundary/mpi_halo_boundary.hpp"
 #include "cfe/grid/partition/slab_partition.hpp"
@@ -86,13 +87,13 @@ double time_one_fill_x_median(const cfe::MpiHaloBoundary<Scalar, 1>& boundary, c
 
 // Bytes moved in one fill_x call: two directions (low-face send +
 // high-face send), each `ghost_depth * padded_ny * padded_nz` scalars.
-double bytes_per_exchange(std::size_t ghost_depth, std::size_t padded_ny, std::size_t padded_nz)
+double bytes_per_exchange(cfe::Index ghost_depth, cfe::Index padded_ny, cfe::Index padded_nz)
 {
   return static_cast<double>(2 * ghost_depth * padded_ny * padded_nz) * sizeof(Scalar);
 }
 
-void print_row(const char* sweep, int size, std::size_t global_nx, std::size_t ny, std::size_t nz,
-               std::size_t ghost_depth, double median_s, double bytes)
+void print_row(const char* sweep, int size, cfe::Index global_nx, cfe::Index ny, cfe::Index nz,
+               cfe::Index ghost_depth, double median_s, double bytes)
 {
   std::printf("%s,%d,%zu,%zu,%zu,%zu,%d,%.6f,%.0f,%.3f\n", sweep, size, global_nx, ny, nz, ghost_depth,
               kRepetitions, median_s * 1e6, bytes, bytes / median_s / 1e9);
@@ -100,10 +101,10 @@ void print_row(const char* sweep, int size, std::size_t global_nx, std::size_t n
 
 void run_ranks_sweep(int rank, int size)
 {
-  constexpr std::size_t kGlobalNx = 1024;
-  constexpr std::size_t kNy = 64;
-  constexpr std::size_t kNz = 64;
-  constexpr std::size_t kNgx = 2;
+  constexpr cfe::Index kGlobalNx = 1024;
+  constexpr cfe::Index kNy = 64;
+  constexpr cfe::Index kNz = 64;
+  constexpr cfe::Index kNgx = 2;
 
   const auto partition = cfe::make_slab_partition(kGlobalNx, rank, size, /*periodic=*/true);
 
@@ -126,13 +127,13 @@ void run_ranks_sweep(int rank, int size)
 
 void run_size_sweep(int rank, int size)
 {
-  constexpr std::size_t kGlobalNx = 256;
-  constexpr std::size_t kNgx = 2;
-  const std::vector<std::size_t> cross_sections = {8, 16, 32, 64, 128};
+  constexpr cfe::Index kGlobalNx = 256;
+  constexpr cfe::Index kNgx = 2;
+  const std::vector<cfe::Index> cross_sections = {8, 16, 32, 64, 128};
 
   const auto partition = cfe::make_slab_partition(kGlobalNx, rank, size, /*periodic=*/true);
 
-  for (std::size_t n : cross_sections) {
+  for (cfe::Index n : cross_sections) {
     cfe::CartesianGrid<Scalar> grid;
     grid.nx = partition.local_nx;
     grid.ny = n;
@@ -153,14 +154,14 @@ void run_size_sweep(int rank, int size)
 
 void run_ghost_depth_sweep(int rank, int size)
 {
-  constexpr std::size_t kGlobalNx = 256;
-  constexpr std::size_t kNy = 64;
-  constexpr std::size_t kNz = 64;
-  const std::vector<std::size_t> depths = {2, 4, 8};
+  constexpr cfe::Index kGlobalNx = 256;
+  constexpr cfe::Index kNy = 64;
+  constexpr cfe::Index kNz = 64;
+  const std::vector<cfe::Index> depths = {2, 4, 8};
 
   const auto partition = cfe::make_slab_partition(kGlobalNx, rank, size, /*periodic=*/true);
 
-  for (std::size_t ngx : depths) {
+  for (cfe::Index ngx : depths) {
     cfe::CartesianGrid<Scalar> grid;
     grid.nx = partition.local_nx;
     grid.ny = kNy;

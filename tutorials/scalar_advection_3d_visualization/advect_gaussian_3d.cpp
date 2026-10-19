@@ -18,6 +18,7 @@
 #include <fstream>
 #include <string>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -28,7 +29,7 @@
 
 namespace {
 
-constexpr std::size_t kN = 64;
+constexpr cfe::Index kN = 64;
 constexpr double kDx = 1.0 / static_cast<double>(kN);
 constexpr double kUx = 0.5;
 constexpr double kUy = 0.3;
@@ -68,9 +69,9 @@ int main()
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const double x = grid.x_center(grid.ngx + i);
         const double y = grid.y_center(grid.ngy + j);
         const double z = grid.z_center(grid.ngz + k);

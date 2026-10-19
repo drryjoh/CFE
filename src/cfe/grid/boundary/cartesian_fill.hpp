@@ -45,14 +45,14 @@ namespace cfe {
 //
 // `transform` must be host/device-callable (ordinarily a `[=] CFE_HOST_DEVICE`
 // lambda, `mutable` if it needs to call a non-`const` operation such as
-// `FieldView::operator()`) taking `(std::size_t g, std::size_t o1,
-// std::size_t o2)`. Captured by value into this function's own dispatch
-// lambda, so it is invoked from inside a `CFE_HOST_DEVICE` context --
-// no new host/device boundary is introduced.
+// `FieldView::operator()`) taking `(Index g, Index o1, Index o2)`.
+// Captured by value into this function's own dispatch lambda, so it is
+// invoked from inside a `CFE_HOST_DEVICE` context -- no new host/device
+// boundary is introduced.
 template <Axis A, class Backend = CpuParallelFor, class Scalar, class Transform>
 void cartesian_fill(const CartesianGrid<Scalar>& grid, Transform transform)
 {
-  std::size_t ghost_depth, p_o1, p_o2;
+  Index ghost_depth, p_o1, p_o2;
   if constexpr (A == Axis::X) {
     ghost_depth = grid.ngx;
     p_o1 = grid.padded_ny();
@@ -69,11 +69,11 @@ void cartesian_fill(const CartesianGrid<Scalar>& grid, Transform transform)
 
   if (ghost_depth == 0) return;
 
-  Backend::run(ghost_depth * p_o1 * p_o2, [=] CFE_HOST_DEVICE(std::size_t idx) mutable {
-    const std::size_t g = idx % ghost_depth;
-    const std::size_t rem = idx / ghost_depth;
-    const std::size_t o1 = rem % p_o1;
-    const std::size_t o2 = rem / p_o1;
+  Backend::run(ghost_depth * p_o1 * p_o2, [=] CFE_HOST_DEVICE(Index idx) mutable {
+    const Index g = idx % ghost_depth;
+    const Index rem = idx / ghost_depth;
+    const Index o1 = rem % p_o1;
+    const Index o2 = rem / p_o1;
     transform(g, o1, o2);
   });
 }

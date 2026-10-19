@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "cfe/backend/mpi/mpi_environment.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -40,11 +41,11 @@ constexpr double kDomainLength = 1.0;
 constexpr double kVelocity = 1.0;  // same speed on all three axes
 constexpr double kFinalTime = 0.1;
 constexpr double kCfl = 0.4;
-constexpr std::size_t kGlobalN = 16;  // 16^3 = 4096 global cells
+constexpr cfe::Index kGlobalN = 16;  // 16^3 = 4096 global cells
 // Deliberately NOT divisible by 2 (or by `px=py=pz=2`): an uneven 3D
 // partition, exercising make_slab_partition's remainder-to-the-first-
 // ranks rule per axis under real MPI communication (see run_case()).
-constexpr std::size_t kGlobalNUneven = 15;
+constexpr cfe::Index kGlobalNUneven = 15;
 
 // Product-of-sines IC (same convention bench_burgers_3d_cuda.cu/
 // test_burgers_3d_sanity.cpp use for their own 3D product ICs) advected
@@ -57,7 +58,7 @@ double exact_solution(double x, double y, double z, double t)
          std::sin(s * (z - kVelocity * t));
 }
 
-double cell_center(std::size_t global_i, double dx) { return (static_cast<double>(global_i) + 0.5) * dx; }
+double cell_center(cfe::Index global_i, double dx) { return (static_cast<double>(global_i) + 0.5) * dx; }
 
 void compute_steps(double dx, int& n_steps, double& dt)
 {
@@ -74,7 +75,7 @@ void compute_steps(double dx, int& n_steps, double& dt)
 // bit-for-bit. Returns a flat (i-fastest, j-next, k-slowest) array of
 // size global_n^3, the same ordering CartesianGrid::flat_index uses for
 // real cells.
-std::vector<double> run_reference(std::size_t global_n)
+std::vector<double> run_reference(cfe::Index global_n)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = grid.ny = grid.nz = global_n;
@@ -85,9 +86,9 @@ std::vector<double> run_reference(std::size_t global_n)
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const double value = exact_solution(cell_center(i, grid.dx), cell_center(j, grid.dy),
                                              cell_center(k, grid.dz), 0.0);
         state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0) = value;
@@ -111,9 +112,9 @@ std::vector<double> run_reference(std::size_t global_n)
   }
 
   std::vector<double> result(global_n * global_n * global_n);
-  for (std::size_t k = 0; k < global_n; ++k) {
-    for (std::size_t j = 0; j < global_n; ++j) {
-      for (std::size_t i = 0; i < global_n; ++i) {
+  for (cfe::Index k = 0; k < global_n; ++k) {
+    for (cfe::Index j = 0; j < global_n; ++j) {
+      for (cfe::Index i = 0; i < global_n; ++i) {
         result[i + global_n * (j + global_n * k)] =
             state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0);
       }
@@ -124,7 +125,7 @@ std::vector<double> run_reference(std::size_t global_n)
 
 // This rank's own block of the SAME global problem, decomposed via
 // CartesianPartition + MpiHaloBoundary on all three axes.
-std::vector<double> run_decomposed(std::size_t global_n, const cfe::CartesianPartition& partition)
+std::vector<double> run_decomposed(cfe::Index global_n, const cfe::CartesianPartition& partition)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = partition.local_nx;
@@ -140,9 +141,9 @@ std::vector<double> run_decomposed(std::size_t global_n, const cfe::CartesianPar
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const double value =
             exact_solution(cell_center(partition.global_offset_x + i, grid.dx),
                             cell_center(partition.global_offset_y + j, grid.dy),
@@ -171,9 +172,9 @@ std::vector<double> run_decomposed(std::size_t global_n, const cfe::CartesianPar
   }
 
   std::vector<double> result(grid.nx * grid.ny * grid.nz);
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         result[i + grid.nx * (j + grid.ny * k)] =
             state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0);
       }
@@ -194,7 +195,7 @@ std::vector<double> run_decomposed(std::size_t global_n, const cfe::CartesianPar
 // on whichever axes have a nonzero remainder, every other block gets the
 // bare quotient), not just in `test_cartesian_partition.cpp`'s pure-math
 // unit tests.
-int run_case(int rank, int size, std::size_t global_n, const char* label)
+int run_case(int rank, int size, cfe::Index global_n, const char* label)
 {
   const auto partition =
       cfe::make_cartesian_partition(global_n, global_n, global_n, 2, 2, 2, rank, size, true, true, true);
@@ -202,12 +203,12 @@ int run_case(int rank, int size, std::size_t global_n, const char* label)
   const std::vector<double> decomposed = run_decomposed(global_n, partition);
 
   int local_failures = 0;
-  for (std::size_t k = 0; k < partition.local_nz; ++k) {
-    for (std::size_t j = 0; j < partition.local_ny; ++j) {
-      for (std::size_t i = 0; i < partition.local_nx; ++i) {
-        const std::size_t gi = partition.global_offset_x + i;
-        const std::size_t gj = partition.global_offset_y + j;
-        const std::size_t gk = partition.global_offset_z + k;
+  for (cfe::Index k = 0; k < partition.local_nz; ++k) {
+    for (cfe::Index j = 0; j < partition.local_ny; ++j) {
+      for (cfe::Index i = 0; i < partition.local_nx; ++i) {
+        const cfe::Index gi = partition.global_offset_x + i;
+        const cfe::Index gj = partition.global_offset_y + j;
+        const cfe::Index gk = partition.global_offset_z + k;
         const double got = decomposed[i + partition.local_nx * (j + partition.local_ny * k)];
         const double want = reference[gi + global_n * (gj + global_n * gk)];
         if (got != want) {

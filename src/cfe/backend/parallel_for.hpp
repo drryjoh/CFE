@@ -33,8 +33,8 @@ using backend::serial::parallel_for;
 // (`CudaParallelFor`), usable only from a `.cu` translation unit.
 struct CpuParallelFor
 {
-  template <class Index, class Functor>
-  static void run(Index n, Functor f)
+  template <class IndexT, class Functor>
+  static void run(IndexT n, Functor f)
   {
     cfe::parallel_for(n, f);
   }

@@ -63,7 +63,7 @@ CFE_TEST(test_euler_rusanov_flux_reduces_to_physical_flux_for_equal_states)
   const cfe::State<double, 3> q = field.conserved_from_primitive(1.0, cfe::Vector<double, 1>(2.0), 1.0);
   const cfe::State<double, 3> flux = cfe::rusanov_flux(q, q, cfe::Axis::X, field);
   const cfe::State<double, 3> expected = field.physical_flux(q, cfe::Axis::X);
-  for (std::size_t c = 0; c < 3; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-12);
+  for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-12);
 }
 
 CFE_TEST(test_euler_rusanov_flux_functor_matches_free_function_for_vector_state)
@@ -75,5 +75,5 @@ CFE_TEST(test_euler_rusanov_flux_functor_matches_free_function_for_vector_state)
   const cfe::RusanovFlux functor{};
   const cfe::State<double, 3> via_functor = functor(left, right, cfe::Axis::X, field);
   const cfe::State<double, 3> via_free_function = cfe::rusanov_flux(left, right, cfe::Axis::X, field);
-  for (std::size_t c = 0; c < 3; ++c) CFE_CHECK_NEAR(via_functor[c], via_free_function[c], 1e-12);
+  for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK_NEAR(via_functor[c], via_free_function[c], 1e-12);
 }

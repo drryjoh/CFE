@@ -82,9 +82,9 @@ namespace fs = std::filesystem;
 constexpr cfe::scalar kCfl = cfe::scalar(0.4);
 constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
 constexpr cfe::scalar kShockOrigin = cfe::scalar(0.5);
-const std::vector<std::size_t> kGrids = {100, 200, 400};
+const std::vector<cfe::Index> kGrids = {100, 200, 400};
 const std::vector<double> kOutputTimes = {0.0, 0.25, 0.5};
-constexpr std::size_t kRepresentativeGrid = 100;  // smallest -- see file header comment
+constexpr cfe::Index kRepresentativeGrid = 100;  // smallest -- see file header comment
 
 // Exact area fraction of a [x_lo,x_lo+h]x[y_lo,y_lo+h] cell lying in
 // {x+y < c} -- the standard closed form for a square clipped by a
@@ -115,10 +115,10 @@ Scalar cut_cell_fraction(Scalar x_lo, Scalar y_lo, Scalar h, Scalar c)
 // The lower edge of the cell at padded axis index `i_pad` (ghost or
 // real alike): `grid.x_center`/`y_center`'s own formula minus half a
 // cell, but computed directly in `Scalar` rather than by subtracting
-// `std::size_t`s (which underflows for any ghost index below the
+// `cfe::Index`s (which underflows for any ghost index below the
 // origin, e.g. i_pad=0 with ngx=2).
 template <class Scalar>
-Scalar cell_lower_edge(std::size_t i_pad, std::size_t n_ghost, Scalar h)
+Scalar cell_lower_edge(cfe::Index i_pad, cfe::Index n_ghost, Scalar h)
 {
   return (static_cast<Scalar>(i_pad) - static_cast<Scalar>(n_ghost)) * h;
 }
@@ -152,11 +152,11 @@ struct DiagonalShockExactBoundary
     if (grid.ngx == 0) return;
     const Scalar c = kShockOrigin + static_cast<Scalar>(time);
     const Scalar h = grid.dx;
-    for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
+    for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
       const Scalar y_lo = cell_lower_edge(j, grid.ngy, grid.dy);
-      for (std::size_t g = 0; g < grid.ngx; ++g) {
-        const std::size_t i_low = grid.ngx - 1 - g;
-        const std::size_t i_high = grid.ngx + grid.nx + g;
+      for (cfe::Index g = 0; g < grid.ngx; ++g) {
+        const cfe::Index i_low = grid.ngx - 1 - g;
+        const cfe::Index i_high = grid.ngx + grid.nx + g;
         field(grid.flat_index(i_low, j, 0), 0) = cut_cell_fraction(cell_lower_edge(i_low, grid.ngx, h),
                                                                     y_lo, h, c);
         field(grid.flat_index(i_high, j, 0), 0) = cut_cell_fraction(cell_lower_edge(i_high, grid.ngx, h),
@@ -171,11 +171,11 @@ struct DiagonalShockExactBoundary
     if (grid.ngy == 0) return;
     const Scalar c = kShockOrigin + static_cast<Scalar>(time);
     const Scalar h = grid.dy;
-    for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
+    for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
       const Scalar x_lo = cell_lower_edge(i, grid.ngx, grid.dx);
-      for (std::size_t g = 0; g < grid.ngy; ++g) {
-        const std::size_t j_low = grid.ngy - 1 - g;
-        const std::size_t j_high = grid.ngy + grid.ny + g;
+      for (cfe::Index g = 0; g < grid.ngy; ++g) {
+        const cfe::Index j_low = grid.ngy - 1 - g;
+        const cfe::Index j_high = grid.ngy + grid.ny + g;
         field(grid.flat_index(i, j_low, 0), 0) = cut_cell_fraction(x_lo, cell_lower_edge(j_low, grid.ngy, h),
                                                                     h, c);
         field(grid.flat_index(i, j_high, 0), 0) =
@@ -193,14 +193,14 @@ struct DiagonalShockExactBoundary
     if (grid.ngz == 0) return;
     const Scalar c = kShockOrigin + static_cast<Scalar>(time);
     const Scalar h = grid.dx;
-    for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
+    for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
       const Scalar y_lo = cell_lower_edge(j, grid.ngy, grid.dy);
-      for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
+      for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
         const Scalar x_lo = cell_lower_edge(i, grid.ngx, grid.dx);
         const Scalar value = cut_cell_fraction(x_lo, y_lo, h, c);
-        for (std::size_t g = 0; g < grid.ngz; ++g) {
-          const std::size_t k_low = grid.ngz - 1 - g;
-          const std::size_t k_high = grid.ngz + grid.nz + g;
+        for (cfe::Index g = 0; g < grid.ngz; ++g) {
+          const cfe::Index k_low = grid.ngz - 1 - g;
+          const cfe::Index k_high = grid.ngz + grid.nz + g;
           field(grid.flat_index(i, j, k_low), 0) = value;
           field(grid.flat_index(i, j, k_high), 0) = value;
         }
@@ -219,22 +219,22 @@ template <class Solver>
 void step_once(Solver& solver, cfe::Field<cfe::scalar, 1>& state, cfe::Field<cfe::scalar, 1>& stage1,
                cfe::Field<cfe::scalar, 1>& scratch, cfe::scalar dt, cfe::scalar t_n)
 {
-  const std::size_t n_active = solver.active_cell_count();
+  const cfe::Index n_active = solver.active_cell_count();
   const auto index_map = solver.active_cell_index_map();
 
   solver.boundary_x.time = t_n;
   solver.boundary_y.time = t_n;
   solver.residual(state.view(), scratch.view());
-  for (std::size_t r = 0; r < n_active; ++r) {
-    const std::size_t cell = index_map(r);
+  for (cfe::Index r = 0; r < n_active; ++r) {
+    const cfe::Index cell = index_map(r);
     stage1(cell, 0) = state(cell, 0) + dt * scratch(cell, 0);
   }
 
   solver.boundary_x.time = t_n + dt;
   solver.boundary_y.time = t_n + dt;
   solver.residual(stage1.view(), scratch.view());
-  for (std::size_t r = 0; r < n_active; ++r) {
-    const std::size_t cell = index_map(r);
+  for (cfe::Index r = 0; r < n_active; ++r) {
+    const cfe::Index cell = index_map(r);
     state(cell, 0) = cfe::scalar(0.5) * state(cell, 0) + cfe::scalar(0.5) * (stage1(cell, 0) + dt * scratch(cell, 0));
   }
 }
@@ -257,9 +257,9 @@ void write_field_csv(const fs::path& path, const cfe::CartesianGrid<cfe::scalar>
   std::ofstream out(path);
   out << "x,y,u_numerical,u_exact\n";
   const cfe::scalar h = grid.dx;
-  for (std::size_t j = 0; j < grid.ny; ++j) {
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
     const cfe::scalar y_lo = static_cast<cfe::scalar>(j) * h;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       const cfe::scalar x_lo = static_cast<cfe::scalar>(i) * h;
       const cfe::scalar value = state(grid.flat_index(grid.ngx + i, grid.ngy + j, 0), 0);
       const cfe::scalar exact = cut_cell_fraction(x_lo, y_lo, h, kShockOrigin + t);
@@ -275,7 +275,7 @@ void write_diagonal_profile_csv(const fs::path& path, const cfe::CartesianGrid<c
   std::ofstream out(path);
   out << "s,u_numerical,u_exact\n";
   const cfe::scalar h = grid.dx;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const cfe::scalar s = grid.x_center(grid.ngx + i);  // x==y along the diagonal, nx==ny here
     const cfe::scalar x_lo = static_cast<cfe::scalar>(i) * h;
     const cfe::scalar value = state(grid.flat_index(grid.ngx + i, grid.ngy + i, 0), 0);
@@ -289,7 +289,7 @@ void write_diagonal_profile_csv(const fs::path& path, const cfe::CartesianGrid<c
 // ---------------------------------------------------------------------
 
 template <class Reconstruction>
-void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bool write_fields,
+void run_diagonal_case(cfe::Index n, const std::string& reconstruction_name, bool write_fields,
                        std::ofstream& summary, const fs::path& data_dir)
 {
   cfe::CartesianGrid<cfe::scalar> grid;
@@ -309,9 +309,9 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
   cfe::Field<cfe::scalar, 1> scratch(grid.n_cells_total());
 
   const cfe::scalar h = grid.dx;
-  for (std::size_t j = 0; j < grid.ny; ++j) {
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
     const cfe::scalar y_lo = static_cast<cfe::scalar>(j) * h;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       const cfe::scalar x_lo = static_cast<cfe::scalar>(i) * h;
       state(grid.flat_index(grid.ngx + i, grid.ngy + j, 0), 0) =
           cut_cell_fraction(x_lo, y_lo, h, kShockOrigin);
@@ -335,9 +335,9 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
     double min_val = max_val;
     double domain_integral = 0.0;
     const double cell_area = static_cast<double>(grid.dx) * static_cast<double>(grid.dy);
-    for (std::size_t j = 0; j < grid.ny; ++j) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
       const cfe::scalar y_lo = static_cast<cfe::scalar>(j) * h;
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const cfe::scalar x_lo = static_cast<cfe::scalar>(i) * h;
         const cfe::scalar value = state(grid.flat_index(grid.ngx + i, grid.ngy + j, 0), 0);
         const cfe::scalar exact = cut_cell_fraction(x_lo, y_lo, h, kShockOrigin + t);
@@ -351,7 +351,7 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
     // Shock straightness: find where the diagonal (x=y) profile crosses
     // 0.5, compare against the exact diagonal crossing (0.5+t)/2.
     double shock_numerical = kNan;
-    for (std::size_t i = 0; i + 1 < grid.nx; ++i) {
+    for (cfe::Index i = 0; i + 1 < grid.nx; ++i) {
       const double v0 = static_cast<double>(state(grid.flat_index(grid.ngx + i, grid.ngy + i, 0), 0));
       const double v1 =
           static_cast<double>(state(grid.flat_index(grid.ngx + i + 1, grid.ngy + i + 1, 0), 0));
@@ -391,7 +391,7 @@ void run_diagonal_case(std::size_t n, const std::string& reconstruction_name, bo
 
   report(cfe::scalar(0.0));
   cfe::scalar t = cfe::scalar(0.0);
-  for (std::size_t seg = 1; seg < kOutputTimes.size(); ++seg) {
+  for (cfe::Index seg = 1; seg < kOutputTimes.size(); ++seg) {
     const cfe::scalar t_target = static_cast<cfe::scalar>(kOutputTimes[seg]);
     const cfe::scalar dt_target = kCfl / (cfe::scalar(1.0) * (cfe::scalar(1.0) / grid.dx + cfe::scalar(1.0) / grid.dy));
     const int n_steps = static_cast<int>(std::ceil(static_cast<double>((t_target - t) / dt_target)));
@@ -417,7 +417,7 @@ int main()
   std::ofstream summary = open_summary_csv(data_dir);
 
   std::printf("=== 2D diagonal moving shock ===\n");
-  for (std::size_t n : kGrids) {
+  for (cfe::Index n : kGrids) {
     const bool write_representative = (n == kRepresentativeGrid);
     run_diagonal_case<cfe::fvm::FirstOrderReconstruction>(n, "first_order", false, summary, data_dir);
     run_diagonal_case<cfe::fvm::MusclMinmodReconstruction>(n, "second_order_limited", write_representative,

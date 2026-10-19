@@ -14,6 +14,7 @@
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/layout.hpp"
 #include "test_framework.hpp"
 
@@ -40,11 +41,11 @@ double tolerance_for(double expected)
 template <class Scalar, class Layout, std::size_t N>
 void run_case_for_n()
 {
-  constexpr std::size_t n_cells = 4096;
+  constexpr cfe::Index n_cells = 4096;
 
   std::vector<Scalar> host_q(n_cells * N);
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < N; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < N; ++k) {
       host_q[Layout::index(i, k, n_cells, N)] = static_cast<Scalar>(i + k + 1);
     }
   }
@@ -55,8 +56,8 @@ void run_case_for_n()
 
   auto q_view = q.view();
   auto out_view = q_new.view();
-  cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(std::size_t i) mutable {
-    for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
+  cfe::backend::cuda::parallel_for(n_cells, [=] CFE_DEVICE(cfe::Index i) mutable {
+    for (cfe::Index k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
   });
   // parallel_for is asynchronous -- must synchronize before the result is
   // meaningful to copy back and check.
@@ -65,8 +66,8 @@ void run_case_for_n()
   std::vector<Scalar> host_result(n_cells * N);
   q_new.copy_to_host(host_result.data());
 
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < N; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < N; ++k) {
       const double base = static_cast<double>(host_q[Layout::index(i, k, n_cells, N)]);
       const double expected = base * base;
       CFE_CHECK_NEAR(host_result[Layout::index(i, k, n_cells, N)], expected,
