@@ -9,9 +9,9 @@
 // profile shifted by a*t, so the error against it is a direct measure of
 // the scheme's truncation error -- not a proxy or a visual check.
 #include <cmath>
-#include <cstddef>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -36,7 +36,7 @@ double exact_solution(double x, double t)
 // Runs the scalar-advection solver on an `nx`-cell periodic grid from
 // t=0 to t=kFinalTime and returns the L2 error against the exact
 // solution.
-double run_and_measure_l2_error(std::size_t nx)
+double run_and_measure_l2_error(cfe::Index nx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = nx;
@@ -48,8 +48,8 @@ double run_and_measure_l2_error(std::size_t nx)
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> residual_scratch(grid.n_cells_total());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     state(cell, 0) = exact_solution(grid.x_center(grid.ngx + i), 0.0);
   }
 
@@ -70,8 +70,8 @@ double run_and_measure_l2_error(std::size_t nx)
   }
 
   double sum_sq_error = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     const double exact = exact_solution(grid.x_center(grid.ngx + i), kFinalTime);
     const double error = state(cell, 0) - exact;
     sum_sq_error += error * error;
@@ -83,17 +83,17 @@ double run_and_measure_l2_error(std::size_t nx)
 
 CFE_TEST(test_scalar_advection_second_order_convergence)
 {
-  const std::vector<std::size_t> resolutions = {20, 40, 80, 160};
+  const std::vector<cfe::Index> resolutions = {20, 40, 80, 160};
   std::vector<double> errors;
   errors.reserve(resolutions.size());
-  for (std::size_t nx : resolutions) {
+  for (cfe::Index nx : resolutions) {
     errors.push_back(run_and_measure_l2_error(nx));
   }
 
   // Each doubling of resolution (halving of dx) should quarter the error
   // for a 2nd-order scheme. Check every consecutive pair, not just the
   // endpoints, so a fluke at one resolution can't hide behind an average.
-  for (std::size_t k = 0; k + 1 < errors.size(); ++k) {
+  for (cfe::Index k = 0; k + 1 < errors.size(); ++k) {
     CFE_CHECK(errors[k + 1] > 0.0);
     const double ratio = errors[k] / errors[k + 1];
     CFE_CHECK(ratio > 3.5);

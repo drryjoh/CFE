@@ -78,6 +78,7 @@
 #include <string>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 
@@ -119,7 +120,7 @@ struct FileHandle
 };
 
 template <class T>
-void write_exact(std::FILE* file, const T* data, std::size_t count, const std::string& path)
+void write_exact(std::FILE* file, const T* data, Index count, const std::string& path)
 {
   if (count == 0) return;
   if (std::fwrite(data, sizeof(T), count, file) != count) {
@@ -128,7 +129,7 @@ void write_exact(std::FILE* file, const T* data, std::size_t count, const std::s
 }
 
 template <class T>
-void read_exact(std::FILE* file, T* data, std::size_t count, const std::string& path)
+void read_exact(std::FILE* file, T* data, Index count, const std::string& path)
 {
   if (count == 0) return;
   if (std::fread(data, sizeof(T), count, file) != count) {
@@ -207,7 +208,7 @@ struct RestartBlockShape
 template <class Scalar, std::size_t NComponents, class Layout>
 void write_restart_checkpoint(const std::string& path, const std::vector<CartesianGrid<Scalar>>& grids,
                                const std::vector<FieldView<const Scalar, NComponents, Layout>>& views,
-                               std::size_t step, Scalar time)
+                               Index step, Scalar time)
 {
   if (grids.size() != views.size()) {
     throw std::invalid_argument("write_restart_checkpoint: grids.size() != views.size()");
@@ -238,19 +239,19 @@ void write_restart_checkpoint(const std::string& path, const std::vector<Cartesi
   // (see this task's `agent_history.md` entry for the measured I/O-vs-
   // simulation-time comparison).
   std::vector<Scalar> buffer;
-  for (std::size_t b = 0; b < grids.size(); ++b) {
+  for (Index b = 0; b < grids.size(); ++b) {
     const CartesianGrid<Scalar>& grid = grids[b];
     const RestartBlockShape<Scalar> shape = RestartBlockShape<Scalar>::from_grid(grid);
     detail::write_exact(file, &shape, 1, path);
 
-    const std::size_t n_real_cells = grid.nx * grid.ny * grid.nz;
+    const Index n_real_cells = grid.nx * grid.ny * grid.nz;
     buffer.resize(n_real_cells * NComponents);
-    std::size_t out = 0;
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-          for (std::size_t c = 0; c < NComponents; ++c) buffer[out++] = views[b](cell, c);
+    Index out = 0;
+    for (Index k = 0; k < grid.nz; ++k) {
+      for (Index j = 0; j < grid.ny; ++j) {
+        for (Index i = 0; i < grid.nx; ++i) {
+          const Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+          for (Index c = 0; c < NComponents; ++c) buffer[out++] = views[b](cell, c);
         }
       }
     }
@@ -268,7 +269,7 @@ void write_restart_checkpoint(const std::string& path, const std::vector<Cartesi
 template <class Scalar>
 struct RestartCheckpointInfo
 {
-  std::size_t step = 0;
+  Index step = 0;
   Scalar time{};
 };
 
@@ -330,7 +331,7 @@ RestartCheckpointInfo<Scalar> read_restart_checkpoint(const std::string& path,
   }
 
   std::vector<Scalar> buffer;
-  for (std::size_t b = 0; b < grids.size(); ++b) {
+  for (Index b = 0; b < grids.size(); ++b) {
     const CartesianGrid<Scalar>& grid = grids[b];
     RestartBlockShape<Scalar> shape{};
     detail::read_exact(file, &shape, 1, path);
@@ -340,7 +341,7 @@ RestartCheckpointInfo<Scalar> read_restart_checkpoint(const std::string& path,
                                 "checkpoint/resolution for this case?");
     }
 
-    const std::size_t n_real_cells = grid.nx * grid.ny * grid.nz;
+    const Index n_real_cells = grid.nx * grid.ny * grid.nz;
     buffer.resize(n_real_cells * NComponents);
     detail::read_exact(file, buffer.data(), buffer.size(), path);
 
@@ -354,18 +355,18 @@ RestartCheckpointInfo<Scalar> read_restart_checkpoint(const std::string& path,
     // (which would force every caller to hand over a mutable vector just
     // to satisfy this internal detail).
     FieldView<Scalar, NComponents, Layout> view = views[b];
-    std::size_t in = 0;
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-          for (std::size_t c = 0; c < NComponents; ++c) view(cell, c) = buffer[in++];
+    Index in = 0;
+    for (Index k = 0; k < grid.nz; ++k) {
+      for (Index j = 0; j < grid.ny; ++j) {
+        for (Index i = 0; i < grid.nx; ++i) {
+          const Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+          for (Index c = 0; c < NComponents; ++c) view(cell, c) = buffer[in++];
         }
       }
     }
   }
 
-  return RestartCheckpointInfo<Scalar>{static_cast<std::size_t>(step64), time};
+  return RestartCheckpointInfo<Scalar>{static_cast<Index>(step64), time};
 }
 
 }  // namespace cfe::io

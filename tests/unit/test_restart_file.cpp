@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 #include "cfe/io/restart_file.hpp"
@@ -37,7 +38,7 @@ struct ScratchFile
   ~ScratchFile() { std::remove(path.string().c_str()); }
 };
 
-cfe::CartesianGrid<Scalar> make_grid(std::size_t nx, std::size_t ny, std::size_t ng)
+cfe::CartesianGrid<Scalar> make_grid(cfe::Index nx, cfe::Index ny, cfe::Index ng)
 {
   cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
@@ -62,18 +63,18 @@ CFE_TEST(test_restart_file_round_trips_single_block_real_cells_exactly)
 
   cfe::CartesianGrid<Scalar> grid = make_grid(5, 4, 2);
   cfe::Field<Scalar, N> field(grid.n_cells_total());
-  for (std::size_t cell = 0; cell < grid.n_cells_total(); ++cell) {
-    for (std::size_t c = 0; c < N; ++c) field(cell, c) = static_cast<Scalar>(cell) * Scalar(1.5) + Scalar(c);
+  for (cfe::Index cell = 0; cell < grid.n_cells_total(); ++cell) {
+    for (cfe::Index c = 0; c < N; ++c) field(cell, c) = static_cast<Scalar>(cell) * Scalar(1.5) + Scalar(c);
   }
   // Poison the ghost cells with an obviously-wrong sentinel: the restart
   // file must never touch these on write, and read-back must leave
   // whatever the (freshly constructed) reading side already had there.
-  for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
-    for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
+  for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
+    for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
       const bool is_real = (i >= grid.ngx && i < grid.ngx + grid.nx && j >= grid.ngy && j < grid.ngy + grid.ny);
       if (!is_real) {
-        const std::size_t cell = grid.flat_index(i, j, 0);
-        for (std::size_t c = 0; c < N; ++c) field(cell, c) = Scalar(-999.0);
+        const cfe::Index cell = grid.flat_index(i, j, 0);
+        for (cfe::Index c = 0; c < N; ++c) field(cell, c) = Scalar(-999.0);
       }
     }
   }
@@ -87,13 +88,13 @@ CFE_TEST(test_restart_file_round_trips_single_block_real_cells_exactly)
   // a `const` method, gets `ConstView` for free from `state_blocks.view
   // (...)` without writing this explicitly).
   cfe::io::write_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
-      scratch.path.string(), {grid}, {std::as_const(field).view()}, std::size_t(1234), Scalar(0.5678));
+      scratch.path.string(), {grid}, {std::as_const(field).view()}, cfe::Index(1234), Scalar(0.5678));
 
   cfe::Field<Scalar, N> loaded(grid.n_cells_total());
   // Fill the fresh destination's ghosts with a DIFFERENT sentinel than
   // the source had, so "ghosts happen to match" can't hide a bug.
-  for (std::size_t cell = 0; cell < grid.n_cells_total(); ++cell) {
-    for (std::size_t c = 0; c < N; ++c) loaded(cell, c) = Scalar(-1.0);
+  for (cfe::Index cell = 0; cell < grid.n_cells_total(); ++cell) {
+    for (cfe::Index c = 0; c < N; ++c) loaded(cell, c) = Scalar(-1.0);
   }
 
   const cfe::io::RestartCheckpointInfo<Scalar> info = cfe::io::read_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
@@ -102,10 +103,10 @@ CFE_TEST(test_restart_file_round_trips_single_block_real_cells_exactly)
   CFE_CHECK(info.step == 1234);
   CFE_CHECK(info.time == Scalar(0.5678));
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
-      for (std::size_t c = 0; c < N; ++c) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
+      for (cfe::Index c = 0; c < N; ++c) {
         CFE_CHECK(loaded(cell, c) == field(cell, c));
       }
     }
@@ -114,12 +115,12 @@ CFE_TEST(test_restart_file_round_trips_single_block_real_cells_exactly)
   // sentinel, not overwritten by whatever garbage sat in the source's
   // ghosts -- confirms ghost cells are genuinely excluded from the file,
   // not merely "happened to round-trip."
-  for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
-    for (std::size_t j = 0; j < grid.padded_ny(); ++j) {
+  for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
+    for (cfe::Index j = 0; j < grid.padded_ny(); ++j) {
       const bool is_real = (i >= grid.ngx && i < grid.ngx + grid.nx && j >= grid.ngy && j < grid.ngy + grid.ny);
       if (!is_real) {
-        const std::size_t cell = grid.flat_index(i, j, 0);
-        for (std::size_t c = 0; c < N; ++c) CFE_CHECK(loaded(cell, c) == Scalar(-1.0));
+        const cfe::Index cell = grid.flat_index(i, j, 0);
+        for (cfe::Index c = 0; c < N; ++c) CFE_CHECK(loaded(cell, c) == Scalar(-1.0));
       }
     }
   }
@@ -133,7 +134,7 @@ CFE_TEST(test_restart_file_rejects_mismatched_grid_shape)
   cfe::CartesianGrid<Scalar> written_grid = make_grid(5, 4, 2);
   cfe::Field<Scalar, N> field(written_grid.n_cells_total());
   cfe::io::write_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
-      scratch.path.string(), {written_grid}, {std::as_const(field).view()}, std::size_t(0), Scalar(0));
+      scratch.path.string(), {written_grid}, {std::as_const(field).view()}, cfe::Index(0), Scalar(0));
 
   // Same ghost depth, different real-cell extent -- must be rejected,
   // not silently misread into the wrong shape.
@@ -157,7 +158,7 @@ CFE_TEST(test_restart_file_rejects_mismatched_component_count)
   cfe::CartesianGrid<Scalar> grid = make_grid(3, 3, 1);
   cfe::Field<Scalar, 2> field(grid.n_cells_total());
   cfe::io::write_restart_checkpoint<Scalar, 2, cfe::AoSLayout>(
-      scratch.path.string(), {grid}, {std::as_const(field).view()}, std::size_t(0), Scalar(0));
+      scratch.path.string(), {grid}, {std::as_const(field).view()}, cfe::Index(0), Scalar(0));
 
   cfe::Field<Scalar, 3> loaded(grid.n_cells_total());
   bool threw = false;
@@ -182,7 +183,7 @@ CFE_TEST(test_restart_file_rejects_mismatched_format_version)
   cfe::CartesianGrid<Scalar> grid = make_grid(3, 3, 1);
   cfe::Field<Scalar, 1> field(grid.n_cells_total());
   cfe::io::write_restart_checkpoint<Scalar, 1, cfe::AoSLayout>(
-      scratch.path.string(), {grid}, {std::as_const(field).view()}, std::size_t(0), Scalar(0));
+      scratch.path.string(), {grid}, {std::as_const(field).view()}, cfe::Index(0), Scalar(0));
 
   // The format version is the first `std::uint32_t` written to the file
   // -- corrupt it in place (to a version number this build does not
@@ -216,7 +217,7 @@ CFE_TEST(test_restart_file_rejects_mismatched_scalar_size)
   cfe::CartesianGrid<double> grid = make_grid(3, 3, 1);
   cfe::Field<double, 1> field(grid.n_cells_total());
   cfe::io::write_restart_checkpoint<double, 1, cfe::AoSLayout>(
-      scratch.path.string(), {grid}, {std::as_const(field).view()}, std::size_t(0), double(0));
+      scratch.path.string(), {grid}, {std::as_const(field).view()}, cfe::Index(0), double(0));
 
   cfe::CartesianGrid<float> grid_f;
   grid_f.nx = grid.nx;
@@ -253,7 +254,7 @@ CFE_TEST(test_restart_file_rejects_mismatched_block_count)
   cfe::Field<Scalar, 1> field_b(grid_b.n_cells_total());
   cfe::io::write_restart_checkpoint<Scalar, 1, cfe::AoSLayout>(
       scratch.path.string(), {grid_a, grid_b}, {std::as_const(field_a).view(), std::as_const(field_b).view()},
-      std::size_t(0), Scalar(0));
+      cfe::Index(0), Scalar(0));
 
   cfe::Field<Scalar, 1> loaded_a(grid_a.n_cells_total());
   bool threw = false;
@@ -273,7 +274,7 @@ CFE_TEST(test_restart_file_rejects_truncated_file)
   cfe::CartesianGrid<Scalar> grid = make_grid(4, 4, 1);
   cfe::Field<Scalar, 2> field(grid.n_cells_total());
   cfe::io::write_restart_checkpoint<Scalar, 2, cfe::AoSLayout>(
-      scratch.path.string(), {grid}, {std::as_const(field).view()}, std::size_t(0), Scalar(0));
+      scratch.path.string(), {grid}, {std::as_const(field).view()}, cfe::Index(0), Scalar(0));
 
   // Chop the file down to just its header, well short of a full block's
   // worth of real-cell data -- `detail::read_exact`'s own short-read
@@ -299,16 +300,16 @@ CFE_TEST(test_restart_file_round_trips_multiple_blocks_in_order)
   cfe::CartesianGrid<Scalar> grid_b = make_grid(4, 3, 2);
   cfe::Field<Scalar, N> field_a(grid_a.n_cells_total());
   cfe::Field<Scalar, N> field_b(grid_b.n_cells_total());
-  for (std::size_t cell = 0; cell < grid_a.n_cells_total(); ++cell) {
-    for (std::size_t c = 0; c < N; ++c) field_a(cell, c) = static_cast<Scalar>(cell + c) + Scalar(0.1);
+  for (cfe::Index cell = 0; cell < grid_a.n_cells_total(); ++cell) {
+    for (cfe::Index c = 0; c < N; ++c) field_a(cell, c) = static_cast<Scalar>(cell + c) + Scalar(0.1);
   }
-  for (std::size_t cell = 0; cell < grid_b.n_cells_total(); ++cell) {
-    for (std::size_t c = 0; c < N; ++c) field_b(cell, c) = static_cast<Scalar>(1000 + cell + c) + Scalar(0.2);
+  for (cfe::Index cell = 0; cell < grid_b.n_cells_total(); ++cell) {
+    for (cfe::Index c = 0; c < N; ++c) field_b(cell, c) = static_cast<Scalar>(1000 + cell + c) + Scalar(0.2);
   }
 
   cfe::io::write_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
       scratch.path.string(), {grid_a, grid_b}, {std::as_const(field_a).view(), std::as_const(field_b).view()},
-      std::size_t(42), Scalar(1.0));
+      cfe::Index(42), Scalar(1.0));
 
   cfe::Field<Scalar, N> loaded_a(grid_a.n_cells_total());
   cfe::Field<Scalar, N> loaded_b(grid_b.n_cells_total());
@@ -316,16 +317,16 @@ CFE_TEST(test_restart_file_round_trips_multiple_blocks_in_order)
       scratch.path.string(), {grid_a, grid_b}, {loaded_a.view(), loaded_b.view()});
 
   CFE_CHECK(info.step == 42);
-  for (std::size_t i = 0; i < grid_a.nx; ++i) {
-    for (std::size_t j = 0; j < grid_a.ny; ++j) {
-      const std::size_t cell = grid_a.flat_index(grid_a.ngx + i, grid_a.ngy + j, 0);
-      for (std::size_t c = 0; c < N; ++c) CFE_CHECK(loaded_a(cell, c) == field_a(cell, c));
+  for (cfe::Index i = 0; i < grid_a.nx; ++i) {
+    for (cfe::Index j = 0; j < grid_a.ny; ++j) {
+      const cfe::Index cell = grid_a.flat_index(grid_a.ngx + i, grid_a.ngy + j, 0);
+      for (cfe::Index c = 0; c < N; ++c) CFE_CHECK(loaded_a(cell, c) == field_a(cell, c));
     }
   }
-  for (std::size_t i = 0; i < grid_b.nx; ++i) {
-    for (std::size_t j = 0; j < grid_b.ny; ++j) {
-      const std::size_t cell = grid_b.flat_index(grid_b.ngx + i, grid_b.ngy + j, 0);
-      for (std::size_t c = 0; c < N; ++c) CFE_CHECK(loaded_b(cell, c) == field_b(cell, c));
+  for (cfe::Index i = 0; i < grid_b.nx; ++i) {
+    for (cfe::Index j = 0; j < grid_b.ny; ++j) {
+      const cfe::Index cell = grid_b.flat_index(grid_b.ngx + i, grid_b.ngy + j, 0);
+      for (cfe::Index c = 0; c < N; ++c) CFE_CHECK(loaded_b(cell, c) == field_b(cell, c));
     }
   }
 }

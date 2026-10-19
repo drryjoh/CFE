@@ -1,4 +1,4 @@
-# ADR 0013: Checkpoint/restart binary format
+# ADR 0014: Checkpoint/restart binary format
 
 **Status:** Accepted
 **Date:** 2026-10-15

@@ -102,6 +102,14 @@ that is often the entire point of the test. Accepted practice for these
   do not attempt to script a direct comparison against a digitized
   literature plot.
 
+This derived-metric-oracle pattern (compare against a known analytic or
+converged-reference scalar, never a raw per-cell field dump) is also
+what `docs/adr/0013-tutorial-data-commit-policy.md` relies on to justify
+NOT committing raw snapshot data for tutorials/verification cases:
+committed `figures/*.png` and `data/**/summary.csv` already carry
+everything a reviewer or a future reader needs to check a result, the
+same way these tests do.
+
 ## 3. CPU/GPU comparison
 
 When the same algorithm runs on CPU and GPU, compare scientifically meaningful quantities within tolerances appropriate for floating-point non-associativity.

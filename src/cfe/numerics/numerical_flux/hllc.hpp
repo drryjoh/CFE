@@ -180,6 +180,7 @@
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
+#include "cfe/math/operations.hpp"
 
 namespace cfe {
 
@@ -230,12 +231,18 @@ HllcFlooredPrimitives<Scalar, N, Field> hllc_floored_primitives(const State<Scal
   const Scalar rho_raw = field.density(q);
   const Scalar rho = rho_raw > kTinyDensityFloor<Scalar> ? rho_raw : kTinyDensityFloor<Scalar>;
   const Scalar u = field.momentum(q, axis) / rho;
-  Scalar kinetic = Scalar(0);
-  for (std::size_t d = 0; d < Dim; ++d) {
-    const Scalar m_d = q[Field::momentum_index(static_cast<Axis>(d))];
-    kinetic += m_d * m_d;
-  }
-  kinetic = Scalar(0.5) * kinetic / rho;
+  // Sum-of-squares via `contract` (math/operations.hpp, AGENTS.md #13)
+  // rather than a hand-rolled accumulator -- PR #6 cleanup task, same
+  // treatment as `EulerField::kinetic_energy`. Only the independent
+  // (not fused into another per-component loop) sum-of-squares site in
+  // this file was converted; `hllc_star_state`'s own momentum_squared_sum
+  // below is built WHILE constructing `q_star`'s components in the same
+  // loop and was deliberately left alone (converting it would need an
+  // extra pass over an already-hardened, floor-safety-critical function
+  // for no behavior change -- see this file's own review history).
+  Vector<Scalar, Dim> momentum;
+  for (Index d = 0; d < Dim; ++d) momentum[d] = q[Field::momentum_index(static_cast<Axis>(d))];
+  const Scalar kinetic = Scalar(0.5) * contract(momentum, momentum) / rho;
   const Scalar p_raw = (field.gamma - Scalar(1)) * (field.total_energy(q) - kinetic);
   const Scalar p = p_raw > kTinyPressureFloor<Scalar> ? p_raw : kTinyPressureFloor<Scalar>;
   return HllcFlooredPrimitives<Scalar, N, Field>{rho, u, p};
@@ -250,7 +257,7 @@ State<Scalar, N> hllc_star_state(const State<Scalar, N>& q_k, Scalar s_k, Scalar
                                   const Field& field)
 {
   constexpr std::size_t Dim = Field::dim;
-  const std::size_t normal_component = Field::momentum_index(axis);
+  const Index normal_component = Field::momentum_index(axis);
 
   // Floors (Violet review finding, see this file's header comment on the
   // forward-step res40+ NaN): `density_star`'s formula is only
@@ -282,8 +289,8 @@ State<Scalar, N> hllc_star_state(const State<Scalar, N>& q_k, Scalar s_k, Scalar
   State<Scalar, N> q_star;
   q_star[0] = density_star;
   Scalar momentum_squared_sum = Scalar(0);
-  for (std::size_t d = 0; d < Dim; ++d) {
-    const std::size_t component = Field::momentum_index(static_cast<Axis>(d));
+  for (Index d = 0; d < Dim; ++d) {
+    const Index component = Field::momentum_index(static_cast<Axis>(d));
     if (component == normal_component) {
       q_star[component] = density_star * s_star;
     } else {
@@ -493,14 +500,14 @@ State<Scalar, N> hllc_flux(const State<Scalar, N>& left_state, const State<Scala
     const State<Scalar, N> q_star_l = detail::hllc_star_state(left_state, s_l, s_star, axis, field);
     const State<Scalar, N> flux_l = field.physical_flux(left_state, axis);
     State<Scalar, N> flux;
-    for (std::size_t c = 0; c < N; ++c) flux[c] = flux_l[c] + s_l * (q_star_l[c] - left_state[c]);
+    for (Index c = 0; c < N; ++c) flux[c] = flux_l[c] + s_l * (q_star_l[c] - left_state[c]);
     return flux;
   }
   if (s_r >= Scalar(0)) {
     const State<Scalar, N> q_star_r = detail::hllc_star_state(right_state, s_r, s_star, axis, field);
     const State<Scalar, N> flux_r = field.physical_flux(right_state, axis);
     State<Scalar, N> flux;
-    for (std::size_t c = 0; c < N; ++c) flux[c] = flux_r[c] + s_r * (q_star_r[c] - right_state[c]);
+    for (Index c = 0; c < N; ++c) flux[c] = flux_r[c] + s_r * (q_star_r[c] - right_state[c]);
     return flux;
   }
   return field.physical_flux(right_state, axis);

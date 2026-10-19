@@ -6,7 +6,6 @@
 // is negated -- exercised on EulerField<Scalar,2> specifically so the
 // X-wall test can also confirm the tangential (Y) momentum component is
 // left untouched, not just that "some" component gets flipped.
-#include <cstddef>
 
 #include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
@@ -29,8 +28,8 @@ CFE_TEST(test_slip_wall_boundary_fill_x_mirrors_density_and_negates_normal_momen
   cfe::Field<double, 4> state(grid.n_cells_total());
   // Fill every real cell with a distinct, fully-populated state so a
   // bug that mixed up components or axes would be caught.
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy, 0);
     state(cell, 0) = 2.0 + static_cast<double>(i);        // density
     state(cell, 1) = 3.0 + static_cast<double>(i);        // momentum_x (normal to an X wall)
     state(cell, 2) = -5.0 - static_cast<double>(i);       // momentum_y (tangential to an X wall)
@@ -42,9 +41,9 @@ CFE_TEST(test_slip_wall_boundary_fill_x_mirrors_density_and_negates_normal_momen
 
   // Low-side ghosts: ghost layer g mirrors real cell at local index g
   // (nearest-to-wall real cell is local index 0).
-  for (std::size_t g = 0; g < grid.ngx; ++g) {
-    const std::size_t ghost_cell = grid.flat_index(grid.ngx - 1 - g, grid.ngy, 0);
-    const std::size_t source_cell = grid.flat_index(grid.ngx + g, grid.ngy, 0);
+  for (cfe::Index g = 0; g < grid.ngx; ++g) {
+    const cfe::Index ghost_cell = grid.flat_index(grid.ngx - 1 - g, grid.ngy, 0);
+    const cfe::Index source_cell = grid.flat_index(grid.ngx + g, grid.ngy, 0);
     CFE_CHECK_NEAR(state(ghost_cell, 0), state(source_cell, 0), 1e-12);
     CFE_CHECK_NEAR(state(ghost_cell, 1), -state(source_cell, 1), 1e-12);  // normal: negated
     CFE_CHECK_NEAR(state(ghost_cell, 2), state(source_cell, 2), 1e-12);   // tangential: unchanged
@@ -52,9 +51,9 @@ CFE_TEST(test_slip_wall_boundary_fill_x_mirrors_density_and_negates_normal_momen
   }
 
   // High-side ghosts: mirrored from the opposite end.
-  for (std::size_t g = 0; g < grid.ngx; ++g) {
-    const std::size_t ghost_cell = grid.flat_index(grid.ngx + grid.nx + g, grid.ngy, 0);
-    const std::size_t source_cell = grid.flat_index(grid.ngx + grid.nx - 1 - g, grid.ngy, 0);
+  for (cfe::Index g = 0; g < grid.ngx; ++g) {
+    const cfe::Index ghost_cell = grid.flat_index(grid.ngx + grid.nx + g, grid.ngy, 0);
+    const cfe::Index source_cell = grid.flat_index(grid.ngx + grid.nx - 1 - g, grid.ngy, 0);
     CFE_CHECK_NEAR(state(ghost_cell, 0), state(source_cell, 0), 1e-12);
     CFE_CHECK_NEAR(state(ghost_cell, 1), -state(source_cell, 1), 1e-12);
     CFE_CHECK_NEAR(state(ghost_cell, 2), state(source_cell, 2), 1e-12);
@@ -74,8 +73,8 @@ CFE_TEST(test_slip_wall_boundary_fill_y_negates_momentum_y_only)
   grid.dy = 1.0;
 
   cfe::Field<double, 4> state(grid.n_cells_total());
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    const std::size_t cell = grid.flat_index(grid.ngx, grid.ngy + j, 0);
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    const cfe::Index cell = grid.flat_index(grid.ngx, grid.ngy + j, 0);
     state(cell, 0) = 1.0 + static_cast<double>(j);
     state(cell, 1) = 4.0 + static_cast<double>(j);   // momentum_x (tangential to a Y wall)
     state(cell, 2) = 7.0 + static_cast<double>(j);   // momentum_y (normal to a Y wall)
@@ -85,9 +84,9 @@ CFE_TEST(test_slip_wall_boundary_fill_y_negates_momentum_y_only)
   cfe::SlipWallBoundary<Field> boundary;
   boundary.fill_y(state.view(), grid);
 
-  for (std::size_t g = 0; g < grid.ngy; ++g) {
-    const std::size_t ghost_cell = grid.flat_index(grid.ngx, grid.ngy - 1 - g, 0);
-    const std::size_t source_cell = grid.flat_index(grid.ngx, grid.ngy + g, 0);
+  for (cfe::Index g = 0; g < grid.ngy; ++g) {
+    const cfe::Index ghost_cell = grid.flat_index(grid.ngx, grid.ngy - 1 - g, 0);
+    const cfe::Index source_cell = grid.flat_index(grid.ngx, grid.ngy + g, 0);
     CFE_CHECK_NEAR(state(ghost_cell, 0), state(source_cell, 0), 1e-12);
     CFE_CHECK_NEAR(state(ghost_cell, 1), state(source_cell, 1), 1e-12);   // tangential: unchanged
     CFE_CHECK_NEAR(state(ghost_cell, 2), -state(source_cell, 2), 1e-12);  // normal: negated

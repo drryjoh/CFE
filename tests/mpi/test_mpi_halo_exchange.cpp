@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "cfe/backend/mpi/mpi_environment.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -54,7 +55,7 @@ constexpr double kDomainLength = 1.0;
 constexpr double kAdvectionSpeed = 1.0;
 constexpr double kFinalTime = 0.3;
 constexpr double kCfl = 0.4;
-constexpr std::size_t kGlobalNx = 160;
+constexpr cfe::Index kGlobalNx = 160;
 
 double exact_solution(double x, double t)
 {
@@ -64,7 +65,7 @@ double exact_solution(double x, double t)
 // Same single multiply-add `CartesianGrid::x_center()` performs when
 // `origin_x == 0` -- see this file's header comment for why that
 // equivalence is what makes bit-identity achievable.
-double cell_center(std::size_t global_i, double dx)
+double cell_center(cfe::Index global_i, double dx)
 {
   return (static_cast<double>(global_i) + 0.5) * dx;
 }
@@ -84,7 +85,7 @@ void compute_steps(double dx, int& n_steps, double& dt)
 // Runs the full global problem on ONE (virtual) rank, entirely locally,
 // no MPI involved -- the reference this test's decomposed run must
 // match bit-for-bit.
-std::vector<double> run_reference(std::size_t global_nx)
+std::vector<double> run_reference(cfe::Index global_nx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = global_nx;
@@ -95,7 +96,7 @@ std::vector<double> run_reference(std::size_t global_nx)
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = exact_solution(cell_center(i, grid.dx), 0.0);
   }
 
@@ -115,7 +116,7 @@ std::vector<double> run_reference(std::size_t global_nx)
   }
 
   std::vector<double> result(global_nx);
-  for (std::size_t i = 0; i < global_nx; ++i) {
+  for (cfe::Index i = 0; i < global_nx; ++i) {
     result[i] = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
   }
   return result;
@@ -123,7 +124,7 @@ std::vector<double> run_reference(std::size_t global_nx)
 
 // Runs this rank's own slice of the SAME global problem, decomposed via
 // SlabPartition + MpiHaloBoundary, and returns its local real cells.
-std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartition& partition)
+std::vector<double> run_decomposed(cfe::Index global_nx, const cfe::SlabPartition& partition)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = partition.local_nx;
@@ -137,8 +138,8 @@ std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartiti
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t global_i = partition.global_offset_x + i;
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index global_i = partition.global_offset_x + i;
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = exact_solution(cell_center(global_i, grid.dx), 0.0);
   }
 
@@ -168,7 +169,7 @@ std::vector<double> run_decomposed(std::size_t global_nx, const cfe::SlabPartiti
   }
 
   std::vector<double> result(grid.nx);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     result[i] = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
   }
   return result;
@@ -187,8 +188,8 @@ int main(int argc, char** argv)
   const std::vector<double> decomposed = run_decomposed(kGlobalNx, partition);
 
   int local_failures = 0;
-  for (std::size_t i = 0; i < decomposed.size(); ++i) {
-    const std::size_t global_i = partition.global_offset_x + i;
+  for (cfe::Index i = 0; i < decomposed.size(); ++i) {
+    const cfe::Index global_i = partition.global_offset_x + i;
     if (decomposed[i] != reference[global_i]) {
       std::fprintf(stderr, "[rank %d] MISMATCH at global cell %zu: decomposed=%.17g reference=%.17g\n", rank,
                    global_i, decomposed[i], reference[global_i]);

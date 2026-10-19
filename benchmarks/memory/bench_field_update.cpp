@@ -25,6 +25,7 @@
 #include "cfe/backend/cpu/serial.hpp"
 #include "cfe/backend/cpu/threaded.hpp"
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/field/layout.hpp"
 
@@ -51,18 +52,18 @@ const char* layout_name<cfe::SoALayout>()
 // comfortably exceeds cache regardless of component count. Not a rigorous
 // roofline target -- just large enough that this is a memory-bandwidth
 // exercise rather than an L1-resident microbenchmark.
-constexpr std::size_t kTargetBytesPerField = 64ull * 1024ull * 1024ull;
+constexpr cfe::Index kTargetBytesPerField = 64ull * 1024ull * 1024ull;
 constexpr int kRepetitions = 7;
 
 template <class Scalar, std::size_t N, class Layout>
-double median_seconds_per_pass(std::size_t n_cells, BackendKind backend)
+double median_seconds_per_pass(cfe::Index n_cells, BackendKind backend)
 {
   cfe::Field<Scalar, N, Layout> q(n_cells);
   cfe::Field<Scalar, N, Layout> q_new(n_cells);
 
   // One-time initialization, outside every timed region.
-  for (std::size_t i = 0; i < n_cells; ++i) {
-    for (std::size_t k = 0; k < N; ++k) {
+  for (cfe::Index i = 0; i < n_cells; ++i) {
+    for (cfe::Index k = 0; k < N; ++k) {
       q(i, k) = static_cast<Scalar>((i % 97) + k) * Scalar(0.01);
     }
   }
@@ -72,12 +73,12 @@ double median_seconds_per_pass(std::size_t n_cells, BackendKind backend)
 
   auto run_pass = [=]() mutable {
     if (backend == BackendKind::Serial) {
-      cfe::backend::serial::parallel_for(n_cells, [=](std::size_t i) mutable {
-        for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
+      cfe::backend::serial::parallel_for(n_cells, [=](cfe::Index i) mutable {
+        for (cfe::Index k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
       });
     } else {
-      cfe::backend::threaded::parallel_for(n_cells, [=](std::size_t i) mutable {
-        for (std::size_t k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
+      cfe::backend::threaded::parallel_for(n_cells, [=](cfe::Index i) mutable {
+        for (cfe::Index k = 0; k < N; ++k) out_view(i, k) = q_view(i, k) * q_view(i, k);
       });
     }
   };
@@ -100,8 +101,8 @@ double median_seconds_per_pass(std::size_t n_cells, BackendKind backend)
 template <class Scalar, std::size_t N, class Layout>
 void run_case(const char* precision_name, BackendKind backend)
 {
-  const std::size_t n_cells =
-      std::max<std::size_t>(1024, kTargetBytesPerField / (N * sizeof(Scalar)));
+  const cfe::Index n_cells =
+      std::max<cfe::Index>(1024, kTargetBytesPerField / (N * sizeof(Scalar)));
 
   const double median_s = median_seconds_per_pass<Scalar, N, Layout>(n_cells, backend);
 

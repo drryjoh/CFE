@@ -64,10 +64,10 @@ namespace {
 using Scalar = cfe::scalar;
 using Blocks = cfe_verification::ForwardStepBlocks<Scalar, 2, cfe::HllcFlux>;
 
-constexpr std::size_t kResolution = 288;
+constexpr cfe::Index kResolution = 288;
 constexpr Scalar kCfl = Scalar(0.4);
-constexpr std::size_t kDemoTotalSteps = 12000;
-constexpr std::size_t kDemoCheckpointLeadSteps = 1000;
+constexpr cfe::Index kDemoTotalSteps = 12000;
+constexpr cfe::Index kDemoCheckpointLeadSteps = 1000;
 
 const fs::path kDataDir = fs::path("data") / "res288_hllc_restart";
 const fs::path kCheckpointPath = kDataDir / "checkpoint.cferst";
@@ -80,7 +80,7 @@ double seconds_since(const std::chrono::steady_clock::time_point& start)
 void run_checkpoint_mode()
 {
   fs::create_directories(kDataDir);
-  const std::size_t steps_before_checkpoint = kDemoTotalSteps - kDemoCheckpointLeadSteps;
+  const cfe::Index steps_before_checkpoint = kDemoTotalSteps - kDemoCheckpointLeadSteps;
 
   std::printf("=== restart demo: --mode=checkpoint (res%zu_hllc, %zu steps total, checkpoint %zu steps before end) ===\n",
               kResolution, kDemoTotalSteps, kDemoCheckpointLeadSteps);

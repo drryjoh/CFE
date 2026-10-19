@@ -15,9 +15,9 @@
 // an exact product-of-sines at any later time, just phase-shifted by
 // the velocity in each direction.
 #include <cmath>
-#include <cstddef>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -39,7 +39,7 @@ double exact_solution(double x, double y, double t)
   return std::sin(2.0 * kPi * (x - kUx * t)) * std::sin(2.0 * kPi * (y - kUy * t));
 }
 
-double run_and_measure_l2_error(std::size_t n)
+double run_and_measure_l2_error(cfe::Index n)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = n;
@@ -53,9 +53,9 @@ double run_and_measure_l2_error(std::size_t n)
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> residual_scratch(grid.n_cells_total());
 
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
       state(cell, 0) =
           exact_solution(grid.x_center(grid.ngx + i), grid.y_center(grid.ngy + j), 0.0);
     }
@@ -81,9 +81,9 @@ double run_and_measure_l2_error(std::size_t n)
   }
 
   double sum_sq_error = 0.0;
-  for (std::size_t j = 0; j < grid.ny; ++j) {
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
+  for (cfe::Index j = 0; j < grid.ny; ++j) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, 0);
       const double exact =
           exact_solution(grid.x_center(grid.ngx + i), grid.y_center(grid.ngy + j), kFinalTime);
       const double error = state(cell, 0) - exact;
@@ -97,14 +97,14 @@ double run_and_measure_l2_error(std::size_t n)
 
 CFE_TEST(test_scalar_advection_2d_second_order_convergence_with_nonzero_xy_velocity)
 {
-  const std::vector<std::size_t> resolutions = {20, 40, 80, 160};
+  const std::vector<cfe::Index> resolutions = {20, 40, 80, 160};
   std::vector<double> errors;
   errors.reserve(resolutions.size());
-  for (std::size_t n : resolutions) {
+  for (cfe::Index n : resolutions) {
     errors.push_back(run_and_measure_l2_error(n));
   }
 
-  for (std::size_t k = 0; k + 1 < errors.size(); ++k) {
+  for (cfe::Index k = 0; k + 1 < errors.size(); ++k) {
     CFE_CHECK(errors[k + 1] > 0.0);
     const double ratio = errors[k] / errors[k + 1];
     CFE_CHECK(ratio > 3.5);

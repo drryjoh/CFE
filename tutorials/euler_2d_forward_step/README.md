@@ -313,7 +313,7 @@ against this tutorial's full sweep means re-running every case from
 `t=0`, including the most expensive one (res288_hllc, ~12,000 steps),
 even when the change being verified provably cannot affect physics
 (e.g. a pure rename). `src/cfe/io/restart_file.hpp` adds a versioned
-binary checkpoint format -- see `docs/adr/0013-checkpoint-restart-
+binary checkpoint format -- see `docs/adr/0014-checkpoint-restart-
 format.md` for the full design and
 `forward_step_setup.hpp::ForwardStepBlocks::write_restart`/
 `read_restart` for how this case uses it.
@@ -336,7 +336,7 @@ doc comment in `forward_step_setup.hpp` for the full reasoning). **You
 cannot currently use a `forward_step_2d_restart_demo` checkpoint to skip
 part of `forward_step_2d.cpp`'s own sweep** -- that would need a
 `t_start`-aware variant of `run_to`, not built in this task (see
-`docs/adr/0013-...md`'s Consequences section).
+`docs/adr/0014-...md`'s Consequences section).
 
 **The non-negotiable correctness property:** a continuous run of N
 steps must produce the IDENTICAL final state (bit-for-bit) to running
@@ -442,5 +442,5 @@ two-block forward-step assembly, and this task did not change that.
   portable across machines/builds (same `sizeof(Scalar)`, component
   count, and exact grid shape required), and only covers this case's
   existing CPU/serial-or-threaded backend -- no MPI-aware multi-block
-  restart, no CUDA restart path. See `docs/adr/0013-checkpoint-restart-
+  restart, no CUDA restart path. See `docs/adr/0014-checkpoint-restart-
   format.md`'s Revisit criteria.

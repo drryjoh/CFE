@@ -42,8 +42,8 @@ namespace fs = std::filesystem;
 namespace {
 
 using Scalar = cfe::scalar;
-constexpr std::size_t kCellsPerUnitHeight = 40;
-constexpr std::size_t kNzCells = 8;
+constexpr cfe::Index kCellsPerUnitHeight = 40;
+constexpr cfe::Index kNzCells = 8;
 constexpr Scalar kSpanZ = Scalar(0.2);
 constexpr Scalar kTFinal = Scalar(4.0);
 constexpr Scalar kCfl = Scalar(0.4);
@@ -63,7 +63,7 @@ int main()
 
   auto density_of = [&](const cfe::State<Scalar, 5>& q) { return static_cast<Scalar>(blocks.field.density(q)); };
 
-  auto write_frame = [&](std::size_t frame) {
+  auto write_frame = [&](cfe::Index frame) {
     char prefix[64];
     std::snprintf(prefix, sizeof(prefix), "frame_%04zu", frame);
     blocks.write_vtk_frame((dir / (std::string(prefix) + "_density")).string(), "density", density_of);
@@ -77,10 +77,10 @@ int main()
   // end of the run, not just at t=0.
   double max_abs_z_momentum = 0.0;
   auto scan = [&](const auto& state, const auto& grid) {
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+    for (cfe::Index k = 0; k < grid.nz; ++k) {
+      for (cfe::Index j = 0; j < grid.ny; ++j) {
+        for (cfe::Index i = 0; i < grid.nx; ++i) {
+          const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
           max_abs_z_momentum = std::max(max_abs_z_momentum, std::fabs(static_cast<double>(state(cell, 3))));
         }
       }

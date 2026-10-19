@@ -24,10 +24,10 @@
 #pragma once
 
 #include <cassert>
-#include <cstddef>
 #include <stdexcept>
 #include <string>
 
+#include "cfe/core/types.hpp"
 #include "cfe/grid/partition/slab_partition.hpp"
 
 namespace cfe {
@@ -36,8 +36,8 @@ struct CartesianPartition
 {
   static constexpr int kNoNeighbor = SlabPartition::kNoNeighbor;
 
-  std::size_t local_nx = 0, local_ny = 0, local_nz = 0;
-  std::size_t global_offset_x = 0, global_offset_y = 0, global_offset_z = 0;
+  Index local_nx = 0, local_ny = 0, local_nz = 0;
+  Index global_offset_x = 0, global_offset_y = 0, global_offset_z = 0;
 
   int x_left_rank = kNoNeighbor, x_right_rank = kNoNeighbor;
   int y_left_rank = kNoNeighbor, y_right_rank = kNoNeighbor;
@@ -56,8 +56,8 @@ struct CartesianPartition
 // (holding the other two fixed) and re-flattening via `flatten(rx,ry,rz)
 // = rz*px*py + ry*px + rx`, with periodic wraparound or `kNoNeighbor`
 // (a true physical boundary) chosen independently per axis.
-inline CartesianPartition make_cartesian_partition(std::size_t global_nx, std::size_t global_ny,
-                                                    std::size_t global_nz, int px, int py, int pz, int rank,
+inline CartesianPartition make_cartesian_partition(Index global_nx, Index global_ny,
+                                                    Index global_nz, int px, int py, int pz, int rank,
                                                     int size, bool periodic_x, bool periodic_y,
                                                     bool periodic_z)
 {

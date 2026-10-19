@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <vector>
 
 #include "cfe/core/types.hpp"
@@ -105,7 +104,7 @@ struct ShuOsherProfile
 // verified directly by this task's own ahead-of-shock exact-match test,
 // not merely assumed).
 template <class Scalar, class NumericalFlux = cfe::RusanovFlux>
-ShuOsherProfile<Scalar> run_shu_osher(std::size_t nx, Scalar t_final, Scalar cfl)
+ShuOsherProfile<Scalar> run_shu_osher(cfe::Index nx, Scalar t_final, Scalar cfl)
 {
   cfe::CartesianGrid<Scalar> grid;
   grid.nx = nx;
@@ -124,7 +123,7 @@ ShuOsherProfile<Scalar> run_shu_osher(std::size_t nx, Scalar t_final, Scalar cfl
   const cfe::State<Scalar, 3> left_q =
       field.conserved_from_primitive(Scalar(left.rho), cfe::Vector<Scalar, 1>(Scalar(left.u)), Scalar(left.p));
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x = grid.x_center(grid.ngx + i);
     cfe::State<Scalar, 3> q;
     if (static_cast<double>(x) < kShuOsherShockX0) {
@@ -133,7 +132,7 @@ ShuOsherProfile<Scalar> run_shu_osher(std::size_t nx, Scalar t_final, Scalar cfl
       const Scalar rho = Scalar(shu_osher_exact_ahead_density(static_cast<double>(x)));
       q = field.conserved_from_primitive(rho, cfe::Vector<Scalar, 1>(Scalar(0.0)), Scalar(1.0));
     }
-    for (std::size_t c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
+    for (cfe::Index c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
   }
 
   cfe::InflowOutflowBoundary<Scalar, 3> boundary{left_q};
@@ -154,10 +153,10 @@ ShuOsherProfile<Scalar> run_shu_osher(std::size_t nx, Scalar t_final, Scalar cfl
   result.rho.resize(grid.nx);
   result.u.resize(grid.nx);
   result.p.resize(grid.nx);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     cfe::State<Scalar, 3> q;
-    for (std::size_t c = 0; c < 3; ++c) q[c] = state(cell, c);
+    for (cfe::Index c = 0; c < 3; ++c) q[c] = state(cell, c);
     result.x[i] = grid.x_center(grid.ngx + i);
     result.rho[i] = field.density(q);
     result.u[i] = field.velocity_component(q, cfe::Axis::X);
@@ -204,7 +203,7 @@ template <class Scalar>
 double shu_osher_shock_front_estimate(const ShuOsherProfile<Scalar>& profile, double tolerance)
 {
   double front = static_cast<double>(profile.x.front());
-  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+  for (cfe::Index i = 0; i < profile.x.size(); ++i) {
     const double x = static_cast<double>(profile.x[i]);
     const double deviation = std::fabs(static_cast<double>(profile.rho[i]) - shu_osher_exact_ahead_density(x));
     if (deviation > tolerance) front = x;
@@ -233,9 +232,9 @@ double shu_osher_shock_front_estimate(const ShuOsherProfile<Scalar>& profile, do
 template <class Scalar>
 double shu_osher_density_at(const ShuOsherProfile<Scalar>& profile, double x_query)
 {
-  std::size_t best = 0;
+  cfe::Index best = 0;
   double best_dist = 1e300;
-  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+  for (cfe::Index i = 0; i < profile.x.size(); ++i) {
     const double d = std::fabs(static_cast<double>(profile.x[i]) - x_query);
     if (d < best_dist) {
       best_dist = d;
@@ -255,7 +254,7 @@ double shu_osher_wake_l1_error(const ShuOsherProfile<Scalar>& test, const ShuOsh
 {
   const double dx = static_cast<double>(test.x[1]) - static_cast<double>(test.x[0]);
   double error = 0.0;
-  for (std::size_t i = 0; i < test.x.size(); ++i) {
+  for (cfe::Index i = 0; i < test.x.size(); ++i) {
     const double x = static_cast<double>(test.x[i]);
     if (x > x_cutoff) continue;
     error += std::fabs(static_cast<double>(test.rho[i]) - shu_osher_density_at(reference, x)) * dx;
@@ -297,7 +296,7 @@ template <class Scalar>
 double shu_osher_max_ahead_deviation(const ShuOsherProfile<Scalar>& profile, double x_lo, double x_hi)
 {
   double max_dev = 0.0;
-  for (std::size_t i = 0; i < profile.x.size(); ++i) {
+  for (cfe::Index i = 0; i < profile.x.size(); ++i) {
     const double x = static_cast<double>(profile.x[i]);
     if (x < x_lo || x > x_hi) continue;
     const double exact = shu_osher_exact_ahead_density(x);
@@ -316,7 +315,7 @@ int shu_osher_count_extrema(const ShuOsherProfile<Scalar>& profile, double x_lo,
 {
   int count = 0;
   int prev_sign = 0;
-  for (std::size_t i = 0; i + 1 < profile.x.size(); ++i) {
+  for (cfe::Index i = 0; i + 1 < profile.x.size(); ++i) {
     const double x = static_cast<double>(profile.x[i]);
     if (x < x_lo || x > x_hi) continue;
     const double gradient = static_cast<double>(profile.rho[i + 1]) - static_cast<double>(profile.rho[i]);

@@ -14,9 +14,9 @@
 // again touches a ghost-cell residual entry, that poison would surface
 // in the output and this test would catch it, on any backend.
 #include <cmath>
-#include <cstddef>
 #include <limits>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -39,10 +39,10 @@ CFE_TEST(test_fvm_solver_residual_never_leaves_nan_poison_in_output_after_ssp_rk
   // A constant field: the true residual is exactly zero everywhere,
   // real or ghost, so any NaN in the final state can only have come
   // from the poisoned scratch buffer below, not from real physics.
-  for (std::size_t idx = 0; idx < state.n_cells(); ++idx) state.data()[idx] = 7.0;
+  for (cfe::Index idx = 0; idx < state.n_cells(); ++idx) state.data()[idx] = 7.0;
 
   const double nan = std::numeric_limits<double>::quiet_NaN();
-  for (std::size_t idx = 0; idx < residual_scratch.n_cells(); ++idx) {
+  for (cfe::Index idx = 0; idx < residual_scratch.n_cells(); ++idx) {
     residual_scratch.data()[idx] = nan;
   }
 
@@ -56,7 +56,7 @@ CFE_TEST(test_fvm_solver_residual_never_leaves_nan_poison_in_output_after_ssp_rk
   cfe::ssp_rk2_step<double>(state.view(), stage1.view(), residual_scratch.view(), 0.01, residual,
                              solver.active_cell_count(), solver.active_cell_index_map());
 
-  for (std::size_t i = 0; i < grid.padded_nx(); ++i) {
+  for (cfe::Index i = 0; i < grid.padded_nx(); ++i) {
     const double value = state.data()[grid.flat_index(i, 0, 0)];
     CFE_CHECK(!std::isnan(value));
     CFE_CHECK_NEAR(value, 7.0, 1e-12);

@@ -107,8 +107,8 @@ struct ForwardStepBlocks
   // (the grid1/grid2 naming is 1-indexed, which invites an off-by-one
   // slip against the 0-indexed `view()` -- these constants remove that
   // trap for a future third block).
-  static constexpr std::size_t kUpstream = 0;
-  static constexpr std::size_t kDownstream = 1;
+  static constexpr cfe::Index kUpstream = 0;
+  static constexpr cfe::Index kDownstream = 1;
   using Blocks = cfe::BlockSet<Scalar, N, cfe::AoSLayout>;
   using View = cfe::FieldView<Scalar, N, cfe::AoSLayout>;
   // What `Blocks::view(block)` returns from a `const ForwardStepBlocks`
@@ -150,12 +150,12 @@ struct ForwardStepBlocks
   Solver1 solver1;
   Solver2 solver2;
 
-  static cfe::CartesianGrid<Scalar> make_grid1(std::size_t cells_per_unit_height, std::size_t nz_cells)
+  static cfe::CartesianGrid<Scalar> make_grid1(cfe::Index cells_per_unit_height, cfe::Index nz_cells)
   {
     const Scalar dxy = kTunnelHeight / static_cast<Scalar>(cells_per_unit_height);
     constexpr bool kDim3 = (Dim == 3);
     cfe::CartesianGrid<Scalar> grid;
-    grid.nx = static_cast<std::size_t>(
+    grid.nx = static_cast<cfe::Index>(
         std::lround(static_cast<double>(kStepPosition) / static_cast<double>(dxy)));
     grid.ny = cells_per_unit_height;
     grid.nz = kDim3 ? nz_cells : 1;
@@ -178,14 +178,14 @@ struct ForwardStepBlocks
     return grid;
   }
 
-  static cfe::CartesianGrid<Scalar> make_grid2(std::size_t cells_per_unit_height, std::size_t nz_cells)
+  static cfe::CartesianGrid<Scalar> make_grid2(cfe::Index cells_per_unit_height, cfe::Index nz_cells)
   {
     const Scalar dxy = kTunnelHeight / static_cast<Scalar>(cells_per_unit_height);
-    const std::size_t step_rows = static_cast<std::size_t>(
+    const cfe::Index step_rows = static_cast<cfe::Index>(
         std::lround(static_cast<double>(kStepHeight) / static_cast<double>(dxy)));
     constexpr bool kDim3 = (Dim == 3);
     cfe::CartesianGrid<Scalar> grid;
-    grid.nx = static_cast<std::size_t>(
+    grid.nx = static_cast<cfe::Index>(
         std::lround(static_cast<double>(kTunnelLength - kStepPosition) / static_cast<double>(dxy)));
     grid.ny = cells_per_unit_height - step_rows;
     grid.nz = kDim3 ? nz_cells : 1;
@@ -213,7 +213,7 @@ struct ForwardStepBlocks
   // three reference resolutions. `nz_cells`/`span_z` matter only when
   // Dim == 3 (a thin spanwise extrusion -- "see it work," not a
   // physically meaningful depth).
-  ForwardStepBlocks(std::size_t cells_per_unit_height, std::size_t nz_cells = 1, Scalar span_z = Scalar(1))
+  ForwardStepBlocks(cfe::Index cells_per_unit_height, cfe::Index nz_cells = 1, Scalar span_z = Scalar(1))
       : grid1(make_grid1(cells_per_unit_height, nz_cells)),
         grid2(make_grid2(cells_per_unit_height, nz_cells)),
         state_blocks{grid1.n_cells_total(), grid2.n_cells_total()},
@@ -227,7 +227,7 @@ struct ForwardStepBlocks
       grid2.dz = dz;
     }
 
-    const std::size_t step_rows = grid1.ny - grid2.ny;
+    const cfe::Index step_rows = grid1.ny - grid2.ny;
 
     // `make_grid1`/`make_grid2` each independently round their own cell
     // count from the nominal geometry constants (`kStepPosition`,
@@ -276,7 +276,7 @@ struct ForwardStepBlocks
     const long offset_2_to_1 = -offset_1_to_2;
 
     // Designated initializers (C++20) rather than six positional,
-    // same-typed (`std::size_t`/`long`) arguments -- a field-order
+    // same-typed (`cfe::Index`/`long`) arguments -- a field-order
     // transposition here would otherwise compile silently and only show
     // up as a wrong ghost value at runtime (Sally review finding).
     BoundaryX1 boundary_x1{.domain_edge_value = inflow_state,
@@ -303,9 +303,9 @@ struct ForwardStepBlocks
   // non-owning pointer+size (see field.hpp).
   static void fill_uniform(View state, const cfe::CartesianGrid<Scalar>& grid, const cfe::State<Scalar, N>& q)
   {
-    const std::size_t total = grid.n_cells_total();
-    for (std::size_t cell = 0; cell < total; ++cell) {
-      for (std::size_t c = 0; c < N; ++c) state(cell, c) = q[c];
+    const cfe::Index total = grid.n_cells_total();
+    for (cfe::Index cell = 0; cell < total; ++cell) {
+      for (cfe::Index c = 0; c < N; ++c) state(cell, c) = q[c];
     }
   }
 
@@ -315,12 +315,12 @@ struct ForwardStepBlocks
   {
     Scalar max_speed = Scalar(0);
     auto scan = [&](ConstView state, const cfe::CartesianGrid<Scalar>& grid) {
-      for (std::size_t k = 0; k < grid.nz; ++k) {
-        for (std::size_t j = 0; j < grid.ny; ++j) {
-          for (std::size_t i = 0; i < grid.nx; ++i) {
-            const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+      for (cfe::Index k = 0; k < grid.nz; ++k) {
+        for (cfe::Index j = 0; j < grid.ny; ++j) {
+          for (cfe::Index i = 0; i < grid.nx; ++i) {
+            const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
             cfe::State<Scalar, N> q;
-            for (std::size_t c = 0; c < N; ++c) q[c] = state(cell, c);
+            for (cfe::Index c = 0; c < N; ++c) q[c] = state(cell, c);
             const Scalar speed = std::abs(field.velocity_component(q, cfe::Axis::X)) + field.sound_speed(q);
             max_speed = speed > max_speed ? speed : max_speed;
           }
@@ -373,9 +373,9 @@ struct ForwardStepBlocks
 
   // Runs to `t_final` with adaptive-CFL `dt`, recomputed every step.
   // Returns the number of steps taken.
-  std::size_t run_to(Scalar t_final, Scalar cfl)
+  cfe::Index run_to(Scalar t_final, Scalar cfl)
   {
-    std::size_t steps = 0;
+    cfe::Index steps = 0;
     Scalar t = Scalar(0);
     while (t < t_final) {
       const Scalar speed = max_wave_speed();
@@ -410,10 +410,10 @@ struct ForwardStepBlocks
   // steps (for the caller's own step/time bookkeeping -- see
   // `write_restart`'s own comment for why that bookkeeping never feeds
   // back into the solve itself).
-  Scalar run_n_steps(std::size_t n_steps, Scalar cfl)
+  Scalar run_n_steps(cfe::Index n_steps, Scalar cfl)
   {
     Scalar t = Scalar(0);
-    for (std::size_t s = 0; s < n_steps; ++s) {
+    for (cfe::Index s = 0; s < n_steps; ++s) {
       const Scalar speed = max_wave_speed();
       const Scalar dt = cfl * grid1.dx / speed;
       step(dt);
@@ -431,7 +431,7 @@ struct ForwardStepBlocks
   // step/time state of its own, since nothing in the solve ever reads it
   // back; it exists purely so a resumed run can report "resumed at step
   // 11000, t=3.67" instead of restarting that bookkeeping at zero.
-  void write_restart(const std::string& path, std::size_t step, Scalar time) const
+  void write_restart(const std::string& path, cfe::Index step, Scalar time) const
   {
     cfe::io::write_restart_checkpoint<Scalar, N, cfe::AoSLayout>(
         path, {grid1, grid2}, {state_blocks.view(kUpstream), state_blocks.view(kDownstream)}, step, time);
@@ -442,7 +442,7 @@ struct ForwardStepBlocks
   // accumulating from.
   struct RestartInfo
   {
-    std::size_t step = 0;
+    cfe::Index step = 0;
     Scalar time = Scalar(0);
   };
 
@@ -467,10 +467,10 @@ struct ForwardStepBlocks
     auto accumulate = [&](ConstView state, const cfe::CartesianGrid<Scalar>& grid) {
       const double cell_volume = static_cast<double>(grid.dx) * static_cast<double>(grid.dy) *
                                   static_cast<double>(grid.dz);
-      for (std::size_t k = 0; k < grid.nz; ++k) {
-        for (std::size_t j = 0; j < grid.ny; ++j) {
-          for (std::size_t i = 0; i < grid.nx; ++i) {
-            const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+      for (cfe::Index k = 0; k < grid.nz; ++k) {
+        for (cfe::Index j = 0; j < grid.ny; ++j) {
+          for (cfe::Index i = 0; i < grid.nx; ++i) {
+            const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
             mass += static_cast<double>(state(cell, 0)) * cell_volume;
           }
         }
@@ -500,12 +500,12 @@ struct ForwardStepBlocks
                                const char* scalar_name, Compute compute)
   {
     cfe::Field<Scalar, 1> scalar_field(grid.n_cells_total());
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+    for (cfe::Index k = 0; k < grid.nz; ++k) {
+      for (cfe::Index j = 0; j < grid.ny; ++j) {
+        for (cfe::Index i = 0; i < grid.nx; ++i) {
+          const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
           cfe::State<Scalar, N> q;
-          for (std::size_t c = 0; c < N; ++c) q[c] = state(cell, c);
+          for (cfe::Index c = 0; c < N; ++c) q[c] = state(cell, c);
           scalar_field(cell, 0) = compute(q);
         }
       }
@@ -531,21 +531,21 @@ struct ForwardStepBlocks
 template <class Scalar>
 struct RunReport
 {
-  std::size_t steps = 0;
+  cfe::Index steps = 0;
   double wall_clock_s = 0.0;
-  std::size_t frames = 0;
+  cfe::Index frames = 0;
   double final_mass = 0.0;
 };
 
 template <class Blocks, class Scalar, class WriteFrame>
 RunReport<Scalar> run_and_report(Blocks& blocks, Scalar t_final, Scalar cfl, Scalar snapshot_dt,
                                   WriteFrame write_frame, const char* progress_tag = "",
-                                  std::size_t progress_every_n_steps = 200)
+                                  cfe::Index progress_every_n_steps = 200)
 {
-  std::size_t frame = 0;
+  cfe::Index frame = 0;
   Scalar next_snapshot = Scalar(0);
   Scalar t = Scalar(0);
-  std::size_t total_steps = 0;
+  cfe::Index total_steps = 0;
 
   const auto wall_start = std::chrono::steady_clock::now();
   write_frame(frame);

@@ -40,8 +40,8 @@ constexpr Scalar kCfl = Scalar(0.4);
 // measured separately since it takes tens of minutes, not test-suite
 // seconds). The PROPERTY being checked (bit-identical restart-resume) is
 // identical in kind at any resolution -- see this file's header comment.
-constexpr std::size_t kContinuousSteps = 60;
-constexpr std::size_t kCheckpointAtStep = 40;
+constexpr cfe::Index kContinuousSteps = 60;
+constexpr cfe::Index kCheckpointAtStep = 40;
 
 struct ScratchFile
 {
@@ -54,11 +54,11 @@ template <class Blocks>
 void check_blocks_bit_identical(const Blocks& a, const Blocks& b)
 {
   auto check_block = [](auto view_a, auto view_b, const auto& grid) {
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-          for (std::size_t c = 0; c < Blocks::N; ++c) {
+    for (cfe::Index k = 0; k < grid.nz; ++k) {
+      for (cfe::Index j = 0; j < grid.ny; ++j) {
+        for (cfe::Index i = 0; i < grid.nx; ++i) {
+          const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+          for (cfe::Index c = 0; c < Blocks::N; ++c) {
             CFE_CHECK(view_a(cell, c) == view_b(cell, c));
           }
         }
@@ -89,9 +89,9 @@ CFE_TEST(test_forward_step_restart_resume_matches_continuous_run_bit_for_bit)
     const auto view = continuous.state_blocks.view(continuous.kDownstream);
     const auto& grid = continuous.grid2;
     bool any_different = false;
-    for (std::size_t j = 0; j < grid.ny && !any_different; ++j) {
-      for (std::size_t i = 0; i < grid.nx && !any_different; ++i) {
-        const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz);
+    for (cfe::Index j = 0; j < grid.ny && !any_different; ++j) {
+      for (cfe::Index i = 0; i < grid.nx && !any_different; ++i) {
+        const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz);
         if (view(cell, 0) != Blocks::kInflowDensity) any_different = true;
       }
     }
@@ -121,7 +121,7 @@ CFE_TEST(test_forward_step_restart_resume_matches_continuous_run_bit_for_bit)
   // riser-face-fallback ghost -- every ghost-fill CASE this case's own
   // boundary conditions have, not just one.
   const auto& grid1 = resumed.grid1;
-  const std::vector<std::size_t> ghost_cells_to_check = {
+  const std::vector<cfe::Index> ghost_cells_to_check = {
       grid1.flat_index(grid1.ngx - 1, grid1.ngy + grid1.ny / 2, grid1.ngz),               // low-x (inflow)
       grid1.flat_index(grid1.ngx + grid1.nx / 2, grid1.ngy - 1, grid1.ngz),               // low-y (slip wall)
       grid1.flat_index(grid1.ngx + grid1.nx, grid1.ngy + grid1.ny - 1, grid1.ngz),        // high-x (interface)
@@ -129,8 +129,8 @@ CFE_TEST(test_forward_step_restart_resume_matches_continuous_run_bit_for_bit)
   std::vector<std::array<Scalar, Blocks::N>> ghost_values_before(ghost_cells_to_check.size());
   {
     const auto view = resumed.state_blocks.view(resumed.kUpstream);
-    for (std::size_t g = 0; g < ghost_cells_to_check.size(); ++g) {
-      for (std::size_t c = 0; c < Blocks::N; ++c) ghost_values_before[g][c] = view(ghost_cells_to_check[g], c);
+    for (cfe::Index g = 0; g < ghost_cells_to_check.size(); ++g) {
+      for (cfe::Index c = 0; c < Blocks::N; ++c) ghost_values_before[g][c] = view(ghost_cells_to_check[g], c);
     }
   }
 
@@ -140,14 +140,14 @@ CFE_TEST(test_forward_step_restart_resume_matches_continuous_run_bit_for_bit)
 
   {
     const auto view = resumed.state_blocks.view(resumed.kUpstream);
-    for (std::size_t g = 0; g < ghost_cells_to_check.size(); ++g) {
-      for (std::size_t c = 0; c < Blocks::N; ++c) {
+    for (cfe::Index g = 0; g < ghost_cells_to_check.size(); ++g) {
+      for (cfe::Index c = 0; c < Blocks::N; ++c) {
         CFE_CHECK(view(ghost_cells_to_check[g], c) == ghost_values_before[g][c]);
       }
     }
   }
 
-  const std::size_t remaining_steps = kContinuousSteps - kCheckpointAtStep;
+  const cfe::Index remaining_steps = kContinuousSteps - kCheckpointAtStep;
   resumed.run_n_steps(remaining_steps, kCfl);
 
   // --- The actual property: bit-identical final state. ---
@@ -203,7 +203,7 @@ CFE_TEST(test_forward_step_restart_resume_matches_continuous_run_bit_for_bit_3d)
     ~Cleanup() { std::remove(p.string().c_str()); }
   } cleanup{path};
 
-  constexpr std::size_t kNz = 4;
+  constexpr cfe::Index kNz = 4;
   constexpr Scalar kSpanZ = Scalar(0.2);
 
   Blocks continuous(10, kNz, kSpanZ);

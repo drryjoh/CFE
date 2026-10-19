@@ -37,6 +37,7 @@
 
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
+#include "cfe/math/scalar_ops.hpp"
 
 namespace cfe {
 
@@ -67,8 +68,8 @@ struct BurgersField
   CFE_HOST_DEVICE
   Scalar wave_speed(Scalar state_left, Scalar state_right, Axis /*axis*/) const
   {
-    const Scalar abs_left = state_left < Scalar(0) ? -state_left : state_left;
-    const Scalar abs_right = state_right < Scalar(0) ? -state_right : state_right;
+    const Scalar abs_left = abs_value(state_left);
+    const Scalar abs_right = abs_value(state_right);
     return abs_left > abs_right ? abs_left : abs_right;
   }
 };
