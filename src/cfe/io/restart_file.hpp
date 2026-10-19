@@ -185,8 +185,6 @@ struct RestartBlockShape
            ngz == grid.ngz && dx == grid.dx && dy == grid.dy && dz == grid.dz && origin_x == grid.origin_x &&
            origin_y == grid.origin_y && origin_z == grid.origin_z;
   }
-
-  std::uint64_t n_real_cells() const { return nx * ny * nz; }
 };
 
 // Writes one multi-block checkpoint: a shared (step, time) pair plus,

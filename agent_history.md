@@ -5904,3 +5904,179 @@ identifiers are genuine runtime indices in the current post-PR#7/PR#8
 code shape" treatment, not a mechanical reapplication of their own old
 diffs) -- scope currently unknown in detail since neither has been
 opened and inspected yet.
+
+## 2026-10-18 — Resolved merge conflict: PR #10 x `main` (checkpoint/restart vs. `cfe::Index` + PR #6 cleanup)
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+PR #10 (task 0016, checkpoint/restart, branch
+`cfe/development/restart-checkpoint`) went `CONFLICTING`/`DIRTY`
+against `main` -- it was still based on the pre-PR#7/PR#8 commit
+`f2f81d2`, while `main` had since gained PR #5 (multi-agent process),
+PR #7 (PR #6 cleanup), and PR #8 (task 0015, `cfe::Index` rename). Same
+situation as the PR #7 x PR #8 conflict above, one branch later: PR
+#10's new checkpoint/restart code was written entirely before
+`cfe::Index` existed, so every runtime index/count in it was still
+`std::size_t`.
+
+`git fetch origin && git merge origin/main` (merge commit, not rebase
+-- PR #10 is already open/pushed/under review). Resolved by hand:
+- `.gitignore`: kept `main`'s generalized `tutorials/*/data/**/*.vtk`
+  pattern (from the PR #7 cleanup's tutorial-data-commit-policy ADR)
+  and PR #10's new `*.cferst` checkpoint-ignore block; dropped PR #10's
+  now-superseded forward-step-specific `*.vtk` lines, which predated
+  that generalization.
+- `src/cfe/io/restart_file.hpp` (PR #10's new restart file format, not
+  present on `main` -- not a real conflict, but written entirely
+  against `std::size_t` before task 0015 existed): every genuine
+  runtime index/count/offset renamed to bare `Index` (`write_exact`/
+  `read_exact`'s `count`, `step`/`step64`, the `b`/`k`/`j`/`i`/`c`/
+  `out`/`in` loop variables, `flat_index(...)` results, `n_real_cells`
+  locals, `RestartCheckpointInfo::step`) -- `NComponents` (the template
+  parameter mirroring `FieldView`'s own NTTP) correctly left
+  `std::size_t`, and `RestartBlockShape`'s `std::uint64_t` fields left
+  untouched (deliberately fixed-width for the on-disk format, a
+  separate concern from the `Index`/`size_t` distinction entirely).
+  Added `#include "cfe/core/types.hpp"` (matching `io/vtk_writer.hpp`'s
+  own precedent for a header that names `Index` directly).
+- `tests/verification/forward_step_setup.hpp`: git auto-merged this
+  file with **no conflict flagged** (PR #10's new `run_n_steps`/
+  `write_restart`/`RestartInfo`/`read_restart` methods didn't overlap
+  textually with `main`'s pre-existing-code rename) -- but as a result
+  those new methods were the only part of this already-renamed file
+  still using `std::size_t`. Converted `run_n_steps`'s `n_steps`/`s`,
+  `write_restart`'s `step` parameter, and `RestartInfo::step` to
+  `cfe::Index`; `Dim`/`N` (this struct's pre-existing NTTP and its
+  local mirror) were untouched, both by `main`'s own earlier rename and
+  by this pass.
+- `tests/unit/test_restart_file.cpp`, `tests/unit/test_forward_step_restart.cpp`,
+  `tutorials/euler_2d_forward_step/forward_step_2d_restart_demo.cpp`
+  (all new in PR #10, no conflicts, but same pre-task-0015
+  `std::size_t` problem as the two files above): applied the identical
+  treatment for consistency, even though these three weren't in PR
+  #10's reported conflict surface -- not doing so would have left three
+  more pieces of brand-new code as the only `std::size_t` holdouts in
+  an otherwise fully-renamed codebase. In `test_restart_file.cpp`,
+  three `constexpr std::size_t N = ...;` locals (forwarded as the
+  `NComponents` template argument to `cfe::Field<Scalar, N>`/
+  `write_restart_checkpoint<Scalar, N, ...>`) are the same
+  local-constexpr-NTTP-mirror exception and were left `std::size_t`;
+  everything else (loop variables, cell indices, the
+  `ghost_cells_to_check` vector, `kContinuousSteps`/`kCheckpointAtStep`/
+  `kNz`/`kResolution`/`kDemoTotalSteps`/`kDemoCheckpointLeadSteps`) is a
+  genuine runtime value and became `cfe::Index`.
+- `docs/adr/0013-checkpoint-restart-format.md` -> renamed to
+  `docs/adr/0014-checkpoint-restart-format.md`: `main` had already
+  claimed ADR number 0013 for the PR #7 cleanup's
+  `tutorial-data-commit-policy.md`, which PR #10 (branched before that
+  existed) didn't know about -- not a git conflict (different
+  filenames), but a real numbering collision that would have left two
+  different ADRs claiming 0013. Updated every cross-reference
+  (`tutorials/euler_2d_forward_step/README.md`, `docs/type-reference.md`,
+  this file's own task-0016 entry below) to point at 0014; confirmed by
+  grep that no stale `0013-checkpoint` reference survived anywhere.
+- `docs/type-reference.md`: merged the conflicting intro-paragraph
+  summary sentence to mention Phase 4/the PR #6 cleanup task/task
+  0015's `cfe::Index`/task 0016's checkpoint-restart format together
+  (previously `HEAD` only named the last of these, `main` only the
+  first three); updated the restart-type rows' "See ADR 0013" ->
+  "See ADR 0014" and the `RestartCheckpointInfo::step` row's type from
+  `std::size_t` to `Index` to match the rename above. Every other row
+  from both sides (including task 0015's own `cfe::Index` row and the
+  five new `cfe::io::*` restart rows) merged in cleanly, untouched.
+- `agent_history.md`: spliced task 0016's entry into its correct
+  chronological slot by date -- task 0014 (2026-10-14), task 0015
+  (2026-10-14), task 0016 (2026-10-15), then the PR #7 x PR #8 merge
+  entry above (2026-10-16) -- rather than letting git's diff3 merge
+  concatenate them in branch order.
+
+Additional cleanup during review (Snorlax finding, see below):
+`src/cfe/io/restart_file.hpp`'s `RestartBlockShape::n_real_cells()` was
+dead code -- never called; both `write_restart_checkpoint` and
+`read_restart_checkpoint` instead recompute the identical
+`nx*ny*nz`-shaped quantity inline from the live `grid`. Deleted rather
+than wired in, since nothing needs it and the inline computation at
+each call site is already clear on its own.
+
+**Verification:** two fresh, separate clean rebuilds of the merged
+worktree, neither reusing a build directory from before the merge --
+(1) `-DCFE_BUILD_TESTS=ON -DCFE_BUILD_TUTORIALS=ON` (Release, no MPI):
+zero errors, every target built including
+`cfe_euler_2d_forward_step_restart_demo`; `cfe_unit_tests` **169/169**
+passed (the 158 `main` already had, plus PR #10's 11 new restart tests
+-- 8 in `test_restart_file.cpp`, 3 bit-for-bit tests in
+`test_forward_step_restart.cpp`). (2) Same configuration plus
+`-DCFE_ENABLE_MPI=ON`: zero errors, `ctest` 7/7 (the MPI-decomposition
+tests, untouched by this task but rebuilt to confirm the merge's
+`Index`-consistency changes didn't disturb them), `cfe_unit_tests`
+169/169 again. Reran `cfe_unit_tests` a third time after deleting
+`n_real_cells()` to confirm the cleanup changed nothing: still 169/169.
+
+Per CLAUDE.md's proportional-review rule (a conflict-resolution task on
+already-reviewed code, not new development): Violet and Snorlax were
+the two reviews judged necessary, same as both prior conflict
+resolutions tonight. **Violet** independently rebuilt the merged
+worktree from scratch herself in her own fresh build directories (both
+the plain and `-DCFE_ENABLE_MPI=ON` configurations), reran
+`cfe_unit_tests` (169/169 both times, not trusted from Robby's run),
+and read `restart_file.hpp`/`forward_step_setup.hpp`/
+`test_forward_step_restart.cpp` directly to confirm the bit-for-bit
+property is genuinely exercised: `check_blocks_bit_identical` uses
+exact `==` (not a tolerance), runs against the real two-block
+`BlockInterfaceBoundary` assembly (not a simplified stand-in), is
+guarded by an explicit anti-degeneracy check (the downstream state must
+actually have evolved away from the uniform inflow IC, ruling out a
+trivial "nothing changed" pass), directly verifies the ghost-cell-
+exclusion assumption by snapshotting four specific ghost cells across
+every boundary-condition case this geometry has and confirming
+`read_restart` leaves them untouched, and covers both `HllcFlux`
+(production's actual flux, different wave-speed machinery from the
+default `RusanovFlux`) and the 3D/periodic-Z case. She also diffed
+`c02ea31` (PR #10's pre-merge tip) against `9cd77c5` (the merge commit)
+for the five touched files and confirmed the `std::size_t`->`Index`
+rename is a true no-op (same width/signedness, no new narrowing casts
+or signed/unsigned comparisons, `%zu` format specifiers still correct)
+with zero compiler warnings on a touch-rebuild. One optional, non-
+blocking observation: the bit-for-bit test runs at toy scale
+(`cells_per_unit_height=10`, 60 steps) to establish the property
+quickly; it does not itself re-measure the production
+`res288_hllc`-scale wall-clock speedup number already recorded in
+`tutorials/euler_2d_forward_step/README.md` from before this merge --
+if that specific number is cited again, it should come from a fresh
+post-merge run, but this is a reporting-freshness note, not a
+correctness concern (the property being verified is resolution-
+independent). **Snorlax** independently re-derived, from
+`tasks/0015-index-type.md`'s own scope rules (not from Robby's
+classification), which identifiers in all five touched files are
+genuine runtime indices vs. NTTP-arity mirrors, and found zero
+misclassifications in either direction; confirmed the
+`RestartBlockShape::std::uint64_t` fields are correctly left alone (a
+separate, deliberate fixed-width-on-disk concern, not a missed
+rename); confirmed the 0013->0014 ADR renumber left no stale
+references anywhere (grepped the whole tree); and flagged the
+`n_real_cells()` dead code (addressed above, see "Additional cleanup").
+She also noted, as out-of-scope-for-this-PR, that the k/j/i-nested-
+loop-plus-`flat_index` real-cell traversal in `restart_file.hpp`
+duplicates a shape already used in `io/vtk_writer.hpp` and several
+`forward_step_setup.hpp` methods -- a real, pre-existing, recurring
+pattern worth a future `for_each_real_cell(grid, fn)` helper, but not
+introduced by this merge and not fixed here (AGENTS.md #6). Given both
+reviews came back with no blocking findings and the scope is a
+conflict reconciliation rather than new development, Ilia's
+independent final review and Amelia's alignment check were judged
+unnecessary, consistent with both prior resolutions tonight.
+
+Checked PR #11 (`cfe/development/agent-accumulated-knowledge`,
+markdown-only, already based on current `main`) for the same class of
+problem: confirmed separately, not addressed here since it needs no
+addressing (see this entry's own close-out below for its exact
+reported status).
+
+Next recommended task: whatever is next on `ROADMAP.md`'s own
+schedule. All four PRs opened tonight (#8, #9, #10, and the
+accumulated-knowledge PR #11) have now been checked for conflicts
+against `main`; #8 is merged, #9 and #10 are each individually
+`MERGEABLE`/`CLEAN` against `main` as of this entry (not against each
+other -- the two have not been cross-merged, since neither depends on
+the other's subject matter), and #11 was never in conflict.
