@@ -6041,3 +6041,141 @@ identifiers are genuine runtime indices in the current post-PR#7/PR#8
 code shape" treatment, not a mechanical reapplication of their own old
 diffs) -- scope currently unknown in detail since neither has been
 opened and inspected yet.
+
+## 2026-10-18 — Resolved merge conflict: PR #8 x PR #9 (`cfe::Index` vs. dual-precision testing)
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+PR #9 (task 0017, dual-precision testing, branch
+`cfe/development/float-precision`) went `CONFLICTING`/`DIRTY` against
+`main` once the user merged PR #8 (`cfe::Index` rename) on top of PR #5,
+the same situation just resolved for PR #8 itself against PR #7. PR #9
+was still based on the pre-rename commit `f2f81d2` and had independently
+rewritten several of the same test files PR #8's mechanical rename had
+already touched -- in PR #9's case, generalizing single-precision
+`CFE_TEST`s into `template <class Scalar>` check functions registered
+under paired `..._double`/`..._float` entries (task 0017's own
+established pattern, `tests/unit/test_fixed_array.cpp`'s original
+shape), with measured-not-guessed float tolerances.
+
+`git fetch origin && git merge origin/main` (merge commit, not a
+rebase -- PR #9 is already open/pushed/under review, same reasoning as
+the PR #7xPR #8 resolution). Resolved by hand, re-deriving which
+identifiers in PR #9's new template-function bodies are genuine runtime
+indices in the MERGED code's actual shape, rather than mechanically
+reapplying either side's old diff:
+
+- `tests/unit/test_hllc_flux.cpp`, `tests/unit/test_euler_3d_sanity.cpp`,
+  `tests/unit/test_forward_step_sanity.cpp`,
+  `tests/verification/test_euler_isolated_contact_hllc.cpp`,
+  `tests/verification/test_euler_propagating_shock.cpp`,
+  `tests/verification/test_euler_shu_osher.cpp`,
+  `tests/verification/test_euler_sod_shock_tube.cpp`,
+  `tests/verification/test_euler_sod_shock_tube_hllc.cpp`,
+  `tests/verification/test_forward_step_interface_conservation.cpp`:
+  kept PR #9's `template <class Scalar>` check-function structure and
+  paired `CFE_TEST` registrations throughout (not origin/main's
+  pre-dual-precision, file-scope `using Scalar = double;` shape), with
+  every genuine runtime loop/array index in that new code (component
+  loops like `for (... c = 0; c < N; ++c)`, grid-cell loops `i`/`j`/`k`,
+  flat cell indices, and function parameters like a grid's `nx`/`ny` or
+  a Riemann-solver driver's `nx`) spelled `cfe::Index`, while every
+  compile-time arity/dimension NTTP (`Dim`, a generic `N` template
+  parameter) and its local `constexpr` mirror copy (e.g.
+  `constexpr std::size_t kN3 = 5; // EulerField<Scalar,3>::n_components`,
+  `constexpr std::size_t kN = 4;`) stayed `std::size_t`, per task 0015's
+  own established exception. `tests/verification/sod_shock_tube_runner.hpp`
+  auto-merged cleanly (git found no overlapping hunks) and already used
+  `cfe::Index` consistently throughout -- used as the reference for what
+  "correctly applied" looks like in this exact subsystem.
+- `tests/unit/test_hllc_flux.cpp` specifically: origin/main's
+  pre-existing, pre-dual-precision file had two ad-hoc,
+  float-only regression tests
+  (`test_hllc_wave_speeds_stays_finite_and_correctly_signed_at_float_precision_wall_reflection`,
+  `test_hllc_flux_stays_finite_at_float_precision_near_vacuum_asymmetric_face`)
+  covering the same two bug regressions (the Mach-3 wall-reflection sign
+  bug, the forward-step near-vacuum NaN) that PR #9's own new templated
+  `check_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection<float>`
+  and
+  `check_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step<float>`
+  tests (registered earlier in the same file) already cover with
+  identical input literals, so the two ad-hoc duplicates were dropped
+  rather than kept as a third copy -- confirmed a genuine superset
+  replacement (same inputs, the templated version asserts at least as
+  much), not a silent coverage loss.
+- `AGENTS.md`: auto-merged cleanly with no conflict -- diffed the
+  merged file against `origin/main` directly to confirm the result is
+  byte-identical to `origin/main` plus exactly PR #9's own ~18-line
+  dual-precision-testing-requirement addition (section 11), nothing
+  from PR #8's side lost.
+- `docs/type-reference.md`: PR #9 never touched this file (checked via
+  `git diff f2f81d2 45ae735 -- docs/type-reference.md`, empty) -- the
+  task brief's suspicion of a conflict here was unfounded; the merged
+  file is identical to `origin/main`.
+- `agent_history.md`: both lineages' entries kept in full, reordered
+  chronologically by date rather than by merge-arrival order: Task 0014
+  (2026-10-14), Task 0015 (2026-10-14), Task 0017 (2026-10-15, PR #9's
+  own entry), then the 2026-10-16 PR #7xPR #8 merge-resolution entry
+  (itself already containing both the 0014 and 0015 lineage) -- matching
+  this file's established convention of ordering by when the work was
+  actually done, the same approach the PR #7xPR #8 entry itself used for
+  0014 vs. 0015.
+
+**Verification:** fresh, from-scratch rebuilds in two new build
+directories (`build-double`, `build-float`; neither reused from any
+prior task), Release, `CFE_ENABLE_MPI=ON`,
+`CFE_BUILD_TESTS`/`TUTORIALS`/`BENCHMARKS=ON`, at
+`-DCFE_SCALAR_TYPE=double` and `=float` respectively:
+
+- Both configurations: zero warnings, zero errors.
+- `cfe_unit_tests`: **196/196** at both configurations (0 `[FAIL]` in
+  either log) -- matching PR #9's own pre-merge-reported count exactly.
+  Since every dual-precision check explicitly instantiates both
+  `<double>` and `<float>` regardless of the build's own
+  `CFE_SCALAR_TYPE`, the two binaries' stdout is expected to be, and
+  was confirmed to be, **byte-for-byte identical** (`diff` exit code 0
+  across the full 196-test log, including every `[info]`-printed
+  measured number).
+- `ctest`: **7/7** at both configurations (4 MPI tests at np=2/4/8),
+  matching PR #9's own pre-merge-reported count exactly.
+
+Per CLAUDE.md's proportional-review rule (conflict-resolution on
+already-reviewed code, not new development, same judgment the PR #7xPR #8
+precedent used): Violet and Snorlax were the two reviews run.
+**Violet** independently rebuilt both precisions from scratch in her own
+build directories, independently confirmed 196/196 + 7/7 at both
+`float` and `double`, traced every renamed identifier in the merge
+commit against the actual `CartesianGrid`/`FixedArray`/`EulerField`
+signatures it feeds to confirm the rename is correct by TYPE (not just
+cosmetically consistent), and independently confirmed the two dropped
+`test_hllc_flux.cpp` tests are a genuine superset replacement (identical
+input literals; the surviving templated versions assert at least as
+much). No blocking or optional findings. **Snorlax** independently
+confirmed the same NTTP-exception consistency against
+`sod_shock_tube_runner.hpp`'s own established style, found no
+duplication or orphaned helpers left behind by the merge, and confirmed
+`agent_history.md`'s reordering is clean (no duplicated entries, no
+mangled markdown, sensible chronological order, nothing silently
+dropped from either side). No blocking or optional findings. Given both
+reviews came back clean on a narrow, mechanical merge-resolution task,
+Ilia's independent final review and Amelia's alignment check were
+judged unnecessary, per the same proportional-review judgment the
+PR #7xPR #8 precedent used.
+
+Re-checked PR #10 (`cfe/development/restart-checkpoint`, task 0016) via
+`gh pr view 10 --json mergeable,mergeStateStatus`: still
+`CONFLICTING`/`DIRTY` against `main` (it was already in this state
+before this task started, confirmed independently rather than assumed)
+-- not touched here, per the user's explicit instruction. Its touched
+files (`gh pr view 10 --json files`) include `agent_history.md`,
+`docs/type-reference.md`, `tests/verification/forward_step_setup.hpp`,
+and `tutorials/euler_2d_forward_step/` -- all overlap candidates with
+the `main` this PR will need to merge against once PR #9 lands, left
+for a separate follow-up.
+
+Next recommended task: resolve PR #10's conflicts against `main` now
+that PR #9 is clean, using the same "re-derive which identifiers are
+genuine runtime indices in the merged code's actual shape" treatment --
+scope currently unknown in detail since PR #10 has not yet been opened
+and inspected for the specifics of its own conflicts.
