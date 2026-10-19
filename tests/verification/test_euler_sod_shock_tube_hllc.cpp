@@ -34,10 +34,10 @@
 // ~6.6e-8 at float (vs. double's ~1e-14/~1e-17) -- 1e-6 is used for all
 // three, keeping >=15x measured margin.
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <type_traits>
 
+#include "cfe/core/types.hpp"
 #include "cfe/numerics/numerical_flux/hllc.hpp"
 #include "sod_shock_tube_exact.hpp"
 #include "sod_shock_tube_runner.hpp"
@@ -58,7 +58,7 @@ const cfe_verification::PrimitiveState kLeft{1.0, 0.0, 1.0};
 const cfe_verification::PrimitiveState kRight{0.125, 0.0, 0.1};
 
 template <class Scalar>
-cfe_verification::SodProfile<Scalar> run_sod_hllc(std::size_t nx)
+cfe_verification::SodProfile<Scalar> run_sod_hllc(cfe::Index nx)
 {
   using P = SodClassic<Scalar>;
   return cfe_verification::run_sod_shock_tube<Scalar, cfe::HllcFlux>(nx, P::kGamma, kLeft, kRight, P::kX0, P::kTFinal,
@@ -66,7 +66,7 @@ cfe_verification::SodProfile<Scalar> run_sod_hllc(std::size_t nx)
 }
 
 template <class Scalar>
-cfe_verification::SodProfile<Scalar> run_sod_rusanov(std::size_t nx)
+cfe_verification::SodProfile<Scalar> run_sod_rusanov(cfe::Index nx)
 {
   using P = SodClassic<Scalar>;
   return cfe_verification::run_sod_shock_tube<Scalar>(nx, P::kGamma, kLeft, kRight, P::kX0, P::kTFinal, P::kCfl);
@@ -75,9 +75,9 @@ cfe_verification::SodProfile<Scalar> run_sod_rusanov(std::size_t nx)
 template <class Scalar>
 double density_at(const cfe_verification::SodProfile<Scalar>& r, Scalar x_query)
 {
-  std::size_t best = 0;
+  cfe::Index best = 0;
   double best_dist = 1e300;
-  for (std::size_t i = 0; i < r.x.size(); ++i) {
+  for (cfe::Index i = 0; i < r.x.size(); ++i) {
     const double d = std::fabs(static_cast<double>(r.x[i]) - static_cast<double>(x_query));
     if (d < best_dist) {
       best_dist = d;
@@ -193,12 +193,12 @@ void check_sod_shock_tube_hllc_resolves_contact_discontinuity_sharper_than_rusan
   const double rho_star_left = exact_at(x_contact - 0.01).rho;
   const double rho_star_right = exact_at(x_contact + 0.01).rho;
 
-  const std::size_t nx = 400;
+  const cfe::Index nx = 400;
   const cfe_verification::SodProfile<Scalar> hllc = run_sod_hllc<Scalar>(nx);
   const cfe_verification::SodProfile<Scalar> rusanov = run_sod_rusanov<Scalar>(nx);
 
-  const std::size_t width_hllc = cfe_verification::contact_width_cells(hllc, x_contact, rho_star_left, rho_star_right);
-  const std::size_t width_rusanov =
+  const cfe::Index width_hllc = cfe_verification::contact_width_cells(hllc, x_contact, rho_star_left, rho_star_right);
+  const cfe::Index width_rusanov =
       cfe_verification::contact_width_cells(rusanov, x_contact, rho_star_left, rho_star_right);
 
   // Report both widths as the actual evidence (not just a pass/fail) --
@@ -258,11 +258,11 @@ void check_sod_shock_tube_hllc_density_l1_error_decreases_with_resolution()
     return cfe_verification::sample_exact_solution(1.4, kLeft, kRight, star, s).rho;
   };
 
-  auto l1_error = [&](std::size_t nx) {
+  auto l1_error = [&](cfe::Index nx) {
     const cfe_verification::SodProfile<Scalar> r = run_sod_hllc<Scalar>(nx);
     double err = 0.0;
     const double dx = 1.0 / static_cast<double>(nx);
-    for (std::size_t i = 0; i < r.x.size(); ++i) {
+    for (cfe::Index i = 0; i < r.x.size(); ++i) {
       err += std::fabs(static_cast<double>(r.rho[i]) - exact_density_at(static_cast<double>(r.x[i]))) * dx;
     }
     return err;

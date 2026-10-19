@@ -53,7 +53,7 @@ CFE_TEST(test_euler_cuda_matches_cpu_reference)
   using Field = cfe::EulerField<double, 1>;
   constexpr std::size_t kN = Field::n_components;  // 3: density, momentum_x, energy
 
-  constexpr std::size_t kNx = 400;
+  constexpr cfe::Index kNx = 400;
   constexpr double kGamma = 1.4;
   constexpr double kX0 = 0.5;
   constexpr double kDx = 1.0 / static_cast<double>(kNx);
@@ -94,11 +94,11 @@ CFE_TEST(test_euler_cuda_matches_cpu_reference)
   const cfe::State<double, kN> right_q = field.conserved_from_primitive(0.125, zero_velocity, 0.1);
 
   std::vector<double> host_ic(grid.n_cells_total() * kN, 0.0);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
     const cfe::State<double, kN>& q = (x < kX0) ? left_q : right_q;
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-    for (std::size_t c = 0; c < kN; ++c) host_ic[cell * kN + c] = q[c];
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
+    for (cfe::Index c = 0; c < kN; ++c) host_ic[cell * kN + c] = q[c];
   }
 
   cfe::SlipWallBoundary<Field> boundary{};
@@ -107,7 +107,7 @@ CFE_TEST(test_euler_cuda_matches_cpu_reference)
   cfe::Field<double, kN> state_cpu(grid.n_cells_total());
   cfe::Field<double, kN> stage1_cpu(grid.n_cells_total());
   cfe::Field<double, kN> scratch_cpu(grid.n_cells_total());
-  for (std::size_t idx = 0; idx < host_ic.size(); ++idx) state_cpu.data()[idx] = host_ic[idx];
+  for (cfe::Index idx = 0; idx < host_ic.size(); ++idx) state_cpu.data()[idx] = host_ic[idx];
 
   cfe::FvmSolver<double, cfe::AoSLayout, Field, cfe::SlipWallBoundary<Field>, cfe::SlipWallBoundary<Field>,
                  cfe::SlipWallBoundary<Field>, cfe::fvm::MusclMinmodReconstruction, cfe::RusanovFlux>
@@ -130,12 +130,12 @@ CFE_TEST(test_euler_cuda_matches_cpu_reference)
   // CPU-vs-GPU agreement check that is this file's main point.
   auto total_mass = [&](const cfe::Field<double, kN>& s) {
     double m = 0.0;
-    for (std::size_t i = 0; i < grid.nx; ++i) m += s(grid.flat_index(grid.ngx + i, 0, 0), 0) * grid.dx;
+    for (cfe::Index i = 0; i < grid.nx; ++i) m += s(grid.flat_index(grid.ngx + i, 0, 0), 0) * grid.dx;
     return m;
   };
   auto total_energy = [&](const cfe::Field<double, kN>& s) {
     double e = 0.0;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       e += s(grid.flat_index(grid.ngx + i, 0, 0), Field::energy_index()) * grid.dx;
     }
     return e;
@@ -172,9 +172,9 @@ CFE_TEST(test_euler_cuda_matches_cpu_reference)
   std::vector<double> host_result(grid.n_cells_total() * kN);
   state_gpu.copy_to_host(host_result.data());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-    for (std::size_t c = 0; c < kN; ++c) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
+    for (cfe::Index c = 0; c < kN; ++c) {
       CFE_CHECK_NEAR(host_result[cell * kN + c], state_cpu.data()[cell * kN + c], 1e-9);
     }
   }

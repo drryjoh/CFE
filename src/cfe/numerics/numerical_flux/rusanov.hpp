@@ -59,6 +59,7 @@
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
+#include "cfe/math/scalar_ops.hpp"
 
 namespace cfe {
 
@@ -67,7 +68,7 @@ CFE_HOST_DEVICE
 Scalar rusanov_flux(Scalar left_value, Scalar right_value, Axis axis, const Field& field)
 {
   const Scalar raw_wave_speed = field.wave_speed(left_value, right_value, axis);
-  const Scalar alpha = raw_wave_speed < Scalar(0) ? -raw_wave_speed : raw_wave_speed;
+  const Scalar alpha = abs_value(raw_wave_speed);
   const Scalar flux_left = field.physical_flux(left_value, axis);
   const Scalar flux_right = field.physical_flux(right_value, axis);
   return Scalar(0.5) * (flux_left + flux_right) - Scalar(0.5) * alpha * (right_value - left_value);
@@ -83,12 +84,12 @@ State<Scalar, N> rusanov_flux(const State<Scalar, N>& left_state, const State<Sc
                               Axis axis, const Field& field)
 {
   const Scalar raw_wave_speed = field.wave_speed(left_state, right_state, axis);
-  const Scalar alpha = raw_wave_speed < Scalar(0) ? -raw_wave_speed : raw_wave_speed;
+  const Scalar alpha = abs_value(raw_wave_speed);
   const State<Scalar, N> flux_left = field.physical_flux(left_state, axis);
   const State<Scalar, N> flux_right = field.physical_flux(right_state, axis);
 
   State<Scalar, N> flux;
-  for (std::size_t c = 0; c < N; ++c) {
+  for (Index c = 0; c < N; ++c) {
     flux[c] =
         Scalar(0.5) * (flux_left[c] + flux_right[c]) - Scalar(0.5) * alpha * (right_state[c] - left_state[c]);
   }

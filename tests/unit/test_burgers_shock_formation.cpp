@@ -36,8 +36,8 @@
 // production code's own templates.
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -62,7 +62,7 @@ struct RunResult
 };
 
 template <class Scalar>
-RunResult run_burgers_shock(std::size_t nx, Scalar u_left, Scalar u_right, Scalar shock_origin,
+RunResult run_burgers_shock(cfe::Index nx, Scalar u_left, Scalar u_right, Scalar shock_origin,
                              Scalar domain_length, Scalar final_time, Scalar cfl)
 {
   const Scalar shock_speed = Scalar(0.5) * (u_left + u_right);  // Rankine-Hugoniot, exact for Burgers
@@ -80,8 +80,8 @@ RunResult run_burgers_shock(std::size_t nx, Scalar u_left, Scalar u_right, Scala
   cfe::Field<Scalar, 1> stage1(grid.n_cells_total());
   cfe::Field<Scalar, 1> residual_scratch(grid.n_cells_total());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     const Scalar x = grid.x_center(grid.ngx + i);
     state(cell, 0) = (x < shock_origin) ? u_left : u_right;
   }
@@ -89,7 +89,7 @@ RunResult run_burgers_shock(std::size_t nx, Scalar u_left, Scalar u_right, Scala
   RunResult result{};
   result.total_variation_initial = 0.0;
   result.integral_initial = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double value = static_cast<double>(state(grid.flat_index(grid.ngx + i, 0, 0), 0));
     result.integral_initial += value * static_cast<double>(grid.dx);
     if (i > 0) {
@@ -126,7 +126,7 @@ RunResult run_burgers_shock(std::size_t nx, Scalar u_left, Scalar u_right, Scala
   result.max_undershoot = 0.0;
   result.total_variation_final = 0.0;
   result.integral_final = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
     const Scalar x = grid.x_center(grid.ngx + i);
     sum_abs_error += static_cast<double>(std::abs(value - exact_riemann_solution(x)));

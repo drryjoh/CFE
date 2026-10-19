@@ -13,8 +13,8 @@
 // cannot.
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -27,7 +27,7 @@
 
 CFE_TEST(test_burgers_3d_solve_matches_1d_solve_column_for_column_when_uniform_in_y_and_z)
 {
-  constexpr std::size_t kNx = 100;
+  constexpr cfe::Index kNx = 100;
   constexpr double kULeft = 2.0;
   constexpr double kURight = 1.0;
   constexpr double kShockOrigin = 2.5;
@@ -45,7 +45,7 @@ CFE_TEST(test_burgers_3d_solve_matches_1d_solve_column_for_column_when_uniform_i
   cfe::Field<double, 1> state_1d(grid_1d.n_cells_total());
   cfe::Field<double, 1> stage1_1d(grid_1d.n_cells_total());
   cfe::Field<double, 1> scratch_1d(grid_1d.n_cells_total());
-  for (std::size_t i = 0; i < grid_1d.nx; ++i) {
+  for (cfe::Index i = 0; i < grid_1d.nx; ++i) {
     const double x = grid_1d.x_center(grid_1d.ngx + i);
     state_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0) = (x < kShockOrigin) ? kULeft : kURight;
   }
@@ -80,9 +80,9 @@ CFE_TEST(test_burgers_3d_solve_matches_1d_solve_column_for_column_when_uniform_i
   cfe::Field<double, 1> state_3d(grid_3d.n_cells_total());
   cfe::Field<double, 1> stage1_3d(grid_3d.n_cells_total());
   cfe::Field<double, 1> scratch_3d(grid_3d.n_cells_total());
-  for (std::size_t k = 0; k < grid_3d.nz; ++k) {
-    for (std::size_t j = 0; j < grid_3d.ny; ++j) {
-      for (std::size_t i = 0; i < grid_3d.nx; ++i) {
+  for (cfe::Index k = 0; k < grid_3d.nz; ++k) {
+    for (cfe::Index j = 0; j < grid_3d.ny; ++j) {
+      for (cfe::Index i = 0; i < grid_3d.nx; ++i) {
         const double x = grid_3d.x_center(grid_3d.ngx + i);
         state_3d(grid_3d.flat_index(grid_3d.ngx + i, grid_3d.ngy + j, grid_3d.ngz + k), 0) =
             (x < kShockOrigin) ? kULeft : kURight;
@@ -106,9 +106,9 @@ CFE_TEST(test_burgers_3d_solve_matches_1d_solve_column_for_column_when_uniform_i
 
   // Every (j,k) column of the 3D solve should match the 1D reference
   // exactly (same dt/dx/steps, same arithmetic repeated).
-  for (std::size_t k = 0; k < grid_3d.nz; ++k) {
-    for (std::size_t j = 0; j < grid_3d.ny; ++j) {
-      for (std::size_t i = 0; i < grid_3d.nx; ++i) {
+  for (cfe::Index k = 0; k < grid_3d.nz; ++k) {
+    for (cfe::Index j = 0; j < grid_3d.ny; ++j) {
+      for (cfe::Index i = 0; i < grid_3d.nx; ++i) {
         const double value_1d = state_1d(grid_1d.flat_index(grid_1d.ngx + i, 0, 0), 0);
         const double value_3d =
             state_3d(grid_3d.flat_index(grid_3d.ngx + i, grid_3d.ngy + j, grid_3d.ngz + k), 0);
@@ -139,7 +139,7 @@ CFE_TEST(test_burgers_3d_solve_matches_1d_solve_column_for_column_when_uniform_i
 // exactly, up to time-integration truncation error).
 CFE_TEST(test_burgers_3d_solve_with_genuine_multi_axis_variation_preserves_yz_symmetry_and_conserves_mass)
 {
-  constexpr std::size_t kN = 24;
+  constexpr cfe::Index kN = 24;
   constexpr double kPi = 3.14159265358979323846;
   constexpr double kBackground = 1.0;
   constexpr double kAmplitude = 0.3;  // kept well below kBackground: state never changes sign
@@ -169,11 +169,11 @@ CFE_TEST(test_burgers_3d_solve_with_genuine_multi_axis_variation_preserves_yz_sy
 
   double max_abs_u0 = 0.0;
   double initial_sum = 0.0;
-  for (std::size_t k = 0; k < grid.nz; ++k) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
     const double z = grid.z_center(grid.ngz + k);
-    for (std::size_t j = 0; j < grid.ny; ++j) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
       const double y = grid.y_center(grid.ngy + j);
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const double x = grid.x_center(grid.ngx + i);
         const double value = kBackground + kAmplitude * (wave_term(x) + wave_term(y) + wave_term(z));
         state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0) = value;
@@ -202,9 +202,9 @@ CFE_TEST(test_burgers_3d_solve_with_genuine_multi_axis_variation_preserves_yz_sy
                                solver.active_cell_count(), solver.active_cell_index_map());
   }
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const double value_jk = state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0);
         const double value_kj = state(grid.flat_index(grid.ngx + i, grid.ngy + k, grid.ngz + j), 0);
         // Not bit-exact: summing the three axes' flux contributions in
@@ -219,9 +219,9 @@ CFE_TEST(test_burgers_3d_solve_with_genuine_multi_axis_variation_preserves_yz_sy
   }
 
   double final_sum = 0.0;
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         final_sum += state(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0);
       }
     }

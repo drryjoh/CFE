@@ -64,7 +64,7 @@ namespace {
 // timing/metric values.
 using Scalar = cfe::scalar;
 
-constexpr std::size_t kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
+constexpr cfe::Index kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
 constexpr Scalar kCfl = 0.3;           // matches tutorials/burgers_3d_visualization/'s own choice
 // Run well past the analytic breaking time (t_s = sigma/(amplitude*
 // exp(-1/2)) ~= 0.396 for this Gaussian bump -- the x where a 1D slice's
@@ -150,9 +150,9 @@ int main(int argc, char** argv)
   // tracking the largest |value| THIS rank sees -- not yet the global
   // maximum the CFL fix below needs.
   Scalar local_max_abs_u = 0.0;
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const Scalar x = grid.x_center(grid.ngx + i);
         const Scalar y = grid.y_center(grid.ngy + j);
         const Scalar z = grid.z_center(grid.ngz + k);

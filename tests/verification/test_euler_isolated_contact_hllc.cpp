@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <type_traits>
 
+#include "cfe/core/types.hpp"
 #include "cfe/numerics/numerical_flux/hllc.hpp"
 #include "sod_shock_tube_runner.hpp"
 #include "test_framework.hpp"
@@ -56,7 +57,7 @@ struct IsolatedContact
   static constexpr Scalar kX0 = Scalar(0.5);
   static constexpr Scalar kTFinal = Scalar(0.5);
   static constexpr Scalar kCfl = Scalar(0.4);
-  static constexpr std::size_t kNx = 100;
+  static constexpr cfe::Index kNx = 100;
 };
 
 // Equal pressure, equal (zero) velocity, different density -- the one
@@ -68,7 +69,7 @@ template <class Scalar>
 double max_deviation_from_initial_step(const cfe_verification::SodProfile<Scalar>& r)
 {
   double max_abs_deviation = 0.0;
-  for (std::size_t i = 0; i < r.x.size(); ++i) {
+  for (cfe::Index i = 0; i < r.x.size(); ++i) {
     const double expected =
         (static_cast<double>(r.x[i]) < static_cast<double>(IsolatedContact<Scalar>::kX0)) ? kLeft.rho : kRight.rho;
     max_abs_deviation = std::max(max_abs_deviation, std::fabs(static_cast<double>(r.rho[i]) - expected));

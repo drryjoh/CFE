@@ -18,6 +18,7 @@
 
 #include "cfe/backend/cpu/serial.hpp"
 #include "cfe/backend/cpu/threaded.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -29,8 +30,8 @@ namespace {
 
 struct SerialBackend
 {
-  template <class Index, class Functor>
-  static void run(Index n, Functor f)
+  template <class IndexT, class Functor>
+  static void run(IndexT n, Functor f)
   {
     cfe::backend::serial::parallel_for(n, f);
   }
@@ -38,8 +39,8 @@ struct SerialBackend
 
 struct ThreadedBackend
 {
-  template <class Index, class Functor>
-  static void run(Index n, Functor f)
+  template <class IndexT, class Functor>
+  static void run(IndexT n, Functor f)
   {
     cfe::backend::threaded::parallel_for(n, f);
   }
@@ -50,7 +51,7 @@ constexpr double kSpeed = 1.0;
 constexpr int kRepetitions = 7;
 
 template <class Backend>
-void run_case(const char* backend_name, std::size_t nx)
+void run_case(const char* backend_name, cfe::Index nx)
 {
   cfe::CartesianGrid<double> grid;
   grid.nx = nx;
@@ -60,7 +61,7 @@ void run_case(const char* backend_name, std::size_t nx)
   cfe::Field<double, 1> state(grid.n_cells_total());
   cfe::Field<double, 1> stage1(grid.n_cells_total());
   cfe::Field<double, 1> scratch(grid.n_cells_total());
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
     state(grid.flat_index(grid.ngx + i, 0, 0), 0) = std::sin(2.0 * kPi * x);
   }
@@ -105,8 +106,8 @@ void run_case(const char* backend_name, std::size_t nx)
 int main()
 {
   std::printf("backend,n_cells,repetitions,median_ms,cell_updates_per_s\n");
-  for (std::size_t nx : {std::size_t(10'000), std::size_t(100'000), std::size_t(1'000'000),
-                        std::size_t(10'000'000)}) {
+  for (cfe::Index nx : {cfe::Index(10'000), cfe::Index(100'000), cfe::Index(1'000'000),
+                        cfe::Index(10'000'000)}) {
     run_case<SerialBackend>("serial", nx);
     run_case<ThreadedBackend>("threaded", nx);
   }

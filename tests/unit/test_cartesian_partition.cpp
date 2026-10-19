@@ -1,5 +1,6 @@
 // Unit tests for CartesianPartition (task spec 0005): pure index
 // arithmetic, no MPI toolchain needed.
+#include "cfe/core/types.hpp"
 #include "cfe/grid/partition/cartesian_partition.hpp"
 #include "test_framework.hpp"
 
@@ -30,9 +31,9 @@ CFE_TEST(test_cartesian_partition_local_extents_and_offsets_at_2x2x2)
     CFE_CHECK(p.local_nx == 8);
     CFE_CHECK(p.local_ny == 8);
     CFE_CHECK(p.local_nz == 8);
-    CFE_CHECK(p.global_offset_x == 8 * static_cast<std::size_t>(rank % 2));
-    CFE_CHECK(p.global_offset_y == 8 * static_cast<std::size_t>((rank / 2) % 2));
-    CFE_CHECK(p.global_offset_z == 8 * static_cast<std::size_t>(rank / 4));
+    CFE_CHECK(p.global_offset_x == 8 * static_cast<cfe::Index>(rank % 2));
+    CFE_CHECK(p.global_offset_y == 8 * static_cast<cfe::Index>((rank / 2) % 2));
+    CFE_CHECK(p.global_offset_z == 8 * static_cast<cfe::Index>(rank / 4));
   }
 }
 

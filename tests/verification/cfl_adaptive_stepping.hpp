@@ -38,16 +38,16 @@ namespace cfe_verification {
 template <class Scalar, std::size_t N, class Layout, class Field, class Residual, class IndexMap>
 Scalar advance_cfl_adaptive(cfe::FieldView<Scalar, N, Layout> state, cfe::FieldView<Scalar, N, Layout> stage1,
                              cfe::FieldView<Scalar, N, Layout> scratch, const cfe::CartesianGrid<Scalar>& grid,
-                             const Field& field, Residual residual, std::size_t n_active, const IndexMap& index_map,
+                             const Field& field, Residual residual, cfe::Index n_active, const IndexMap& index_map,
                              Scalar t_current, Scalar t_target, Scalar cfl)
 {
   Scalar t = t_current;
   while (t < t_target) {
     Scalar max_speed = Scalar(0.0);
-    for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
       cfe::State<Scalar, N> q;
-      const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-      for (std::size_t c = 0; c < N; ++c) q[c] = state(cell, c);
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
+      for (cfe::Index c = 0; c < N; ++c) q[c] = state(cell, c);
       const Scalar speed = std::abs(field.velocity_component(q, cfe::Axis::X)) + field.sound_speed(q);
       max_speed = speed > max_speed ? speed : max_speed;
     }

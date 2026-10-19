@@ -58,11 +58,11 @@
 // source, at the resolutions tested, is spatial truncation, not
 // floating-point roundoff), reported here rather than silently assumed.
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <type_traits>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/numerics/numerical_flux/hllc.hpp"
 #include "shu_osher_setup.hpp"
 #include "test_framework.hpp"
@@ -73,10 +73,10 @@ template <class Scalar>
 constexpr Scalar kTFinal = Scalar(1.8);
 template <class Scalar>
 constexpr Scalar kCfl = Scalar(0.4);
-constexpr std::size_t kFineNx = 2000;
+constexpr cfe::Index kFineNx = 2000;
 
 template <class Scalar, class NumericalFlux>
-cfe_verification::ShuOsherProfile<Scalar> run(std::size_t nx)
+cfe_verification::ShuOsherProfile<Scalar> run(cfe::Index nx)
 {
   return cfe_verification::run_shu_osher<Scalar, NumericalFlux>(nx, kTFinal<Scalar>, kCfl<Scalar>);
 }
@@ -430,7 +430,7 @@ void check_shu_osher_hllc_resolves_more_fine_structure_than_rusanov_at_matched_r
   // same resolution -- on top of the separate, more dramatic
   // ahead-of-shock finding above (HLLC exact, Rusanov measurably
   // diffusive). Confirmed at both precisions independently.
-  const std::size_t nx = 200;
+  const cfe::Index nx = 200;
   const auto& rusanov_reference = rusanov_fine_reference<Scalar>();
   const auto& hllc_reference = hllc_fine_reference<Scalar>();
   const double cutoff = canonical_shock_front<Scalar>() - 0.5;

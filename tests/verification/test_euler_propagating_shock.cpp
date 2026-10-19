@@ -49,11 +49,11 @@
 // unchanged by both `Scalar` instantiations below -- it is this file's
 // oracle, not simulation state (same convention used project-wide).
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 #include <type_traits>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/numerics/numerical_flux/hllc.hpp"
 #include "propagating_shock_setup.hpp"
 #include "shock_feature_tracking.hpp"
@@ -88,7 +88,7 @@ std::vector<Scalar> output_times()
 // spacing -- see propagating_shock_setup.hpp's header comment on why
 // CFL-adaptive stepping makes that necessary).
 template <class Scalar, class NumericalFlux>
-double measured_shock_speed(std::size_t nx)
+double measured_shock_speed(cfe::Index nx)
 {
   const auto snapshots = cfe_verification::run_propagating_shock<Scalar, NumericalFlux>(
       nx, Scalar(kGamma), kJump, Scalar(kX0), output_times<Scalar>(), Scalar(kCfl));
@@ -195,7 +195,7 @@ void check_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed()
   // ~0.000085 (double: Rusanov=2.366554, HLLC=2.366639) / ~0.000086
   // (float) -- both converge to the same physical speed, as expected,
   // at either precision.
-  const std::size_t nx = 400;
+  const cfe::Index nx = 400;
   const double rusanov_speed = measured_shock_speed<Scalar, cfe::RusanovFlux>(nx);
   const double hllc_speed = measured_shock_speed<Scalar, cfe::HllcFlux>(nx);
   std::printf("[info] Propagating-shock measured speed at nx=%zu (Scalar=%s): Rusanov=%.6f, HLLC=%.6f (analytic=%.6f)\n",

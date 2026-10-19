@@ -50,6 +50,7 @@
 
 #include "cfe/backend/parallel_for.hpp"
 #include "cfe/core/macros.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/ghost/ghost_fill.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
@@ -75,14 +76,14 @@ template <Axis A, class Scalar, class FieldViewT, class Reconstruction, class Nu
           class Field>
 CFE_HOST_DEVICE
 State<Scalar, Field::n_components> axis_flux_difference(FieldViewT state, const CartesianGrid<Scalar>& grid,
-                                                          std::size_t i, std::size_t j, std::size_t k,
+                                                          Index i, Index j, Index k,
                                                           const Reconstruction& reconstruction,
                                                           const NumericalFlux& numerical_flux,
                                                           const Field& field)
 {
   constexpr std::size_t N = Field::n_components;
 
-  std::size_t cell_m2, cell_m1, cell_c, cell_p1, cell_p2;
+  Index cell_m2, cell_m1, cell_c, cell_p1, cell_p2;
   Scalar spacing;
   if constexpr (A == Axis::X) {
     cell_m2 = grid.flat_index(i - 2, j, k);
@@ -111,7 +112,7 @@ State<Scalar, Field::n_components> axis_flux_difference(FieldViewT state, const 
   // State vectors -- the componentwise reconstruction loop below reads
   // each component's own 5 raw values out of these.
   State<Scalar, N> state_m2, state_m1, state_c, state_p1, state_p2;
-  for (std::size_t c = 0; c < N; ++c) {
+  for (Index c = 0; c < N; ++c) {
     state_m2[c] = state(cell_m2, c);
     state_m1[c] = state(cell_m1, c);
     state_c[c] = state(cell_c, c);
@@ -132,7 +133,7 @@ State<Scalar, Field::n_components> axis_flux_difference(FieldViewT state, const 
   // right value is this cell's own reconstruction.
   State<Scalar, N> state_left_of_right_face, state_right_of_right_face, state_left_of_left_face,
       state_right_of_left_face;
-  for (std::size_t c = 0; c < N; ++c) {
+  for (Index c = 0; c < N; ++c) {
     state_left_of_right_face[c] = reconstruction.right(state_m1[c], state_c[c], state_p1[c]);
     state_right_of_right_face[c] = reconstruction.left(state_c[c], state_p1[c], state_p2[c]);
     state_left_of_left_face[c] = reconstruction.right(state_m2[c], state_m1[c], state_c[c]);
@@ -160,7 +161,7 @@ State<Scalar, Field::n_components> axis_flux_difference(FieldViewT state, const 
         numerical_flux(state_left_of_right_face, state_right_of_right_face, A, field);
     const State<Scalar, N> flux_left =
         numerical_flux(state_left_of_left_face, state_right_of_left_face, A, field);
-    for (std::size_t c = 0; c < N; ++c) {
+    for (Index c = 0; c < N; ++c) {
       result[c] = -(flux_right[c] - flux_left[c]) / spacing;
     }
   }
@@ -194,18 +195,18 @@ struct CartesianRealCellIndexMap
 
   CFE_HOST_DEVICE
   CFE_FORCEINLINE
-  std::size_t operator()(std::size_t r) const
+  Index operator()(Index r) const
   {
     if constexpr (Dim == 1) {
       return grid.flat_index(grid.ngx + r, grid.ngy, grid.ngz);
     } else if constexpr (Dim == 2) {
-      const std::size_t local_i = r % grid.nx;
-      const std::size_t local_j = r / grid.nx;
+      const Index local_i = r % grid.nx;
+      const Index local_j = r / grid.nx;
       return grid.flat_index(grid.ngx + local_i, grid.ngy + local_j, grid.ngz);
     } else {
-      const std::size_t local_i = r % grid.nx;
-      const std::size_t local_j = (r / grid.nx) % grid.ny;
-      const std::size_t local_k = r / (grid.nx * grid.ny);
+      const Index local_i = r % grid.nx;
+      const Index local_j = (r / grid.nx) % grid.ny;
+      const Index local_k = r / (grid.nx * grid.ny);
       return grid.flat_index(grid.ngx + local_i, grid.ngy + local_j, grid.ngz + local_k);
     }
   }
@@ -291,14 +292,14 @@ struct FvmSolver
     // performance cost for a value nothing needed (caught in code
     // review; see agent_history.md). Fixed at the actual source instead:
     // `ssp_rk2_step` no longer visits ghost cells at all.
-    Backend::run(grid.nx * grid.ny * grid.nz, [=] CFE_HOST_DEVICE(std::size_t linear) mutable {
-      const std::size_t local_i = linear % grid.nx;
-      const std::size_t local_j = (linear / grid.nx) % grid.ny;
-      const std::size_t local_k = linear / (grid.nx * grid.ny);
+    Backend::run(grid.nx * grid.ny * grid.nz, [=] CFE_HOST_DEVICE(Index linear) mutable {
+      const Index local_i = linear % grid.nx;
+      const Index local_j = (linear / grid.nx) % grid.ny;
+      const Index local_k = linear / (grid.nx * grid.ny);
 
-      const std::size_t i = grid.ngx + local_i;
-      const std::size_t j = grid.ngy + local_j;
-      const std::size_t k = grid.ngz + local_k;
+      const Index i = grid.ngx + local_i;
+      const Index j = grid.ngy + local_j;
+      const Index k = grid.ngz + local_k;
 
       State<Scalar, n_components> total_flux_difference = detail::axis_flux_difference<Axis::X>(
           state, grid, i, j, k, reconstruction, numerical_flux, field);
@@ -312,8 +313,8 @@ struct FvmSolver
             state, grid, i, j, k, reconstruction, numerical_flux, field);
       }
 
-      const std::size_t cell = grid.flat_index(i, j, k);
-      for (std::size_t c = 0; c < n_components; ++c) {
+      const Index cell = grid.flat_index(i, j, k);
+      for (Index c = 0; c < n_components; ++c) {
         out(cell, c) = total_flux_difference[c];
       }
     });
@@ -325,7 +326,7 @@ struct FvmSolver
   // only real cells, never ghost cells. See detail::CartesianRealCellIndexMap's
   // own doc comment above for why a plain cell count alone isn't enough
   // on a 2D/3D grid.
-  std::size_t active_cell_count() const { return grid.nx * grid.ny * grid.nz; }
+  Index active_cell_count() const { return grid.nx * grid.ny * grid.nz; }
   detail::CartesianRealCellIndexMap<Scalar, Field::dim> active_cell_index_map() const
   {
     return detail::CartesianRealCellIndexMap<Scalar, Field::dim>{grid};

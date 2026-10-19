@@ -27,7 +27,6 @@
 #pragma once
 
 #include <cmath>
-#include <cstddef>
 #include <vector>
 
 #include "cfe/core/types.hpp"
@@ -62,7 +61,7 @@ struct ShockSnapshot
 // timestep (recomputed every step from the current max wave speed)
 // makes step count alone an unreliable proxy for elapsed time.
 template <class Scalar, class NumericalFlux = cfe::RusanovFlux>
-std::vector<ShockSnapshot<Scalar>> run_propagating_shock(std::size_t nx, Scalar gamma,
+std::vector<ShockSnapshot<Scalar>> run_propagating_shock(cfe::Index nx, Scalar gamma,
                                                           const NormalShockJump& jump, Scalar x0,
                                                           const std::vector<Scalar>& output_times, Scalar cfl)
 {
@@ -84,10 +83,10 @@ std::vector<ShockSnapshot<Scalar>> run_propagating_shock(std::size_t nx, Scalar 
   const cfe::State<Scalar, 3> ahead_q = field.conserved_from_primitive(
       Scalar(jump.ahead.rho), cfe::Vector<Scalar, 1>(Scalar(jump.ahead.u)), Scalar(jump.ahead.p));
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x = grid.x_center(grid.ngx + i);
     const cfe::State<Scalar, 3>& q = (x < x0) ? behind_q : ahead_q;
-    for (std::size_t c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
+    for (cfe::Index c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
   }
 
   cfe::StaticBoundary<Scalar, 3> boundary{behind_q, ahead_q};
@@ -106,10 +105,10 @@ std::vector<ShockSnapshot<Scalar>> run_propagating_shock(std::size_t nx, Scalar 
     snap.rho.resize(grid.nx);
     snap.u.resize(grid.nx);
     snap.p.resize(grid.nx);
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
       cfe::State<Scalar, 3> q;
-      for (std::size_t c = 0; c < 3; ++c) q[c] = state(cell, c);
+      for (cfe::Index c = 0; c < 3; ++c) q[c] = state(cell, c);
       snap.x[i] = grid.x_center(grid.ngx + i);
       snap.rho[i] = field.density(q);
       snap.u[i] = field.velocity_component(q, cfe::Axis::X);

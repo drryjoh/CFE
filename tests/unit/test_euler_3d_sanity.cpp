@@ -65,7 +65,7 @@ void check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_u
   constexpr Scalar kX0 = Scalar(0.5);
   constexpr Scalar kTFinal = Scalar(0.2);
   constexpr Scalar kCfl = Scalar(0.4);
-  constexpr std::size_t kNx = 100;
+  constexpr cfe::Index kNx = 100;
   constexpr std::size_t kN3 = 5;  // EulerField<Scalar,3>::n_components
 
   const cfe_verification::PrimitiveState kLeft{1.0, 0.0, 1.0};
@@ -104,13 +104,13 @@ void check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_u
   const cfe::State<Scalar, kN3> right_q =
       field.conserved_from_primitive(Scalar(kRight.rho), zero_velocity, Scalar(kRight.p));
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const Scalar x = grid.x_center(grid.ngx + i);
         const cfe::State<Scalar, kN3>& q = (x < kX0) ? left_q : right_q;
-        const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-        for (std::size_t c = 0; c < kN3; ++c) state(cell, c) = q[c];
+        const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+        for (cfe::Index c = 0; c < kN3; ++c) state(cell, c) = q[c];
       }
     }
   }
@@ -137,12 +137,12 @@ void check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_u
   Scalar t = Scalar(0.0);
   while (t < kTFinal) {
     Scalar max_speed = Scalar(0.0);
-    for (std::size_t k = 0; k < grid.nz; ++k) {
-      for (std::size_t j = 0; j < grid.ny; ++j) {
-        for (std::size_t i = 0; i < grid.nx; ++i) {
+    for (cfe::Index k = 0; k < grid.nz; ++k) {
+      for (cfe::Index j = 0; j < grid.ny; ++j) {
+        for (cfe::Index i = 0; i < grid.nx; ++i) {
           cfe::State<Scalar, kN3> q;
-          const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-          for (std::size_t c = 0; c < kN3; ++c) q[c] = state(cell, c);
+          const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+          for (cfe::Index c = 0; c < kN3; ++c) q[c] = state(cell, c);
           const Scalar speed = std::abs(field.velocity_component(q, cfe::Axis::X)) + field.sound_speed(q);
           max_speed = speed > max_speed ? speed : max_speed;
         }
@@ -155,12 +155,12 @@ void check_euler_3d_sod_shock_tube_matches_1d_reference_column_for_column_when_u
     t += dt;
   }
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         cfe::State<Scalar, kN3> q;
-        const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-        for (std::size_t c = 0; c < kN3; ++c) q[c] = state(cell, c);
+        const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+        for (cfe::Index c = 0; c < kN3; ++c) q[c] = state(cell, c);
 
         CFE_CHECK_NEAR(static_cast<double>(field.density(q)), static_cast<double>(reference.rho[i]), tol);
         CFE_CHECK_NEAR(static_cast<double>(field.velocity_component(q, cfe::Axis::X)),

@@ -2,6 +2,7 @@
 // containers"). Exercised at N=1 (scalar) and a representative vector size,
 // in both float and double.
 #include "cfe/core/component_counts.hpp"
+#include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
 #include "test_framework.hpp"
 
@@ -51,7 +52,7 @@ CFE_TEST(test_fixed_array_componentwise_arithmetic_double) { check_basic_arithme
 CFE_TEST(test_fixed_array_fill_constructor_sets_all_components)
 {
   cfe::FixedArray<double, 5> a(3.5);
-  for (std::size_t k = 0; k < a.size(); ++k) {
+  for (cfe::Index k = 0; k < a.size(); ++k) {
     CFE_CHECK_NEAR(a[k], 3.5, 1e-12);
   }
 }

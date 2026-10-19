@@ -73,6 +73,8 @@
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 #include "cfe/math/fixed_array.hpp"
+#include "cfe/math/operations.hpp"
+#include "cfe/math/scalar_ops.hpp"
 
 namespace cfe {
 
@@ -99,10 +101,10 @@ struct EulerField
   // constructing a Field instance -- see this file's header comment and
   // grid/boundary/slip_wall_boundary.hpp.
   CFE_HOST_DEVICE
-  static constexpr std::size_t momentum_index(Axis axis) { return 1 + static_cast<std::size_t>(axis); }
+  static constexpr Index momentum_index(Axis axis) { return 1 + static_cast<Index>(axis); }
 
   CFE_HOST_DEVICE
-  static constexpr std::size_t energy_index() { return Dim + 1; }
+  static constexpr Index energy_index() { return Dim + 1; }
 
   // --- semantic accessors (AGENTS.md #12) ---------------------------------
 
@@ -122,15 +124,22 @@ struct EulerField
   }
 
   // 0.5 * |momentum|^2 / density = 0.5 * density * |velocity|^2.
+  // `contract(momentum, momentum)` (math/operations.hpp, AGENTS.md #13)
+  // is exactly the sum-of-squares |momentum|^2 this needs -- PR #6
+  // cleanup task: this used to hand-roll that same sum in a local loop
+  // instead of calling the math-layer primitive that already existed
+  // for it. The loop that remains below only copies `q`'s momentum
+  // components into a `Vector` (unavoidable: `contract` takes two
+  // same-size containers, and `q`'s momentum components are a
+  // contiguous sub-range of the larger conserved-state vector, not
+  // already their own container) -- it no longer does the squaring or
+  // summing itself.
   CFE_HOST_DEVICE
   Scalar kinetic_energy(const ConservedState& q) const
   {
-    Scalar momentum_squared_sum = Scalar(0);
-    for (std::size_t d = 0; d < Dim; ++d) {
-      const Scalar m = q[1 + d];
-      momentum_squared_sum += m * m;
-    }
-    return Scalar(0.5) * momentum_squared_sum / density(q);
+    Vector<Scalar, Dim> momentum;
+    for (Index d = 0; d < Dim; ++d) momentum[d] = q[1 + d];
+    return Scalar(0.5) * contract(momentum, momentum) / density(q);
   }
 
   // Ideal-gas equation of state: p = (gamma - 1) * (E - kinetic_energy).
@@ -140,6 +149,18 @@ struct EulerField
     return (gamma - Scalar(1)) * (total_energy(q) - kinetic_energy(q));
   }
 
+  // Unqualified `sqrt` (not `std::sqrt`): this is this codebase's first
+  // transcendental-function call, flagged during ADR 0010's review as
+  // needing a future convention decision -- now made (PR #6 cleanup
+  // task, see this ADR's own addendum and agent_history.md): call
+  // `sqrt`/`pow` unqualified everywhere, letting ordinary/ADL lookup
+  // find the right float/double overload, rather than `std::sqrt`,
+  // because `std::` qualification is not reliably available in CUDA
+  // device code across this project's supported compilers while the
+  // unqualified form already resolves correctly in both host (<cmath>)
+  // and CUDA device (builtin intrinsic) translation units. This was
+  // already hllc.hpp's de facto practice (task 0011) before being
+  // written down as the explicit project convention here.
   CFE_HOST_DEVICE
   Scalar sound_speed(const ConservedState& q) const
   {
@@ -148,6 +169,15 @@ struct EulerField
 
   // --- Calculators (ARCHITECTURE.md #2) -----------------------------------
 
+  // Backlog note (PR #6 cleanup task, Snorlax/Violet): the `Dim`-sized
+  // `for` loops in `kinetic_energy` above and `physical_flux` below were
+  // considered for parameter-pack/fold-expression/`index_sequence`
+  // unrolling and rejected -- Violet confirmed byte-identical `-O3`
+  // assembly against the plain loop, and Snorlax found no readability
+  // case for it, for this codebase's student audience. Only reconsider
+  // if Enzo profiles these kernels and finds real register/occupancy
+  // evidence the plain loop is costing something.
+  //
   // The physical flux Calculator for one axis:
   //   F_axis(Q) = (rho*u_axis,
   //                momentum_d * u_axis + delta(d,axis)*p  for each d,
@@ -158,12 +188,12 @@ struct EulerField
   {
     const Scalar u_axis = velocity_component(q, axis);
     const Scalar p = pressure(q);
-    const std::size_t normal_component = momentum_index(axis);
+    const Index normal_component = momentum_index(axis);
 
     ConservedState flux;
     flux[0] = density(q) * u_axis;
-    for (std::size_t d = 0; d < Dim; ++d) {
-      const std::size_t component = 1 + d;
+    for (Index d = 0; d < Dim; ++d) {
+      const Index component = 1 + d;
       flux[component] = q[component] * u_axis + (component == normal_component ? p : Scalar(0));
     }
     flux[energy_index()] = (total_energy(q) + p) * u_axis;
@@ -186,8 +216,8 @@ struct EulerField
     const Scalar u_right = velocity_component(state_right, axis);
     const Scalar c_right = sound_speed(state_right);
 
-    const Scalar abs_u_left = u_left < Scalar(0) ? -u_left : u_left;
-    const Scalar abs_u_right = u_right < Scalar(0) ? -u_right : u_right;
+    const Scalar abs_u_left = abs_value(u_left);
+    const Scalar abs_u_right = abs_value(u_right);
     const Scalar speed_left = abs_u_left + c_left;
     const Scalar speed_right = abs_u_right + c_right;
     return speed_left > speed_right ? speed_left : speed_right;
@@ -205,13 +235,14 @@ struct EulerField
   {
     ConservedState q;
     q[0] = density_value;
-    Scalar momentum_squared_sum = Scalar(0);
-    for (std::size_t d = 0; d < Dim; ++d) {
-      const Scalar m = density_value * velocity[d];
-      q[1 + d] = m;
-      momentum_squared_sum += m * m;
-    }
-    const Scalar kinetic = Scalar(0.5) * momentum_squared_sum / density_value;
+    for (Index d = 0; d < Dim; ++d) q[1 + d] = density_value * velocity[d];
+    // kinetic = 0.5*|momentum|^2/density = 0.5*density^2*|velocity|^2/density
+    //         = 0.5*density*|velocity|^2 -- computed directly from the
+    // already-available `velocity` vector via `contract` (AGENTS.md #13)
+    // rather than re-deriving |momentum|^2 from the `q` just built above
+    // (PR #6 cleanup task: this is the same sum-of-squares `kinetic_energy`
+    // needed, and this call site already has the cheaper form on hand).
+    const Scalar kinetic = Scalar(0.5) * density_value * contract(velocity, velocity);
     q[energy_index()] = pressure_value / (gamma - Scalar(1)) + kinetic;
     return q;
   }

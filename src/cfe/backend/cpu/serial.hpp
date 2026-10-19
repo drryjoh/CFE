@@ -8,10 +8,10 @@ namespace backend {
 namespace serial {
 
 // Executes `f(i)` for i in [0, n) on the calling thread, in order.
-template <class Index, class Functor>
-void parallel_for(Index n, Functor f)
+template <class IndexT, class Functor>
+void parallel_for(IndexT n, Functor f)
 {
-  for (Index i = 0; i < n; ++i) {
+  for (IndexT i = 0; i < n; ++i) {
     f(i);
   }
 }

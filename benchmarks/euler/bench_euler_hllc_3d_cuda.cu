@@ -53,7 +53,7 @@ constexpr Scalar kVelocityAmplitude = Scalar(0.1);
 constexpr Scalar kGamma = Scalar(1.4);
 constexpr int kRepetitions = 10;
 
-void run_case(std::size_t n_per_axis)
+void run_case(cfe::Index n_per_axis)
 {
   cfe::CartesianGrid<Scalar> grid;
   grid.nx = n_per_axis;
@@ -71,9 +71,9 @@ void run_case(std::size_t n_per_axis)
 
   std::vector<Scalar> host_ic(grid.n_cells_total() * kN, Scalar(0.0));
   Scalar max_speed = Scalar(0.0);
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index k = 0; k < grid.nz; ++k) {
+    for (cfe::Index j = 0; j < grid.ny; ++j) {
+      for (cfe::Index i = 0; i < grid.nx; ++i) {
         const Scalar x = grid.x_center(grid.ngx + i);
         const Scalar y = grid.y_center(grid.ngy + j);
         const Scalar z = grid.z_center(grid.ngz + k);
@@ -88,8 +88,8 @@ void run_case(std::size_t n_per_axis)
         velocity[2] = Scalar(0.3) * kVelocityAmplitude * wave;
 
         const cfe::State<Scalar, kN> q = field.conserved_from_primitive(rho, velocity, p);
-        const std::size_t cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
-        for (std::size_t c = 0; c < kN; ++c) host_ic[cell * kN + c] = q[c];
+        const cfe::Index cell = grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k);
+        for (cfe::Index c = 0; c < kN; ++c) host_ic[cell * kN + c] = q[c];
 
         const Scalar c_sound = field.sound_speed(q);
         const Scalar speed_x = (velocity[0] < Scalar(0) ? -velocity[0] : velocity[0]) + c_sound;
@@ -146,8 +146,8 @@ void run_case(std::size_t n_per_axis)
 int main()
 {
   std::printf("backend,dim,n_per_axis,n_cells,repetitions,median_ms,cell_updates_per_s\n");
-  for (std::size_t n : {std::size_t(64), std::size_t(128), std::size_t(256), std::size_t(400),
-                        std::size_t(512)}) {
+  for (cfe::Index n : {cfe::Index(64), cfe::Index(128), cfe::Index(256), cfe::Index(400),
+                        cfe::Index(512)}) {
     run_case(n);
   }
   return 0;

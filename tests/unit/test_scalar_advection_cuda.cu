@@ -10,6 +10,7 @@
 
 #include "cfe/backend/cuda/cuda_backend.cuh"
 #include "cfe/backend/cuda/device_field.cuh"
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/scalar_advection/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -24,7 +25,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
 {
-  constexpr std::size_t kNx = 256;
+  constexpr cfe::Index kNx = 256;
   constexpr double kSpeed = 1.0;
   constexpr double kDx = 1.0 / static_cast<double>(kNx);
   constexpr double kDt = 0.4 * kDx / kSpeed;
@@ -36,7 +37,7 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
   grid.dx = kDx;
 
   std::vector<double> host_ic(grid.n_cells_total(), 0.0);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const double x = grid.x_center(grid.ngx + i);
     host_ic[grid.flat_index(grid.ngx + i, 0, 0)] = std::sin(2.0 * kPi * x);
   }
@@ -47,7 +48,7 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
   cfe::Field<double, 1> state_cpu(grid.n_cells_total());
   cfe::Field<double, 1> stage1_cpu(grid.n_cells_total());
   cfe::Field<double, 1> scratch_cpu(grid.n_cells_total());
-  for (std::size_t idx = 0; idx < host_ic.size(); ++idx) state_cpu.data()[idx] = host_ic[idx];
+  for (cfe::Index idx = 0; idx < host_ic.size(); ++idx) state_cpu.data()[idx] = host_ic[idx];
 
   cfe::FvmSolver<double, cfe::AoSLayout, cfe::ScalarAdvectionField<double, 1>, cfe::PeriodicBoundary>
       solver_cpu{grid, field, cfe::PeriodicBoundary{}};
@@ -83,8 +84,8 @@ CFE_TEST(test_scalar_advection_cuda_matches_cpu_reference)
   std::vector<double> host_result(grid.n_cells_total());
   state_gpu.copy_to_host(host_result.data());
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     CFE_CHECK_NEAR(host_result[cell], state_cpu.data()[cell], 1e-9);
   }
 }

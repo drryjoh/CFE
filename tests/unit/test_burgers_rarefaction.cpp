@@ -41,8 +41,8 @@
 // VERIFICATION.md section 4.
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/fields/burgers/field.hpp"
 #include "cfe/grid/boundary/boundary_condition.hpp"
@@ -85,7 +85,7 @@ struct RunResult
 };
 
 template <class Scalar>
-RunResult run_burgers_rarefaction(std::size_t nx, Scalar u_left, Scalar u_right, Scalar x0,
+RunResult run_burgers_rarefaction(cfe::Index nx, Scalar u_left, Scalar u_right, Scalar x0,
                                    Scalar domain_length, Scalar final_time, Scalar cfl)
 {
   cfe::CartesianGrid<Scalar> grid;
@@ -100,7 +100,7 @@ RunResult run_burgers_rarefaction(std::size_t nx, Scalar u_left, Scalar u_right,
 
   RunResult result{};
   result.integral_initial = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
     const Scalar x_hi = x_lo + grid.dx;
     const Scalar value = rarefaction_exact_cell_average(x_lo, x_hi, x0, Scalar(0.0), u_left, u_right);
@@ -149,7 +149,7 @@ RunResult run_burgers_rarefaction(std::size_t nx, Scalar u_left, Scalar u_right,
   result.max_overshoot = 0.0;
   result.max_undershoot = 0.0;
   result.integral_final = 0.0;
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar value = state(grid.flat_index(grid.ngx + i, 0, 0), 0);
     const Scalar x_lo = static_cast<Scalar>(i) * grid.dx;
     const Scalar x_hi = x_lo + grid.dx;

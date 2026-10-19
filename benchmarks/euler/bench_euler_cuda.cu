@@ -60,7 +60,7 @@ constexpr int kRepetitions = 10;
 // Runs and times ONE benchmark case (one grid size, on the GPU), then
 // prints one CSV row with the result. Called once per grid size from
 // main() below.
-void run_case(std::size_t nx)
+void run_case(cfe::Index nx)
 {
   // Build a 1D grid of `nx` cells, each `grid.dx` wide, covering [0,1].
   // `ngx = 2` ghost cells pad each end -- the solver's stencil reaches 2
@@ -81,7 +81,7 @@ void run_case(std::size_t nx)
 
   std::vector<Scalar> host_ic(grid.n_cells_total() * kN, Scalar(0.0));
   Scalar max_speed = Scalar(0.0);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x = grid.x_center(grid.ngx + i);
     const Scalar wave = std::sin(Scalar(2.0) * kPi * x);
     const Scalar rho = kBackground + kAmplitude * wave;
@@ -91,8 +91,8 @@ void run_case(std::size_t nx)
     cfe::Vector<Scalar, 1> velocity;
     velocity[0] = u;
     const cfe::State<Scalar, kN> q = field.conserved_from_primitive(rho, velocity, p);
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
-    for (std::size_t c = 0; c < kN; ++c) host_ic[cell * kN + c] = q[c];
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
+    for (cfe::Index c = 0; c < kN; ++c) host_ic[cell * kN + c] = q[c];
 
     const Scalar c_sound = field.sound_speed(q);
     const Scalar speed = (u < Scalar(0) ? -u : u) + c_sound;
@@ -177,8 +177,8 @@ void run_case(std::size_t nx)
 int main()
 {
   std::printf("backend,n_cells,repetitions,median_ms,cell_updates_per_s\n");
-  for (std::size_t nx : {std::size_t(1'000'000), std::size_t(10'000'000), std::size_t(50'000'000),
-                        std::size_t(100'000'000)}) {
+  for (cfe::Index nx : {cfe::Index(1'000'000), cfe::Index(10'000'000), cfe::Index(50'000'000),
+                        cfe::Index(100'000'000)}) {
     run_case(nx);
   }
   return 0;

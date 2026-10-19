@@ -38,7 +38,6 @@
 
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <vector>
 
 #include "cfe/core/types.hpp"
@@ -75,19 +74,19 @@ struct SodProfile
 // discontinuity, given the discontinuity's own exact location and the
 // exact plateau densities on either side of it.
 template <class Scalar>
-std::size_t contact_width_cells(const SodProfile<Scalar>& profile, double x_contact, double rho_plateau_left,
-                                 double rho_plateau_right)
+cfe::Index contact_width_cells(const SodProfile<Scalar>& profile, double x_contact, double rho_plateau_left,
+                               double rho_plateau_right)
 {
   const double dx = static_cast<double>(profile.x[1]) - static_cast<double>(profile.x[0]);
-  const std::size_t center =
-      static_cast<std::size_t>(std::lround((x_contact - static_cast<double>(profile.x[0])) / dx));
+  const cfe::Index center =
+      static_cast<cfe::Index>(std::lround((x_contact - static_cast<double>(profile.x[0])) / dx));
 
   const double lo = rho_plateau_right + 0.05 * (rho_plateau_left - rho_plateau_right);
   const double hi = rho_plateau_right + 0.95 * (rho_plateau_left - rho_plateau_right);
 
-  std::size_t left_edge = center;
+  cfe::Index left_edge = center;
   while (left_edge > 0 && static_cast<double>(profile.rho[left_edge]) < hi) --left_edge;
-  std::size_t right_edge = center;
+  cfe::Index right_edge = center;
   while (right_edge + 1 < profile.rho.size() && static_cast<double>(profile.rho[right_edge]) > lo) ++right_edge;
   return right_edge - left_edge;
 }
@@ -103,7 +102,7 @@ std::size_t contact_width_cells(const SodProfile<Scalar>& profile, double x_cont
 // speed (not a fixed a priori bound), since the maximum signal speed
 // changes as the shock/rarefaction form.
 template <class Scalar, class NumericalFlux = cfe::RusanovFlux>
-SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const PrimitiveState& left,
+SodProfile<Scalar> run_sod_shock_tube(cfe::Index nx, Scalar gamma, const PrimitiveState& left,
                                        const PrimitiveState& right, Scalar x0, Scalar t_final, Scalar cfl)
 {
   cfe::CartesianGrid<Scalar> grid;
@@ -123,10 +122,10 @@ SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const Primit
   const cfe::State<Scalar, 3> right_q = field.conserved_from_primitive(
       Scalar(right.rho), cfe::Vector<Scalar, 1>(Scalar(right.u)), Scalar(right.p));
 
-  for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
     const Scalar x = grid.x_center(grid.ngx + i);
     const cfe::State<Scalar, 3>& q = (x < x0) ? left_q : right_q;
-    for (std::size_t c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
+    for (cfe::Index c = 0; c < 3; ++c) state(grid.flat_index(grid.ngx + i, 0, 0), c) = q[c];
   }
 
   cfe::StaticBoundary<Scalar, 3> boundary{left_q, right_q};
@@ -140,8 +139,8 @@ SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const Primit
 
   auto total_integrals = [&]() {
     double mass = 0.0, momentum = 0.0, energy = 0.0;
-    for (std::size_t i = 0; i < grid.nx; ++i) {
-      const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+    for (cfe::Index i = 0; i < grid.nx; ++i) {
+      const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
       mass += static_cast<double>(state(cell, 0)) * static_cast<double>(grid.dx);
       momentum += static_cast<double>(state(cell, 1)) * static_cast<double>(grid.dx);
       energy += static_cast<double>(state(cell, 2)) * static_cast<double>(grid.dx);
@@ -162,10 +161,10 @@ SodProfile<Scalar> run_sod_shock_tube(std::size_t nx, Scalar gamma, const Primit
   result.rho.resize(grid.nx);
   result.u.resize(grid.nx);
   result.p.resize(grid.nx);
-  for (std::size_t i = 0; i < grid.nx; ++i) {
-    const std::size_t cell = grid.flat_index(grid.ngx + i, 0, 0);
+  for (cfe::Index i = 0; i < grid.nx; ++i) {
+    const cfe::Index cell = grid.flat_index(grid.ngx + i, 0, 0);
     cfe::State<Scalar, 3> q;
-    for (std::size_t c = 0; c < 3; ++c) q[c] = state(cell, c);
+    for (cfe::Index c = 0; c < 3; ++c) q[c] = state(cell, c);
     result.x[i] = grid.x_center(grid.ngx + i);
     result.rho[i] = field.density(q);
     result.u[i] = field.velocity_component(q, cfe::Axis::X);

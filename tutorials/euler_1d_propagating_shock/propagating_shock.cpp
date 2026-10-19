@@ -37,7 +37,7 @@ constexpr Scalar kGamma = Scalar(1.4);
 constexpr Scalar kMach = Scalar(2.0);
 constexpr Scalar kX0 = Scalar(0.2);
 constexpr Scalar kCfl = Scalar(0.4);
-const std::vector<std::size_t> kGrids = {100, 200, 400, 800};
+const std::vector<cfe::Index> kGrids = {100, 200, 400, 800};
 
 // Picked so the shock (speed ~2.3664 for the default Mach 2 below)
 // travels comfortably inside [0,1] for the whole run -- if you change
@@ -55,7 +55,7 @@ std::vector<Scalar> output_times()
 }
 
 template <class NumericalFlux>
-void run_case(const std::string& flux_name, std::size_t nx, const cfe_verification::NormalShockJump& jump,
+void run_case(const std::string& flux_name, cfe::Index nx, const cfe_verification::NormalShockJump& jump,
               std::ofstream& summary, std::ofstream& tracks)
 {
   const auto snapshots =
@@ -96,7 +96,7 @@ int main()
   std::ofstream tracks(data_dir / "tracked_positions.csv");
   tracks << "nx,flux,t,x_shock\n";
 
-  for (std::size_t nx : kGrids) {
+  for (cfe::Index nx : kGrids) {
     run_case<cfe::RusanovFlux>("rusanov", nx, jump, summary, tracks);
     run_case<cfe::HllcFlux>("hllc", nx, jump, summary, tracks);
   }

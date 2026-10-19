@@ -30,8 +30,6 @@
 // redesigning this type.
 #pragma once
 
-#include <cstddef>
-
 #include "cfe/core/macros.hpp"
 #include "cfe/core/types.hpp"
 
@@ -41,16 +39,16 @@ template <class Scalar>
 struct CartesianGrid
 {
   // Real (non-ghost) cell counts per dimension. 1 for an unused dimension.
-  std::size_t nx = 1;
-  std::size_t ny = 1;
-  std::size_t nz = 1;
+  Index nx = 1;
+  Index ny = 1;
+  Index nz = 1;
 
   // Ghost-layer depth per dimension. 0 for an unused dimension -- there is
   // nothing to be a neighbor of, and a periodic/static boundary condition
   // on a size-1 axis is meaningless.
-  std::size_t ngx = 0;
-  std::size_t ngy = 0;
-  std::size_t ngz = 0;
+  Index ngx = 0;
+  Index ngy = 0;
+  Index ngz = 0;
 
   // Cell spacing per dimension. Meaningless (and unused) on an axis with
   // n_cells == 1.
@@ -64,21 +62,21 @@ struct CartesianGrid
   Scalar origin_z = Scalar(0);
 
   CFE_HOST_DEVICE
-  std::size_t padded_nx() const { return nx + 2 * ngx; }
+  Index padded_nx() const { return nx + 2 * ngx; }
   CFE_HOST_DEVICE
-  std::size_t padded_ny() const { return ny + 2 * ngy; }
+  Index padded_ny() const { return ny + 2 * ngy; }
   CFE_HOST_DEVICE
-  std::size_t padded_nz() const { return nz + 2 * ngz; }
+  Index padded_nz() const { return nz + 2 * ngz; }
 
   CFE_HOST_DEVICE
-  std::size_t n_cells_total() const { return padded_nx() * padded_ny() * padded_nz(); }
+  Index n_cells_total() const { return padded_nx() * padded_ny() * padded_nz(); }
 
   // i, j, k are PADDED indices (including ghost layers): valid range is
   // [0, padded_nx()) etc. Real interior cells occupy [ngx, ngx + nx), and
   // so on for j, k. This is the one and only place (i,j,k) is converted
   // to the flat `cell` index Field/FieldView expect.
   CFE_HOST_DEVICE
-  std::size_t flat_index(std::size_t i, std::size_t j, std::size_t k) const
+  Index flat_index(Index i, Index j, Index k) const
   {
     return i + j * padded_nx() + k * padded_nx() * padded_ny();
   }
@@ -86,15 +84,15 @@ struct CartesianGrid
   // Physical cell-center coordinate for a padded index. Host-only: used
   // for setting initial conditions and evaluating exact solutions, never
   // inside a per-timestep kernel.
-  Scalar x_center(std::size_t i) const
+  Scalar x_center(Index i) const
   {
     return origin_x + (static_cast<Scalar>(i) - static_cast<Scalar>(ngx) + Scalar(0.5)) * dx;
   }
-  Scalar y_center(std::size_t j) const
+  Scalar y_center(Index j) const
   {
     return origin_y + (static_cast<Scalar>(j) - static_cast<Scalar>(ngy) + Scalar(0.5)) * dy;
   }
-  Scalar z_center(std::size_t k) const
+  Scalar z_center(Index k) const
   {
     return origin_z + (static_cast<Scalar>(k) - static_cast<Scalar>(ngz) + Scalar(0.5)) * dz;
   }

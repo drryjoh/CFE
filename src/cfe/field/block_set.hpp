@@ -17,7 +17,7 @@
 //
 // `FieldView` already has zero assumption that it owns, or sits at the
 // start of, its own allocation (see field.hpp) -- it is exactly
-// `(Scalar* data, std::size_t n_cells)`. That is what makes this
+// `(Scalar* data, Index n_cells)`. That is what makes this
 // possible with no change to `FieldView` itself, and no change at all to
 // any code that only ever consumes a `FieldView` (`FvmSolver`,
 // `BlockInterfaceBoundary`, `ssp_rk2_combine_stage1/2`, ...): they cannot
@@ -35,6 +35,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/field/layout.hpp"
 
@@ -51,8 +52,8 @@ class BlockSet
   // will address them. The backing allocation is sized once, up front,
   // to the sum of these -- never resized afterward.
   //
-  // `std::initializer_list<std::size_t>` (rather than, say, two
-  // `std::size_t` parameters) is what lets brace-init syntax --
+  // `std::initializer_list<Index>` (rather than, say, two
+  // `Index` parameters) is what lets brace-init syntax --
   // `BlockSet<...> x{10, 20}`, or `{10, 20, 30}` for three blocks --
   // bind to THIS one constructor regardless of how many entries are
   // listed: a braced list preferentially matches an initializer-list
@@ -63,16 +64,16 @@ class BlockSet
   // call site -- no new constructor needed here. One real limitation:
   // an initializer list must be written as a literal braced list at the
   // call site; it cannot bind to an already-built
-  // `std::vector<std::size_t>`. A future caller needing a genuinely
+  // `std::vector<Index>`. A future caller needing a genuinely
   // runtime-determined block count would need a different constructor
-  // overload (e.g. one taking a `std::vector<std::size_t>` directly) --
+  // overload (e.g. one taking a `std::vector<Index>` directly) --
   // not needed by anything in this codebase today.
-  explicit BlockSet(std::initializer_list<std::size_t> block_cell_counts)
+  explicit BlockSet(std::initializer_list<Index> block_cell_counts)
       : block_cell_counts_(block_cell_counts)
   {
     scalar_offsets_.reserve(block_cell_counts_.size());
-    std::size_t total_scalars = 0;
-    for (const std::size_t n_cells : block_cell_counts_) {
+    Index total_scalars = 0;
+    for (const Index n_cells : block_cell_counts_) {
       scalar_offsets_.push_back(total_scalars);
       total_scalars += n_cells * NComponents;
     }
@@ -85,29 +86,29 @@ class BlockSet
   // `CartesianGrid` already), kept for the same reason `Field` exposes
   // them -- a natural, near-zero-cost accessor pair for a type whose
   // whole job is "how many cells, and where are they."
-  std::size_t n_blocks() const { return block_cell_counts_.size(); }
-  std::size_t n_cells(std::size_t block) const { return block_cell_counts_[block]; }
+  Index n_blocks() const { return block_cell_counts_.size(); }
+  Index n_cells(Index block) const { return block_cell_counts_[block]; }
   // Total scalars across every block -- the one allocation's size.
-  std::size_t size() const { return storage_.size(); }
+  Index size() const { return storage_.size(); }
 
-  View view(std::size_t block)
+  View view(Index block)
   {
     return View(storage_.data() + scalar_offsets_[block], block_cell_counts_[block]);
   }
   // See `Field::view() const`'s own comment: `storage_.data()` on a
   // const `BlockSet` is already `const Scalar*`, exactly what
   // `ConstView` expects -- no `const_cast` needed.
-  ConstView view(std::size_t block) const
+  ConstView view(Index block) const
   {
     return ConstView(storage_.data() + scalar_offsets_[block], block_cell_counts_[block]);
   }
 
  private:
-  std::vector<std::size_t> block_cell_counts_;
+  std::vector<Index> block_cell_counts_;
   // Scalar (not cell) offset of each block's first element into
   // `storage_` -- i.e. already multiplied by `NComponents`, so `view()`
   // can index `storage_.data()` directly.
-  std::vector<std::size_t> scalar_offsets_;
+  std::vector<Index> scalar_offsets_;
   std::vector<Scalar> storage_;
 };
 

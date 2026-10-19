@@ -16,7 +16,7 @@
 // matching standard FVM practice (fill ghosts -> compute residual on
 // interior cells -> integrate interior cells only). This stepper still
 // has no knowledge of what a "ghost cell" *is*: `index_map` is an opaque
-// `std::size_t -> std::size_t` translation from "the r-th active cell"
+// `Index -> Index` translation from "the r-th active cell"
 // to a storage index, supplied by the caller (`FvmSolver::active_cell_index_map()`
 // for a Cartesian grid; the default `IdentityIndexMap` for a caller with
 // no ghost cells at all, e.g. a plain ODE system). This used to iterate
@@ -40,6 +40,7 @@
 
 #include "cfe/backend/parallel_for.hpp"
 #include "cfe/core/macros.hpp"
+#include "cfe/core/types.hpp"
 
 namespace cfe {
 
@@ -51,7 +52,7 @@ struct IdentityIndexMap
 {
   CFE_HOST_DEVICE
   CFE_FORCEINLINE
-  std::size_t operator()(std::size_t r) const { return r; }
+  Index operator()(Index r) const { return r; }
 };
 
 // The two combine steps below are each pulled out as their own public,
@@ -85,12 +86,12 @@ struct IdentityIndexMap
 // coupling needs).
 template <class Scalar, class FieldViewT, class Backend = CpuParallelFor, class IndexMap = IdentityIndexMap>
 void ssp_rk2_combine_stage1(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
-                            std::size_t n_active, IndexMap index_map = IndexMap{})
+                            Index n_active, IndexMap index_map = IndexMap{})
 {
   constexpr std::size_t n_components = FieldViewT::n_components();
-  Backend::run(n_active, [=] CFE_HOST_DEVICE(std::size_t r) mutable {
-    const std::size_t cell = index_map(r);
-    for (std::size_t c = 0; c < n_components; ++c) {
+  Backend::run(n_active, [=] CFE_HOST_DEVICE(Index r) mutable {
+    const Index cell = index_map(r);
+    for (Index c = 0; c < n_components; ++c) {
       stage1(cell, c) = state(cell, c) + dt * residual_scratch(cell, c);
     }
   });
@@ -102,12 +103,12 @@ void ssp_rk2_combine_stage1(FieldViewT state, FieldViewT stage1, FieldViewT resi
 // `ssp_rk2_combine_stage1` above).
 template <class Scalar, class FieldViewT, class Backend = CpuParallelFor, class IndexMap = IdentityIndexMap>
 void ssp_rk2_combine_stage2(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
-                            std::size_t n_active, IndexMap index_map = IndexMap{})
+                            Index n_active, IndexMap index_map = IndexMap{})
 {
   constexpr std::size_t n_components = FieldViewT::n_components();
-  Backend::run(n_active, [=] CFE_HOST_DEVICE(std::size_t r) mutable {
-    const std::size_t cell = index_map(r);
-    for (std::size_t c = 0; c < n_components; ++c) {
+  Backend::run(n_active, [=] CFE_HOST_DEVICE(Index r) mutable {
+    const Index cell = index_map(r);
+    for (Index c = 0; c < n_components; ++c) {
       state(cell, c) =
           Scalar(0.5) * state(cell, c) + Scalar(0.5) * (stage1(cell, c) + dt * residual_scratch(cell, c));
     }
@@ -125,7 +126,7 @@ void ssp_rk2_combine_stage2(FieldViewT state, FieldViewT stage1, FieldViewT resi
 template <class Scalar, class FieldViewT, class Residual, class Backend = CpuParallelFor,
           class IndexMap = IdentityIndexMap>
 void ssp_rk2_step(FieldViewT state, FieldViewT stage1, FieldViewT residual_scratch, Scalar dt,
-                   Residual residual, std::size_t n_active, IndexMap index_map = IndexMap{})
+                   Residual residual, Index n_active, IndexMap index_map = IndexMap{})
 {
   residual(state, residual_scratch);
   ssp_rk2_combine_stage1<Scalar, FieldViewT, Backend>(state, stage1, residual_scratch, dt, n_active, index_map);

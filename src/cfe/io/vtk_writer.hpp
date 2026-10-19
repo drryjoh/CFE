@@ -18,11 +18,11 @@
 // if that need arises later.
 #pragma once
 
-#include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <string>
 
+#include "cfe/core/types.hpp"
 #include "cfe/field/field.hpp"
 #include "cfe/grid/structured/cartesian_grid.hpp"
 
@@ -46,9 +46,9 @@ void write_vtk_structured_points_cell_scalar(const std::string& path, const Cart
   out << "SCALARS " << scalar_name << " double 1\n";
   out << "LOOKUP_TABLE default\n";
 
-  for (std::size_t k = 0; k < grid.nz; ++k) {
-    for (std::size_t j = 0; j < grid.ny; ++j) {
-      for (std::size_t i = 0; i < grid.nx; ++i) {
+  for (Index k = 0; k < grid.nz; ++k) {
+    for (Index j = 0; j < grid.ny; ++j) {
+      for (Index i = 0; i < grid.nx; ++i) {
         out << field(grid.flat_index(grid.ngx + i, grid.ngy + j, grid.ngz + k), 0) << "\n";
       }
     }
