@@ -5593,6 +5593,212 @@ Next recommended task: whatever is next on `ROADMAP.md`'s Phase 4/5
 list -- this task was a pure cleanup pass with no dependency on, or
 blocking effect on, that work.
 
+
+## 2026-10-15 — Task 0016: Checkpoint/restart for the forward-step resolution sweep
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+Objective: re-verifying a change against `tutorials/euler_2d_forward_step`'s
+full resolution sweep requires re-running every case from `t=0`,
+including the most expensive case (`res288_hllc`, ~12,000 steps, tens
+of minutes), even when the change being verified provably cannot
+affect physics (e.g. a pure rename). Add checkpoint/restart so the
+expensive tail of a long run can be re-verified from a checkpoint taken
+shortly before a target, instead of the whole run from scratch.
+Explicit user scope decision: CPU-only (serial/threaded backend); do
+**not** wire MPI into Euler/`BlockInterfaceBoundary`/forward-step in
+this task (that is separate, already-named future work, "Task B:
+MPI-aware multi-block interface boundary," still unstarted); do **not**
+actually SSH into PSC Bridges-2 or set up live cron automation
+(documentation/script only).
+
+Worktree: `/tmp/CFE-restart` (branch `cfe/development/restart-
+checkpoint`), based on `origin/main` @ `f2f81d2`. Confirmed via `gh pr
+list` + each open PR's own `tasks/` directory that 0014 (PR #7) and
+0015 (the in-flight `cfe::Index` rename, `/tmp/CFE-index-type`, not yet
+merged) were both already taken before picking 0016.
+
+Files changed/new:
+- `src/cfe/io/restart_file.hpp` (new): a versioned binary checkpoint
+  format. Writes/reads, per block: `RestartBlockShape<Scalar>` (grid
+  extents/ghost depth/spacing/origin, exact-equality-checked against
+  the caller's own grid on read) and every REAL cell's raw conserved
+  state, every component -- ghost cells excluded. File-level: format
+  version, `sizeof(Scalar)`, component count, step count, simulation
+  time, block count. `RestartCheckpointInfo<Scalar>{step, time}`
+  returned by value from `read_restart_checkpoint` (an early draft
+  split `step`/`time` across an out-parameter and a return value;
+  Snorlax's review caught this as unnecessary split-across-two-channels
+  and it was merged into one struct before this entry was written).
+  Ghost-cell exclusion rests on one stated, traced, and tested
+  assumption: `FvmSolver::residual()` (`solver/explicit/fvm_solver.hpp`)
+  calls `fill_ghost_cells()` at the START of every call, before reading
+  any state, so a ghost cell is never state that must survive a
+  restart -- see Violet's review below for the independent trace that
+  confirmed this, not just the header comment's own claim of it.
+- `tests/verification/forward_step_setup.hpp` (modified):
+  `ForwardStepBlocks` gained `run_n_steps(n_steps, cfl)` (step-count-
+  bounded adaptive-CFL advance -- deliberately NOT `run_to`'s time-
+  bounded clamping, which depends on the exact accumulated simulation
+  time and would need restoring to resume bit-identically; see that
+  method's own doc comment), `write_restart(path, step, time) const`,
+  `read_restart(path) -> RestartInfo{step, time}`.
+- `tests/unit/test_restart_file.cpp` (new): 8 format-level tests --
+  round-trip (single- and multi-block, with ghost cells deliberately
+  poisoned with DIFFERENT sentinels on each side to prove exclusion, not
+  just infer it), plus 5 reject-path tests (mismatched grid shape,
+  component count, format version, `sizeof(Scalar)`, block count, and a
+  truncated/short-read file) -- the last four added specifically in
+  response to Violet's review (the header already implemented all of
+  these checks; only 2 of 5 had a test before her finding).
+- `tests/unit/test_forward_step_restart.cpp` (new): the core property.
+  Continuous run of 60 steps vs. 40 steps + write_restart + read_restart
+  into a FRESH object + 20 more steps, checked bit-for-bit (`==`, not
+  tolerance) over every real cell of both blocks plus `total_mass()`,
+  at Dim=2 (`RusanovFlux` and, added per Violet's review, `HllcFlux` --
+  the actual flux the motivating `res288_hllc` case uses) and Dim=3.
+  Also a direct (snapshot-before/after `read_restart`, not inferred)
+  check that 4 distinct ghost-cell cases (fixed inflow, slip wall,
+  cross-block interface, riser-face fallback) are left completely
+  untouched.
+- `tutorials/euler_2d_forward_step/forward_step_2d_restart_demo.cpp`
+  (new): a separate small CLI (`--mode=checkpoint` / `--mode=resume`),
+  not a modification of the existing sweep's `main()` (Snorlax: the
+  sweep's `main()` takes no CLI args and has a fundamentally different,
+  batch shape; a separate executable was the lower-complexity option,
+  not speculative generality). `--mode=checkpoint` runs `res288_hllc`
+  from scratch (`kDemoTotalSteps=12000`, chosen as the same order as the
+  real sweep's own res288_hllc step count to `t=4`, not a literal
+  reproduction of that time-bounded run), writes a checkpoint 1000 steps
+  before the end, continues to completion. `--mode=resume` loads that
+  checkpoint fresh and runs just the remaining 1000 steps. `main()`
+  wraps both in `try/catch` (added per Sally's review -- an
+  uncommitted-exception path previously reached the user as a raw
+  `libc++abi: terminating...` abort instead of a clean one-line error).
+  Timer split into construct/read_restart/run phases (per Enzo's review
+  -- a bundled "load" number had attributed ~30-50% of its own time to
+  `ForwardStepBlocks` construction, not `read_restart`'s own I/O cost).
+- `tutorials/euler_2d_forward_step/regenerate_restart_checkpoints.sh`
+  (new): documents (does not execute remotely) the intended PSC-
+  Bridges-2-overnight-full-sweep / local-fast-tail-reverify workflow,
+  currently covering exactly the one `res288_hllc` case.
+- `docs/adr/0014-checkpoint-restart-format.md` (new): why a new bespoke
+  format rather than extending `io/vtk_writer.hpp`; the ghost-exclusion
+  and step/time-as-bookkeeping-not-solver-state decisions; the
+  non-portability scope boundary.
+- `docs/type-reference.md`, `presentations/0016-checkpoint-restart.md`,
+  `tasks/0016-checkpoint-restart.md` (new/updated per AGENTS.md #26/#27).
+- `.gitignore`: added `tutorials/euler_2d_forward_step/data/**/*.cferst`
+  -- the generated 6.68 MB checkpoint binary itself is NOT committed
+  (same policy this project already applies to VTK frames: only the
+  small `*_summary.csv` files are tracked).
+
+Real measured evidence (not an estimate -- both runs executed this
+session, numbers taken directly from the committed
+`data/res288_hllc_restart/{checkpoint,resume}_mode_summary.csv`):
+
+| | steps | wall-clock | final_mass |
+|---|---:|---:|---:|
+| Full run from scratch (`--mode=checkpoint`) | 12,000 | 886.21s (~14.8 min) | 6.319028 |
+| Resume from checkpoint (`--mode=resume`, fresh process) | 1,000 | 78.02s (construct 0.002s + read_restart 0.003s + run 78.02s) | 6.319028 |
+
+**~11.4x speedup** (886.21s / 78.02s) re-verifying the tail via restart
+vs. redoing the whole run from scratch -- the exact workflow motivating
+this task. Checkpoint file: 6.68 MB; reading it back cost 0.0026s,
+under 0.01% of the 1000 steps (78s) it lets a developer skip
+re-running. Full CPU unit/verification suite: 169/169 passing (161
+pre-existing plus 8 new file-format tests, 3 new end-to-end restart
+tests -- 2D/Rusanov, 2D/HLLC, 3D), zero regressions.
+
+Review (full cycle -- touches solver/memory-layout/I-O and a new
+persistent file format, per CLAUDE.md's proportionality rule):
+
+**Violet** (numerical correctness) analytically traced
+`FvmSolver::residual()`'s unconditional `fill_ghost_cells()`-before-read
+ordering and `BlockInterfaceBoundary::fill_x`'s neighbor-real-cell-only
+reads herself (not just accepting the header comment's claim), ran the
+full suite herself (164/164 at the time of her review), and -- finding
+the committed bit-identical test covered only `RusanovFlux` at a toy
+scale -- independently wrote and ran her own scratch spot-check at
+`cells_per_unit_height=40`, 800 steps, `HllcFlux`, lead=250: "Checked
+16128 scalar values, 0 mismatches." Conclusion: the core property is
+genuinely established, not merely claimed. Two optional findings, both
+closed before this entry was written: add tests for the
+format-version/`sizeof(Scalar)`/block-count reject paths (done -- see
+`test_restart_file.cpp` above), and promote her one-off HLLC spot-check
+into a permanent committed test (done -- see
+`test_forward_step_restart.cpp` above). No blocking findings.
+
+**Snorlax** (simplicity/architecture) confirmed the design matches
+established conventions (`vtk_writer.hpp`'s traversal order,
+`block_set.hpp`'s block-count-as-runtime-list shape) rather than
+reinventing one, confirmed `run_n_steps` is a genuinely different
+(simpler) loop than `run_to`, not duplicated logic, and confirmed the
+separate CLI executable was the right call given the existing sweep's
+different shape. One optional finding (the `step`/`time` split-return
+API -- closed, see `restart_file.hpp` above) and one blocking finding:
+the README/ADR/task file all pointed to a "Checkpoint/restart" README
+section that did not exist yet at review time (the real timing run was
+still in progress) -- closed once that run completed and the section
+was written with the real numbers above.
+
+**Enzo** (performance/resource discipline) measured, independently,
+against the real production code (not a reimplementation): checkpoint
+write 1.0-1.2ms, read 0.7-0.85ms, for a 6.68MB/208,754-real-cell payload
+at the actual `res288_hllc` scale -- confirmed the gather-into-buffer +
+one-`fwrite`-per-block design is not just "acceptable" but measurably
+*faster* than the alternative he tested (direct per-row `fwrite`, no
+buffer: 2.8-4.8ms, 2.5-4x slower, dominated by per-call stdio overhead
+at ~518 separate calls). Computed checkpoint I/O as ~2.7% of a single
+simulation step's own cost and ~0.003% of the 1000-step tail it lets a
+developer skip. Confirmed `run_n_steps` adds no per-step overhead
+versus the existing `run_to`/`step()`. One blocking finding (the
+forward-referenced README/`agent_history.md` evidence didn't exist yet
+-- same gap Snorlax caught, closed the same way) and two optional
+findings, both closed: split the demo's "load" timer into
+construct-vs-`read_restart` phases (`ForwardStepBlocks` construction
+alone measured 0.32-0.55ms, 30-50% of what a bundled timer would have
+misattributed to I/O), and document that `restart_file.hpp`'s functions
+assume host-accessible `FieldView`s (no current consequence -- no CUDA
+`Field` backend exists yet -- but worth stating for a future CUDA
+restart path).
+
+**Sally** (usability/explanation) confirmed the header comments
+(ghost-exclusion rationale, `run_n_steps`-vs-`run_to` reasoning) and the
+two test files are strong, adaptable teaching material. Built and ran
+the demo herself at reduced scale (`kResolution=10/12`,
+`kDemoTotalSteps=60`) and confirmed `final_mass` matched bit-for-bit
+between `--mode=checkpoint` and `--mode=resume`. Found one blocking
+issue (a stale `docs/type-reference.md` entry, mid-refactor at her
+review time -- closed as part of the same refactor), one near-blocking
+issue (an uncaught-exception crash on a resolution/shape mismatch --
+closed, `main()` now wraps both modes in `try/catch`), and one optional
+(explain the RAII `FileHandle` idiom explicitly -- closed, added to
+`restart_file.hpp`'s header comment), plus several concrete suggestions
+for the README section's content (now incorporated: the demo is a
+separate standalone run, not literally resuming the sweep's own
+`run_to`-driven execution; why `run_n_steps` instead of `run_to`; the
+non-portability limitation stated plainly, not just in the ADR).
+
+Known limitations (stated, not silently dropped):
+- CPU-only; no CUDA restart path. MPI-aware multi-block restart is
+  explicitly out of scope ("Task B," still unstarted) -- MPI in this
+  codebase today still only connects to `BurgersField`/
+  `ScalarAdvectionField`, unchanged by this task.
+- The restart format is not portable across machines/builds (no byte-
+  swapping; exact `sizeof(Scalar)`/component-count/grid-shape match
+  required) -- versioned so it can evolve, not yet solving cross-
+  machine portability or reacting-flow species metadata.
+- `regenerate_restart_checkpoints.sh` documents the intended PSC
+  Bridges-2 nightly workflow but does not execute it remotely -- no
+  live SSH/cron automation was set up in this task, per the user's own
+  explicit instruction.
+- `run_to`-driven (time-bounded) production runs are not directly
+  restart-resumable as-is (`run_n_steps` is step-count-bounded); a
+  future case wanting that would need a `t_start`-aware `run_to`
+  variant (see `docs/adr/0014-...md`'s Consequences/Revisit criteria).
+
 ## 2026-10-15 — Task 0017: Float precision — closing the dual-precision testing gap
 
 Agent: Claude Code (Robby)
@@ -6179,3 +6385,227 @@ that PR #9 is clean, using the same "re-derive which identifiers are
 genuine runtime indices in the merged code's actual shape" treatment --
 scope currently unknown in detail since PR #10 has not yet been opened
 and inspected for the specifics of its own conflicts.
+
+## 2026-10-18 — Resolved merge conflict: PR #10 x `main` (checkpoint/restart vs. `cfe::Index` + PR #6 cleanup)
+
+Agent: Claude Code (Robby)
+Model: Sonnet 5
+
+PR #10 (task 0016, checkpoint/restart, branch
+`cfe/development/restart-checkpoint`) went `CONFLICTING`/`DIRTY`
+against `main` -- it was still based on the pre-PR#7/PR#8 commit
+`f2f81d2`, while `main` had since gained PR #5 (multi-agent process),
+PR #7 (PR #6 cleanup), and PR #8 (task 0015, `cfe::Index` rename). Same
+situation as the PR #7 x PR #8 conflict above, one branch later: PR
+#10's new checkpoint/restart code was written entirely before
+`cfe::Index` existed, so every runtime index/count in it was still
+`std::size_t`.
+
+`git fetch origin && git merge origin/main` (merge commit, not rebase
+-- PR #10 is already open/pushed/under review). Resolved by hand:
+- `.gitignore`: kept `main`'s generalized `tutorials/*/data/**/*.vtk`
+  pattern (from the PR #7 cleanup's tutorial-data-commit-policy ADR)
+  and PR #10's new `*.cferst` checkpoint-ignore block; dropped PR #10's
+  now-superseded forward-step-specific `*.vtk` lines, which predated
+  that generalization.
+- `src/cfe/io/restart_file.hpp` (PR #10's new restart file format, not
+  present on `main` -- not a real conflict, but written entirely
+  against `std::size_t` before task 0015 existed): every genuine
+  runtime index/count/offset renamed to bare `Index` (`write_exact`/
+  `read_exact`'s `count`, `step`/`step64`, the `b`/`k`/`j`/`i`/`c`/
+  `out`/`in` loop variables, `flat_index(...)` results, `n_real_cells`
+  locals, `RestartCheckpointInfo::step`) -- `NComponents` (the template
+  parameter mirroring `FieldView`'s own NTTP) correctly left
+  `std::size_t`, and `RestartBlockShape`'s `std::uint64_t` fields left
+  untouched (deliberately fixed-width for the on-disk format, a
+  separate concern from the `Index`/`size_t` distinction entirely).
+  Added `#include "cfe/core/types.hpp"` (matching `io/vtk_writer.hpp`'s
+  own precedent for a header that names `Index` directly).
+- `tests/verification/forward_step_setup.hpp`: git auto-merged this
+  file with **no conflict flagged** (PR #10's new `run_n_steps`/
+  `write_restart`/`RestartInfo`/`read_restart` methods didn't overlap
+  textually with `main`'s pre-existing-code rename) -- but as a result
+  those new methods were the only part of this already-renamed file
+  still using `std::size_t`. Converted `run_n_steps`'s `n_steps`/`s`,
+  `write_restart`'s `step` parameter, and `RestartInfo::step` to
+  `cfe::Index`; `Dim`/`N` (this struct's pre-existing NTTP and its
+  local mirror) were untouched, both by `main`'s own earlier rename and
+  by this pass.
+- `tests/unit/test_restart_file.cpp`, `tests/unit/test_forward_step_restart.cpp`,
+  `tutorials/euler_2d_forward_step/forward_step_2d_restart_demo.cpp`
+  (all new in PR #10, no conflicts, but same pre-task-0015
+  `std::size_t` problem as the two files above): applied the identical
+  treatment for consistency, even though these three weren't in PR
+  #10's reported conflict surface -- not doing so would have left three
+  more pieces of brand-new code as the only `std::size_t` holdouts in
+  an otherwise fully-renamed codebase. In `test_restart_file.cpp`,
+  three `constexpr std::size_t N = ...;` locals (forwarded as the
+  `NComponents` template argument to `cfe::Field<Scalar, N>`/
+  `write_restart_checkpoint<Scalar, N, ...>`) are the same
+  local-constexpr-NTTP-mirror exception and were left `std::size_t`;
+  everything else (loop variables, cell indices, the
+  `ghost_cells_to_check` vector, `kContinuousSteps`/`kCheckpointAtStep`/
+  `kNz`/`kResolution`/`kDemoTotalSteps`/`kDemoCheckpointLeadSteps`) is a
+  genuine runtime value and became `cfe::Index`.
+- `docs/adr/0013-checkpoint-restart-format.md` -> renamed to
+  `docs/adr/0014-checkpoint-restart-format.md`: `main` had already
+  claimed ADR number 0013 for the PR #7 cleanup's
+  `tutorial-data-commit-policy.md`, which PR #10 (branched before that
+  existed) didn't know about -- not a git conflict (different
+  filenames), but a real numbering collision that would have left two
+  different ADRs claiming 0013. Updated every cross-reference
+  (`tutorials/euler_2d_forward_step/README.md`, `docs/type-reference.md`,
+  this file's own task-0016 entry below) to point at 0014; confirmed by
+  grep that no stale `0013-checkpoint` reference survived anywhere.
+- `docs/type-reference.md`: merged the conflicting intro-paragraph
+  summary sentence to mention Phase 4/the PR #6 cleanup task/task
+  0015's `cfe::Index`/task 0016's checkpoint-restart format together
+  (previously `HEAD` only named the last of these, `main` only the
+  first three); updated the restart-type rows' "See ADR 0013" ->
+  "See ADR 0014" and the `RestartCheckpointInfo::step` row's type from
+  `std::size_t` to `Index` to match the rename above. Every other row
+  from both sides (including task 0015's own `cfe::Index` row and the
+  five new `cfe::io::*` restart rows) merged in cleanly, untouched.
+- `agent_history.md`: spliced task 0016's entry into its correct
+  chronological slot by date -- task 0014 (2026-10-14), task 0015
+  (2026-10-14), task 0016 (2026-10-15), then the PR #7 x PR #8 merge
+  entry above (2026-10-16) -- rather than letting git's diff3 merge
+  concatenate them in branch order.
+
+Additional cleanup during review (Snorlax finding, see below):
+`src/cfe/io/restart_file.hpp`'s `RestartBlockShape::n_real_cells()` was
+dead code -- never called; both `write_restart_checkpoint` and
+`read_restart_checkpoint` instead recompute the identical
+`nx*ny*nz`-shaped quantity inline from the live `grid`. Deleted rather
+than wired in, since nothing needs it and the inline computation at
+each call site is already clear on its own.
+
+**Verification:** two fresh, separate clean rebuilds of the merged
+worktree, neither reusing a build directory from before the merge --
+(1) `-DCFE_BUILD_TESTS=ON -DCFE_BUILD_TUTORIALS=ON` (Release, no MPI):
+zero errors, every target built including
+`cfe_euler_2d_forward_step_restart_demo`; `cfe_unit_tests` **169/169**
+passed (the 158 `main` already had, plus PR #10's 11 new restart tests
+-- 8 in `test_restart_file.cpp`, 3 bit-for-bit tests in
+`test_forward_step_restart.cpp`). (2) Same configuration plus
+`-DCFE_ENABLE_MPI=ON`: zero errors, `ctest` 7/7 (the MPI-decomposition
+tests, untouched by this task but rebuilt to confirm the merge's
+`Index`-consistency changes didn't disturb them), `cfe_unit_tests`
+169/169 again. Reran `cfe_unit_tests` a third time after deleting
+`n_real_cells()` to confirm the cleanup changed nothing: still 169/169.
+
+Per CLAUDE.md's proportional-review rule (a conflict-resolution task on
+already-reviewed code, not new development): Violet and Snorlax were
+the two reviews judged necessary, same as both prior conflict
+resolutions tonight. **Violet** independently rebuilt the merged
+worktree from scratch herself in her own fresh build directories (both
+the plain and `-DCFE_ENABLE_MPI=ON` configurations), reran
+`cfe_unit_tests` (169/169 both times, not trusted from Robby's run),
+and read `restart_file.hpp`/`forward_step_setup.hpp`/
+`test_forward_step_restart.cpp` directly to confirm the bit-for-bit
+property is genuinely exercised: `check_blocks_bit_identical` uses
+exact `==` (not a tolerance), runs against the real two-block
+`BlockInterfaceBoundary` assembly (not a simplified stand-in), is
+guarded by an explicit anti-degeneracy check (the downstream state must
+actually have evolved away from the uniform inflow IC, ruling out a
+trivial "nothing changed" pass), directly verifies the ghost-cell-
+exclusion assumption by snapshotting four specific ghost cells across
+every boundary-condition case this geometry has and confirming
+`read_restart` leaves them untouched, and covers both `HllcFlux`
+(production's actual flux, different wave-speed machinery from the
+default `RusanovFlux`) and the 3D/periodic-Z case. She also diffed
+`c02ea31` (PR #10's pre-merge tip) against `9cd77c5` (the merge commit)
+for the five touched files and confirmed the `std::size_t`->`Index`
+rename is a true no-op (same width/signedness, no new narrowing casts
+or signed/unsigned comparisons, `%zu` format specifiers still correct)
+with zero compiler warnings on a touch-rebuild. One optional, non-
+blocking observation: the bit-for-bit test runs at toy scale
+(`cells_per_unit_height=10`, 60 steps) to establish the property
+quickly; it does not itself re-measure the production
+`res288_hllc`-scale wall-clock speedup number already recorded in
+`tutorials/euler_2d_forward_step/README.md` from before this merge --
+if that specific number is cited again, it should come from a fresh
+post-merge run, but this is a reporting-freshness note, not a
+correctness concern (the property being verified is resolution-
+independent). **Snorlax** independently re-derived, from
+`tasks/0015-index-type.md`'s own scope rules (not from Robby's
+classification), which identifiers in all five touched files are
+genuine runtime indices vs. NTTP-arity mirrors, and found zero
+misclassifications in either direction; confirmed the
+`RestartBlockShape::std::uint64_t` fields are correctly left alone (a
+separate, deliberate fixed-width-on-disk concern, not a missed
+rename); confirmed the 0013->0014 ADR renumber left no stale
+references anywhere (grepped the whole tree); and flagged the
+`n_real_cells()` dead code (addressed above, see "Additional cleanup").
+She also noted, as out-of-scope-for-this-PR, that the k/j/i-nested-
+loop-plus-`flat_index` real-cell traversal in `restart_file.hpp`
+duplicates a shape already used in `io/vtk_writer.hpp` and several
+`forward_step_setup.hpp` methods -- a real, pre-existing, recurring
+pattern worth a future `for_each_real_cell(grid, fn)` helper, but not
+introduced by this merge and not fixed here (AGENTS.md #6). Given both
+reviews came back with no blocking findings and the scope is a
+conflict reconciliation rather than new development, Ilia's
+independent final review and Amelia's alignment check were judged
+unnecessary, consistent with both prior resolutions tonight.
+
+Checked PR #11 (`cfe/development/agent-accumulated-knowledge`,
+markdown-only, already based on current `main`) for the same class of
+problem: confirmed separately, not addressed here since it needs no
+addressing (see this entry's own close-out below for its exact
+reported status).
+
+Next recommended task: whatever is next on `ROADMAP.md`'s own
+schedule. All four PRs opened tonight (#8, #9, #10, and the
+accumulated-knowledge PR #11) have now been checked for conflicts
+against `main`; #8 is merged, #9 and #10 are each individually
+`MERGEABLE`/`CLEAN` against `main` as of this entry (not against each
+other -- the two have not been cross-merged, since neither depends on
+the other's subject matter), and #11 was never in conflict.
+
+## 2026-10-19 — Resolved merge conflict (second round): PR #10 x `main` (after PR #9 also merged)
+
+Agent: Claude (main session, not a dispatched Robby task)
+Model: Sonnet 5
+
+PR #10 (task 0016, checkpoint/restart) went `CONFLICTING`/`DIRTY` a
+second time after the user merged PR #9 (task 0017, dual-precision
+testing) on top of PR #8 -- both PR #9 and PR #10 had independently
+appended their own `agent_history.md` entries (and, in PR #9's case,
+its own entry for resolving *its* conflict against PR #8) after the
+same point in the file's history, which Git could not auto-order.
+
+This was a pure history-file ordering conflict, not a code conflict:
+`git merge origin/main` in the `cfe/development/restart-checkpoint`
+worktree flagged `agent_history.md` as the only conflicting file;
+every other file (including the files touched by PR #10's first
+conflict-resolution round) merged cleanly. Resolved by extracting both
+sides' full pre-merge content (`git show HEAD:agent_history.md` /
+`git show origin/main:agent_history.md`), confirming the common prefix
+through Task 0015 was byte-identical, confirming the "PR #7 x PR #8"
+entry present in both tails was itself byte-identical (so only one
+copy was kept), and splicing the remaining entries into task-number/
+chronological order: Task 0016, Task 0017, the "PR #7 x PR #8" merge
+entry, the "PR #8 x PR #9" merge entry, then PR #10's own first
+conflict-resolution entry (this entry you're reading now comes last).
+
+No rebuild/retest was needed -- confirmed via `git merge origin/main`
+that no source file actually conflicted this time (PR #10's first
+resolution round already reconciled every code-level conflict against
+the `main` that existed at that point, and nothing PR #9 touched
+overlaps PR #10's own files beyond `agent_history.md` itself). This is
+lighter-weight than the prior two conflict-resolution rounds tonight
+and didn't need Violet/Snorlax review for that reason -- it is a pure
+text-merge of an append-only log, not a reconciliation of two
+independently-written pieces of logic.
+
+PR #10 is now `MERGEABLE`/`CLEAN` against the current `main` (which
+includes PR #5, #7, #8, and #9). PR #11 (`cfe/development/
+agent-accumulated-knowledge`) remains unaffected -- it is markdown-only
+and was never in conflict with any of this.
+
+Next recommended task: whatever is next on `ROADMAP.md`'s own
+schedule. This is expected to keep recurring in a small way every time
+one more already-reviewed, still-open PR merges while others remain
+open with their own `agent_history.md` entries pending -- worth
+batching the remaining merges (PR #10, then #11) close together to
+stop generating a fresh round of this each time.

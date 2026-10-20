@@ -34,6 +34,8 @@ add_executable(cfe_unit_tests
   unit/test_euler_3d_sanity.cpp
   unit/test_block_interface_boundary.cpp
   unit/test_forward_step_sanity.cpp
+  unit/test_restart_file.cpp
+  unit/test_forward_step_restart.cpp
   verification/test_euler_sod_shock_tube.cpp
   verification/test_euler_sod_shock_tube_hllc.cpp
   verification/test_euler_isolated_contact_hllc.cpp

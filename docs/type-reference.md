@@ -7,15 +7,17 @@ one is added; do not let it drift from the code. It is a reference, not
 a tutorial: for the reasoning behind a design, see the relevant ADR under
 `docs/adr/`.
 
-*Covers through the PR #6 cleanup task (tasks/0014-pr6-cleanup.md):
-Phase 1's scalar-advection solver (grid, boundary conditions,
-interface-value/numerical-flux, SSP-RK2, the
-`ScalarAdvectionField`/`FvmSolver` split), Phase 2's Burgers/MPI-
-decomposition work, Phase 3's `EulerField`, `SlipWallBoundary`, and the
-vector (system) `RusanovFlux` overload, task 0011's `HllcFlux`
-(`docs/adr/0012-hllc-numerical-flux.md`), Phase 4's forward-step/
-Shu-Osher/propagating-shock work, and the cleanup task's
-`cfe::abs_value` and `cfe::cartesian_fill`.*
+*Covers through task 0016's checkpoint/restart addition: Phase 1's
+scalar-advection solver (grid, boundary conditions, interface-value/
+numerical-flux, SSP-RK2, the `ScalarAdvectionField`/`FvmSolver` split),
+Phase 2's Burgers/MPI-decomposition work, Phase 3's `EulerField`,
+`SlipWallBoundary`, and the vector (system) `RusanovFlux` overload, task
+0011's `HllcFlux` (`docs/adr/0012-hllc-numerical-flux.md`), Phase 4's
+forward-step/Shu-Osher/propagating-shock work, the PR #6 cleanup task's
+(tasks/0014-pr6-cleanup.md) `cfe::abs_value` and `cfe::cartesian_fill`,
+task 0015's `cfe::Index` general-purpose runtime index type
+(tasks/0015-index-type.md), and task 0016's binary checkpoint/restart
+format (`docs/adr/0014-checkpoint-restart-format.md`).*
 
 ## `cfe::core` — precision, indexing, host/device macros
 
@@ -130,6 +132,11 @@ Where the physics-specific Calculator functions actually live (ARCHITECTURE.md
 | Type / function | File | What it is |
 |---|---|---|
 | `cfe::io::write_vtk_structured_points_cell_scalar<Scalar, Layout>(path, grid, field, scalar_name)` | `io/vtk_writer.hpp` | Writes one cell-centered scalar over a `CartesianGrid`'s *real* (non-ghost) cells as a legacy VTK `STRUCTURED_POINTS` ASCII file — an API over an established portable format (ARCHITECTURE.md #19), not a custom binary format. Host-only; not performance-sensitive by design (visualization snapshots, not checkpointing). Used by `tutorials/scalar_advection_3d_visualization/`. |
+| `cfe::io::kRestartFormatVersion` | `io/restart_file.hpp` | The on-disk checkpoint format's version number (currently `1`), written to every file and checked on read — bumping it is how a future incompatible format change (e.g. reacting-flow species metadata) gets detected rather than silently misread. See ADR 0014. |
+| `cfe::io::RestartBlockShape<Scalar>` | `io/restart_file.hpp` | One block's grid shape as written to a checkpoint file (`nx/ny/nz`, `ngx/ngy/ngz`, `dx/dy/dz`, `origin_x/y/z`) — `from_grid(grid)` builds one from a `CartesianGrid<Scalar>`; `matches(grid)` is an exact (not tolerance-based) equality check used by `read_restart_checkpoint` to reject a checkpoint that does not match the grid the caller already built. |
+| `cfe::io::write_restart_checkpoint<Scalar, NComponents, Layout>(path, grids, views, step, time)` | `io/restart_file.hpp` | Writes a multi-block binary checkpoint: file-level format version/`sizeof(Scalar)`/component-count/step/time, then per block its `RestartBlockShape` and every REAL cell's raw state (ghost cells excluded — see this header's doc comment for why that is safe). `grids`/`views` (a `std::vector<CartesianGrid<Scalar>>` / `std::vector<FieldView<const Scalar,...>>`) must be the same length, in the same block order `read_restart_checkpoint` will later use. Not performance-sensitive by design (one bulk read/write per block, run once per checkpoint, not per step). See ADR 0014. |
+| `cfe::io::RestartCheckpointInfo<Scalar>` | `io/restart_file.hpp` | What `read_restart_checkpoint` returns by value: `step` (`Index`) and `time` (`Scalar`) bundled together — two halves of one "what did this checkpoint record" concept, not split across a return value and an out-parameter. |
+| `cfe::io::read_restart_checkpoint<Scalar, NComponents, Layout>(path, grids, views)` → `RestartCheckpointInfo<Scalar>` | `io/restart_file.hpp` | Reads a checkpoint written by `write_restart_checkpoint` directly into caller-owned `views` (ghost cells left untouched); throws `std::runtime_error` on any format-version/`sizeof(Scalar)`/component-count/block-shape mismatch rather than silently misreading. See ADR 0014 and `tests/unit/test_restart_file.cpp`/`test_forward_step_restart.cpp`. |
 
 ## Test framework
 
