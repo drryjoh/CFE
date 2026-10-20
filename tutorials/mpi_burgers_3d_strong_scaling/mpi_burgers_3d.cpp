@@ -52,7 +52,17 @@
 
 namespace {
 
-using Scalar = double;
+// Precision is `cfe::scalar` (core/types.hpp, project-wide via
+// `-DCFE_SCALAR_TYPE`), same convention
+// `tutorials/burgers_3d_visualization/` already established -- this file
+// previously hardcoded `double` here (task 0017 finding: this is the
+// simulation/field precision, not a reported metric, so it must track
+// the build's chosen precision for a float build's strong-scaling numbers
+// to actually reflect the float path). The wall-clock timing captured
+// below stays plain `double` regardless -- that is a reported metric,
+// not simulation state, matching this project's existing convention for
+// timing/metric values.
+using Scalar = cfe::scalar;
 
 constexpr cfe::Index kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
 constexpr Scalar kCfl = 0.3;           // matches tutorials/burgers_3d_visualization/'s own choice

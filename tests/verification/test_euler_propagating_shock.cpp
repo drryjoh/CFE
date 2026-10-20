@@ -31,8 +31,26 @@
 // independently, plus a direct check that both fluxes agree with each
 // other (same physical shock, should converge to the same speed,
 // verified rather than assumed).
+//
+// Dual-precision instantiation (task 0017): both resolution-sweep
+// checks and the cross-flux-agreement check below are `template
+// <class Scalar>` functions, instantiated at `double` and `float` with
+// IDENTICAL numeric floors/tolerances -- measured (this task's own
+// calibration), uniquely among this task's 6 verification files, this
+// problem's error/agreement numbers come out nearly indistinguishable
+// between the two precisions at every resolution tested (100/200/400/
+// 800): e.g. the finest-resolution floor this file checks is 0.001,
+// against a measured error of ~0.000044 (double) vs. ~0.000040 (float)
+// for Rusanov, and ~0.000071 (double) vs. ~0.000072 (float) for HLLC --
+// both already >10x inside the floor at EITHER precision, and the
+// float-vs-double difference is far smaller than the resolution-to-
+// resolution changes the trend check itself requires. The Rankine-
+// Hugoniot jump itself (`kJump`) is computed once, in `double`, shared
+// unchanged by both `Scalar` instantiations below -- it is this file's
+// oracle, not simulation state (same convention used project-wide).
 #include <cmath>
 #include <cstdio>
+#include <type_traits>
 #include <vector>
 
 #include "cfe/core/types.hpp"
@@ -43,11 +61,10 @@
 
 namespace {
 
-using Scalar = double;
-constexpr Scalar kGamma = Scalar(1.4);
-constexpr Scalar kMach = Scalar(2.0);
-constexpr Scalar kX0 = Scalar(0.2);
-constexpr Scalar kCfl = Scalar(0.4);
+constexpr double kGamma = 1.4;
+constexpr double kMach = 2.0;
+constexpr double kX0 = 0.2;
+constexpr double kCfl = 0.4;
 
 const cfe_verification::NormalShockJump kJump =
     cfe_verification::normal_shock_jump(kGamma, /*rho_ahead=*/1.0, /*p_ahead=*/1.0, kMach);
@@ -56,6 +73,7 @@ const cfe_verification::NormalShockJump kJump =
 // shock (speed ~2.3664) starts at x=0.2 and reaches ~0.2+2.3664*0.2 =
 // 0.6733 by t_final=0.2 -- comfortably inside [0,1] with margin on both
 // sides for the whole run.
+template <class Scalar>
 std::vector<Scalar> output_times()
 {
   std::vector<Scalar> times;
@@ -69,11 +87,11 @@ std::vector<Scalar> output_times()
 // snapshots' own actually-recorded time (not an assumed uniform
 // spacing -- see propagating_shock_setup.hpp's header comment on why
 // CFL-adaptive stepping makes that necessary).
-template <class NumericalFlux>
+template <class Scalar, class NumericalFlux>
 double measured_shock_speed(cfe::Index nx)
 {
-  const auto snapshots =
-      cfe_verification::run_propagating_shock<Scalar, NumericalFlux>(nx, kGamma, kJump, kX0, output_times(), kCfl);
+  const auto snapshots = cfe_verification::run_propagating_shock<Scalar, NumericalFlux>(
+      nx, Scalar(kGamma), kJump, Scalar(kX0), output_times<Scalar>(), Scalar(kCfl));
 
   std::vector<double> times, positions;
   times.reserve(snapshots.size());
@@ -86,6 +104,12 @@ double measured_shock_speed(cfe::Index nx)
   return cfe_verification::least_squares_slope(times, positions);
 }
 
+template <class Scalar>
+const char* scalar_name()
+{
+  return std::is_same_v<Scalar, float> ? "float" : "double";
+}
+
 }  // namespace
 
 CFE_TEST(test_propagating_shock_rankine_hugoniot_jump_matches_hand_derivation)
@@ -93,63 +117,97 @@ CFE_TEST(test_propagating_shock_rankine_hugoniot_jump_matches_hand_derivation)
   // Cross-check normal_shock_jump's own formulas against the
   // independently hand-derived values recorded in
   // tasks/0013-phase4-propagating-shock-tracking.md before trusting it
-  // as this test's oracle.
+  // as this test's oracle. `kJump` is always `double` -- no `Scalar`
+  // dependence here, so no float counterpart is needed.
   CFE_CHECK_NEAR(kJump.behind.rho, 2.666667, 1e-5);
   CFE_CHECK_NEAR(kJump.behind.u, 1.479020, 1e-5);
   CFE_CHECK_NEAR(kJump.behind.p, 4.5, 1e-10);
   CFE_CHECK_NEAR(kJump.shock_speed, 2.366432, 1e-5);
 }
 
-CFE_TEST(test_propagating_shock_rusanov_speed_error_decreases_with_resolution)
+template <class Scalar>
+void check_propagating_shock_rusanov_speed_error_decreases_with_resolution()
 {
-  const double error_coarse = std::fabs(measured_shock_speed<cfe::RusanovFlux>(100) - kJump.shock_speed);
-  const double error_mid = std::fabs(measured_shock_speed<cfe::RusanovFlux>(200) - kJump.shock_speed);
-  const double error_fine = std::fabs(measured_shock_speed<cfe::RusanovFlux>(400) - kJump.shock_speed);
-  const double error_finest = std::fabs(measured_shock_speed<cfe::RusanovFlux>(800) - kJump.shock_speed);
+  const double error_coarse = std::fabs(measured_shock_speed<Scalar, cfe::RusanovFlux>(100) - kJump.shock_speed);
+  const double error_mid = std::fabs(measured_shock_speed<Scalar, cfe::RusanovFlux>(200) - kJump.shock_speed);
+  const double error_fine = std::fabs(measured_shock_speed<Scalar, cfe::RusanovFlux>(400) - kJump.shock_speed);
+  const double error_finest = std::fabs(measured_shock_speed<Scalar, cfe::RusanovFlux>(800) - kJump.shock_speed);
   std::printf(
-      "[info] Rusanov propagating-shock speed error vs nx: 100=%.6f 200=%.6f 400=%.6f 800=%.6f "
+      "[info] Rusanov propagating-shock speed error vs nx (Scalar=%s): 100=%.6f 200=%.6f 400=%.6f 800=%.6f "
       "(analytic=%.6f)\n",
-      error_coarse, error_mid, error_fine, error_finest, kJump.shock_speed);
+      scalar_name<Scalar>(), error_coarse, error_mid, error_fine, error_finest, kJump.shock_speed);
 
   CFE_CHECK(error_mid <= error_coarse);
   CFE_CHECK(error_fine <= error_mid);
   CFE_CHECK(error_finest <= error_fine);
   // Absolute floor at the finest resolution tested, set with margin
-  // over the measured ~0.000044.
+  // over the measured ~0.000044 (double) / ~0.000040 (float) -- same
+  // floor at both precisions, see this file's header comment.
   CFE_CHECK(error_finest < 0.001);
 }
 
-CFE_TEST(test_propagating_shock_hllc_speed_error_decreases_with_resolution)
+CFE_TEST(test_propagating_shock_rusanov_speed_error_decreases_with_resolution_double)
 {
-  const double error_coarse = std::fabs(measured_shock_speed<cfe::HllcFlux>(100) - kJump.shock_speed);
-  const double error_mid = std::fabs(measured_shock_speed<cfe::HllcFlux>(200) - kJump.shock_speed);
-  const double error_fine = std::fabs(measured_shock_speed<cfe::HllcFlux>(400) - kJump.shock_speed);
-  const double error_finest = std::fabs(measured_shock_speed<cfe::HllcFlux>(800) - kJump.shock_speed);
+  check_propagating_shock_rusanov_speed_error_decreases_with_resolution<double>();
+}
+CFE_TEST(test_propagating_shock_rusanov_speed_error_decreases_with_resolution_float)
+{
+  check_propagating_shock_rusanov_speed_error_decreases_with_resolution<float>();
+}
+
+template <class Scalar>
+void check_propagating_shock_hllc_speed_error_decreases_with_resolution()
+{
+  const double error_coarse = std::fabs(measured_shock_speed<Scalar, cfe::HllcFlux>(100) - kJump.shock_speed);
+  const double error_mid = std::fabs(measured_shock_speed<Scalar, cfe::HllcFlux>(200) - kJump.shock_speed);
+  const double error_fine = std::fabs(measured_shock_speed<Scalar, cfe::HllcFlux>(400) - kJump.shock_speed);
+  const double error_finest = std::fabs(measured_shock_speed<Scalar, cfe::HllcFlux>(800) - kJump.shock_speed);
   std::printf(
-      "[info] HLLC propagating-shock speed error vs nx: 100=%.6f 200=%.6f 400=%.6f 800=%.6f "
+      "[info] HLLC propagating-shock speed error vs nx (Scalar=%s): 100=%.6f 200=%.6f 400=%.6f 800=%.6f "
       "(analytic=%.6f)\n",
-      error_coarse, error_mid, error_fine, error_finest, kJump.shock_speed);
+      scalar_name<Scalar>(), error_coarse, error_mid, error_fine, error_finest, kJump.shock_speed);
 
   CFE_CHECK(error_mid <= error_coarse);
   CFE_CHECK(error_fine <= error_mid);
   CFE_CHECK(error_finest <= error_fine);
   // Absolute floor at the finest resolution tested, set with margin
-  // over the measured ~0.000071.
+  // over the measured ~0.000071 (double) / ~0.000072 (float) -- same
+  // floor at both precisions, see this file's header comment.
   CFE_CHECK(error_finest < 0.001);
 }
 
-CFE_TEST(test_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed)
+CFE_TEST(test_propagating_shock_hllc_speed_error_decreases_with_resolution_double)
+{
+  check_propagating_shock_hllc_speed_error_decreases_with_resolution<double>();
+}
+CFE_TEST(test_propagating_shock_hllc_speed_error_decreases_with_resolution_float)
+{
+  check_propagating_shock_hllc_speed_error_decreases_with_resolution<float>();
+}
+
+template <class Scalar>
+void check_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed()
 {
   // Both fluxes model the SAME physical shock, so their measured speeds
   // should agree with each other closely at a shared resolution --
   // checked directly rather than assumed, per the task's own explicit
   // "verify this for real" instruction. Measured difference at nx=400:
-  // ~0.000085 (Rusanov=2.366554, HLLC=2.366639) -- both converge to the
-  // same physical speed, as expected.
+  // ~0.000085 (double: Rusanov=2.366554, HLLC=2.366639) / ~0.000086
+  // (float) -- both converge to the same physical speed, as expected,
+  // at either precision.
   const cfe::Index nx = 400;
-  const double rusanov_speed = measured_shock_speed<cfe::RusanovFlux>(nx);
-  const double hllc_speed = measured_shock_speed<cfe::HllcFlux>(nx);
-  std::printf("[info] Propagating-shock measured speed at nx=%zu: Rusanov=%.6f, HLLC=%.6f (analytic=%.6f)\n", nx,
-              rusanov_speed, hllc_speed, kJump.shock_speed);
+  const double rusanov_speed = measured_shock_speed<Scalar, cfe::RusanovFlux>(nx);
+  const double hllc_speed = measured_shock_speed<Scalar, cfe::HllcFlux>(nx);
+  std::printf("[info] Propagating-shock measured speed at nx=%zu (Scalar=%s): Rusanov=%.6f, HLLC=%.6f (analytic=%.6f)\n",
+              nx, scalar_name<Scalar>(), rusanov_speed, hllc_speed, kJump.shock_speed);
   CFE_CHECK(std::fabs(rusanov_speed - hllc_speed) < 0.001);
+}
+
+CFE_TEST(test_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed_double)
+{
+  check_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed<double>();
+}
+CFE_TEST(test_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed_float)
+{
+  check_propagating_shock_rusanov_and_hllc_measure_the_same_physical_speed<float>();
 }

@@ -67,6 +67,20 @@ inline int run_all()
 #define CFE_CONCAT_(a, b) a##b
 #define CFE_CONCAT(a, b) CFE_CONCAT_(a, b)
 
+// A check that must be validated at more than one type (most commonly
+// `float` AND `double` -- see `test_fixed_array.cpp` for the original
+// example, and `docs/adr/0014-dual-precision-verification-requirement.md`
+// for why both precisions matter and how a widened tolerance gets
+// justified) is written as a single `template <class Scalar> void
+// check_X(...)` function holding the actual logic, then registered
+// under TWO separate `CFE_TEST` entries below it (conventionally named
+// `..._double`/`..._float`), each just calling
+// `check_X<double>(...)`/`check_X<float>(...)`. This two-registration
+// shape exists because `CFE_TEST` (below) wraps exactly one ordinary,
+// non-template function into the registry -- it has no way to
+// instantiate a template itself, so the double registration has to be
+// written out by hand, once per type, rather than generated
+// automatically from one macro invocation.
 #define CFE_TEST(test_name)                                                              \
   static void test_name();                                                               \
   namespace {                                                                            \
@@ -90,6 +104,14 @@ inline int run_all()
 // CPU/GPU cross-backend agreement test (this project's primary
 // correctness gate for CUDA) must not have (caught in code review; see
 // agent_history.md).
+// `a`/`b` are always widened to `double` below regardless of their own
+// type -- a call site that already writes
+// `CFE_CHECK_NEAR(static_cast<double>(x), ..., tol)` explicitly (common
+// in dual-precision `Scalar` tests, task 0017) is not wrong, just
+// redundant with what this macro already does internally; such call
+// sites do it anyway purely for self-documentation ("this comparison is
+// always evaluated in double"), not because omitting it would compare
+// at a narrower type.
 #define CFE_CHECK_NEAR(a, b, tol)                                                              \
   do {                                                                                         \
     const auto cfe_check_near_a_ = (a);                                                        \

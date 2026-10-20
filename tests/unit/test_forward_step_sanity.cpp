@@ -9,6 +9,17 @@
 // tutorials/euler_2d_forward_step/ and
 // tutorials/euler_3d_forward_step_extrusion/ -- this is the fast,
 // CI-sized regression guard, run at both Dim=2 and Dim=3.
+//
+// Dual-precision instantiation (task 0017): also templated on `Scalar`
+// now (previously hardcoded `double`), run at both `double` and `float`
+// for each of Dim=2/3 -- these checks are all "stays finite and
+// physical", not tight numeric comparisons, so no tolerance widening is
+// needed at float; the point is confirming the coupled two-block
+// stage-interleaved stepping does not itself introduce a float-specific
+// instability (e.g. from the near-vacuum floors in hllc.hpp/rusanov.hpp
+// sitting much closer to float's own epsilon -- see
+// test_hllc_flux.cpp's header comment) that a generic-but-unverified
+// template parameter would hide.
 #include <cmath>
 #include <cstddef>
 
@@ -19,9 +30,7 @@
 
 namespace {
 
-using Scalar = double;
-
-template <std::size_t Dim>
+template <class Scalar, std::size_t Dim>
 void run_short_sanity_check(cfe::Index nz_cells)
 {
   cfe_verification::ForwardStepBlocks<Scalar, Dim> blocks(10, nz_cells, Scalar(0.2));
@@ -58,14 +67,22 @@ void run_short_sanity_check(cfe::Index nz_cells)
 
 }  // namespace
 
-CFE_TEST(test_forward_step_2d_short_run_stays_finite_and_physical)
+CFE_TEST(test_forward_step_2d_short_run_stays_finite_and_physical_double)
 {
-  run_short_sanity_check<2>(1);
+  run_short_sanity_check<double, 2>(1);
+}
+CFE_TEST(test_forward_step_2d_short_run_stays_finite_and_physical_float)
+{
+  run_short_sanity_check<float, 2>(1);
 }
 
-CFE_TEST(test_forward_step_3d_short_run_stays_finite_and_physical)
+CFE_TEST(test_forward_step_3d_short_run_stays_finite_and_physical_double)
 {
-  run_short_sanity_check<3>(4);
+  run_short_sanity_check<double, 3>(4);
+}
+CFE_TEST(test_forward_step_3d_short_run_stays_finite_and_physical_float)
+{
+  run_short_sanity_check<float, 3>(4);
 }
 
 // Directly checks the memory-layout claim this task's `BlockSet` refactor
@@ -74,8 +91,13 @@ CFE_TEST(test_forward_step_3d_short_run_stays_finite_and_physical)
 // immediately after block1's in ONE allocation, rather than two
 // allocations that merely happen to produce the same numbers. Computed
 // from `n_cells()`/`n_components()`, not hardcoded, so it stays correct
-// at any grid resolution.
-CFE_TEST(test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation)
+// at any grid resolution. This is a memory-layout claim, not a numeric
+// one, so a `Scalar` template parameter is the only thing float coverage
+// adds here -- included for completeness/consistency with the rest of
+// this file now being dual-precision, not because the layout claim
+// itself is expected to differ by precision.
+template <class Scalar>
+void check_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation()
 {
   cfe_verification::ForwardStepBlocks<Scalar, 2> blocks(10);
   using Field = cfe::EulerField<Scalar, 2>;
@@ -89,4 +111,13 @@ CFE_TEST(test_forward_step_block_set_buffers_are_genuinely_one_contiguous_alloca
   check_contiguous(blocks.state_blocks);
   check_contiguous(blocks.stage1_blocks);
   check_contiguous(blocks.scratch_blocks);
+}
+
+CFE_TEST(test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation_double)
+{
+  check_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation<double>();
+}
+CFE_TEST(test_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation_float)
+{
+  check_forward_step_block_set_buffers_are_genuinely_one_contiguous_allocation<float>();
 }

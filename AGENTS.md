@@ -203,6 +203,24 @@ Define independent index types for local and global indexing as required.
 
 Do not use `long` or `long long` as floating-point precision options.
 
+Every PR that introduces or changes numerical production code (a Field,
+Calculator, numerical flux, reconstruction scheme, boundary condition,
+time integrator, or anything else templated on `Scalar`) must pass its
+relevant tests under BOTH `-DCFE_SCALAR_TYPE=float` and
+`-DCFE_SCALAR_TYPE=double`, in the same PR -- the same standing-policy
+shape as the existing "every PR adding a Field/scheme needs a 3D CUDA
+correctness test + at-scale benchmark" requirement (`agent_history.md`'s
+2026-10-02 entry; ADR 0011/0012). A new test file exercises both
+precisions as a `template <class Scalar>` check registered under two
+`CFE_TEST` entries (`..._double`/`..._float`), per `test_fixed_array.cpp`'s
+original pattern -- not a file-scope `using Scalar = double;` alias,
+which silently defeats `-DCFE_SCALAR_TYPE=float` regardless of what the
+rest of the build is configured to. See
+`docs/adr/0014-dual-precision-verification-requirement.md` for the full
+rationale, the gap that motivated it (task 0017), and the tolerance-
+derivation convention (measure the real float-vs-double error before
+widening any tolerance; many need no widening at all).
+
 ## 12. State representation
 
 Physics states should have compile-time-known structure whenever practical.
