@@ -10,10 +10,15 @@
 // "simulate it" part is shared.
 //
 // Templated on `Scalar` (not hardcoded `double`) so the tutorial can run
-// it at `cfe::scalar` (switchable via `-DCFE_SCALAR_TYPE`) while the
-// test runs it at a fixed `double` for oracle-comparison precision --
-// the same split every other dual-precision-aware file in this codebase
-// uses.
+// it at `cfe::scalar` (switchable via `-DCFE_SCALAR_TYPE`), and so
+// (task 0017) `tests/verification/test_euler_sod_shock_tube.cpp` and
+// its siblings can instantiate the SAME driver at both `double` and
+// `float` to verify both precisions, not just one. The actual
+// double-only oracle this driver's own callers compare against is a
+// SEPARATE file, `sod_shock_tube_exact.hpp` (an exact Riemann solver,
+// deliberately plain `double` regardless of what `Scalar` this driver
+// itself runs at -- see that file's own header comment for why) -- not
+// this driver, which has no fixed precision of its own.
 //
 // Also templated on `NumericalFlux` (default `cfe::RusanovFlux`, every
 // existing call site unaffected) so task 0011's HLLC re-verification

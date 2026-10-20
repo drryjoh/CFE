@@ -6,6 +6,28 @@
 // must treat the normal momentum component differently from every
 // tangential one, and the PVRS wave-speed estimate must stay robust at
 // its documented weak point (a strong double rarefaction).
+//
+// Dual-precision instantiation (task 0017, "every numerical component
+// must be validated at float AND double, not just generic-but-
+// unverified"): every check below is a `template <class Scalar>`
+// function, instantiated once at `double` (identical tolerances to
+// before this task) and once at `float`, mirroring
+// `test_fixed_array.cpp`'s established
+// `check_X<T>()` + two `CFE_TEST` entries shape. Tolerances that must
+// widen at `float` are each justified by a MEASURED error (same
+// calibration harness/methodology this file's own double-precision
+// tolerances already used), not guessed -- see each check's own
+// comment. Most of these checks turned out to need NO widening at all:
+// they are either exact-cancellation identities that hold to the same
+// bit-level degree at either precision (equal-states reduction, mirror
+// symmetry, the star-state hand formulas, the symmetric-collision
+// s_star check, HLLC's isolated-contact exactness), or already loose
+// enough (the Sod-rarefaction s_star estimate, the double-rarefaction
+// sanity floor) that float's own ~1.2e-7 epsilon is nowhere near the
+// tolerance's own margin. Only tests that accumulate real
+// floating-point rounding across a Newton iteration or several
+// arithmetic steps (the wall-reflection regression's `s_star`/flux
+// components) need a widened, float-epsilon-scaled tolerance.
 #include <cmath>
 
 #include "cfe/core/types.hpp"
@@ -16,8 +38,7 @@
 
 namespace {
 
-using Scalar = double;
-constexpr Scalar kGamma = Scalar(1.4);
+constexpr double kGammaValue = 1.4;
 
 }  // namespace
 
@@ -26,9 +47,16 @@ constexpr Scalar kGamma = Scalar(1.4);
 // (test_euler_rusanov_flux_reduces_to_physical_flux_for_equal_states);
 // see hllc.hpp's header comment for why this holds exactly (S_star
 // reduces to u_axis, q*_K reduces to q_K) for HLLC specifically, not
-// just approximately.
+// just approximately. Measured (this file's own calibration): this
+// identity holds to EXACT (0.0) floating-point equality at both double
+// and float on this toolchain (arm64/AppleClang) -- the algebra is a
+// pure identity (no subtraction-of-close-quantities cancellation), so
+// 1e-10 at double and a float-epsilon-scaled 1e-5 at float both keep a
+// large margin without being tightened to the point of flakiness across
+// toolchains.
 
-CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_1d)
+template <class Scalar>
+void check_hllc_flux_reduces_to_physical_flux_for_equal_states_1d(double tol)
 {
   const cfe::EulerField<Scalar, 1> field{};
   cfe::Vector<Scalar, 1> velocity;
@@ -36,10 +64,20 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_1d)
   const cfe::State<Scalar, 3> q = field.conserved_from_primitive(Scalar(1.0), velocity, Scalar(1.0));
   const cfe::State<Scalar, 3> flux = cfe::hllc_flux(q, q, cfe::Axis::X, field);
   const cfe::State<Scalar, 3> expected = field.physical_flux(q, cfe::Axis::X);
-  for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
+  for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK_NEAR(static_cast<double>(flux[c]), static_cast<double>(expected[c]), tol);
 }
 
-CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d)
+CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_1d_double)
+{
+  check_hllc_flux_reduces_to_physical_flux_for_equal_states_1d<double>(1e-10);
+}
+CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_1d_float)
+{
+  check_hllc_flux_reduces_to_physical_flux_for_equal_states_1d<float>(1e-5);
+}
+
+template <class Scalar>
+void check_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d(double tol)
 {
   // Nonzero tangential (Y) velocity specifically: a bug that applies the
   // normal-velocity star formula to every momentum component would still
@@ -55,11 +93,23 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangentia
   for (cfe::Axis axis : {cfe::Axis::X, cfe::Axis::Y}) {
     const cfe::State<Scalar, 4> flux = cfe::hllc_flux(q, q, axis, field);
     const cfe::State<Scalar, 4> expected = field.physical_flux(q, axis);
-    for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
+    for (cfe::Index c = 0; c < 4; ++c) {
+      CFE_CHECK_NEAR(static_cast<double>(flux[c]), static_cast<double>(expected[c]), tol);
+    }
   }
 }
 
-CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_3d)
+CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d_double)
+{
+  check_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d<double>(1e-10);
+}
+CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d_float)
+{
+  check_hllc_flux_reduces_to_physical_flux_for_equal_states_with_tangential_velocity_2d<float>(1e-5);
+}
+
+template <class Scalar>
+void check_hllc_flux_reduces_to_physical_flux_for_equal_states_3d(double tol)
 {
   const cfe::EulerField<Scalar, 3> field{};
   cfe::Vector<Scalar, 3> velocity;
@@ -70,8 +120,19 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_3d)
   for (cfe::Axis axis : {cfe::Axis::X, cfe::Axis::Y, cfe::Axis::Z}) {
     const cfe::State<Scalar, 5> flux = cfe::hllc_flux(q, q, axis, field);
     const cfe::State<Scalar, 5> expected = field.physical_flux(q, axis);
-    for (cfe::Index c = 0; c < 5; ++c) CFE_CHECK_NEAR(flux[c], expected[c], 1e-10);
+    for (cfe::Index c = 0; c < 5; ++c) {
+      CFE_CHECK_NEAR(static_cast<double>(flux[c]), static_cast<double>(expected[c]), tol);
+    }
   }
+}
+
+CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_3d_double)
+{
+  check_hllc_flux_reduces_to_physical_flux_for_equal_states_3d<double>(1e-10);
+}
+CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_3d_float)
+{
+  check_hllc_flux_reduces_to_physical_flux_for_equal_states_3d<float>(1e-5);
 }
 
 // --- Mirror symmetry (1D) -----------------------------------------------
@@ -81,9 +142,14 @@ CFE_TEST(test_hllc_flux_reduces_to_physical_flux_for_equal_states_3d)
 // flux component's sign unchanged -- a transposition bug in the
 // left/right or S_L/S_R roles would generally break this (it is not
 // satisfied "by accident" the way the equal-states check above could be
-// for a sufficiently symmetric bug).
+// for a sufficiently symmetric bug). Measured: exact at both precisions
+// on this toolchain (the mirrored construction reproduces the identical
+// sequence of operations, just negated, so there is no cancellation to
+// amplify roundoff) -- the float tolerance below still keeps a wide,
+// float-epsilon-scaled margin for portability to other toolchains.
 
-CFE_TEST(test_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_reflection)
+template <class Scalar>
+void check_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_reflection(double tol)
 {
   const cfe::EulerField<Scalar, 1> field{};
   cfe::Vector<Scalar, 1> vL, vR;
@@ -107,9 +173,18 @@ CFE_TEST(test_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_
 
   const cfe::State<Scalar, 3> flux_mirrored = cfe::hllc_flux(q_left_mirrored, q_right_mirrored, cfe::Axis::X, field);
 
-  CFE_CHECK_NEAR(flux_mirrored[0], -flux[0], 1e-10);
-  CFE_CHECK_NEAR(flux_mirrored[1], flux[1], 1e-10);
-  CFE_CHECK_NEAR(flux_mirrored[2], -flux[2], 1e-10);
+  CFE_CHECK_NEAR(static_cast<double>(flux_mirrored[0]), static_cast<double>(-flux[0]), tol);
+  CFE_CHECK_NEAR(static_cast<double>(flux_mirrored[1]), static_cast<double>(flux[1]), tol);
+  CFE_CHECK_NEAR(static_cast<double>(flux_mirrored[2]), static_cast<double>(-flux[2]), tol);
+}
+
+CFE_TEST(test_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_reflection_double)
+{
+  check_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_reflection<double>(1e-10);
+}
+CFE_TEST(test_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_reflection_float)
+{
+  check_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_reflection<float>(1e-5);
 }
 
 // --- Star-state formula: normal vs. tangential momentum (the bug this
@@ -119,9 +194,14 @@ CFE_TEST(test_hllc_flux_is_odd_in_mass_and_energy_even_in_momentum_under_mirror_
 // outer `hllc_flux` picks) -- hand-computed against the formula in this
 // file's own header comment, with arbitrary (not physically-solved)
 // `S_K`/`S_star` values chosen only to keep every denominator away from
-// zero.
+// zero. Measured: exact (0.0) at both precisions on this toolchain;
+// float tolerances below are a generous, non-zero margin for
+// portability, not a reflection of an actually-measured loss of
+// precision.
 
-CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_x)
+template <class Scalar>
+void check_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_x(double tol_state,
+                                                                                                  double tol_energy)
 {
   const cfe::EulerField<Scalar, 2> field{};
   cfe::Vector<Scalar, 2> velocity;
@@ -135,17 +215,30 @@ CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_origin
   const cfe::State<Scalar, 4> q_star = cfe::detail::hllc_star_state(q, s_k, s_star, cfe::Axis::X, field);
 
   const Scalar u = velocity[0], v = velocity[1];
+  const Scalar gamma = Scalar(kGammaValue);
   const Scalar density_star = rho * (s_k - u) / (s_k - s_star);
-  const Scalar E = p / (kGamma - Scalar(1)) + Scalar(0.5) * rho * (u * u + v * v);
+  const Scalar E = p / (gamma - Scalar(1)) + Scalar(0.5) * rho * (u * u + v * v);
   const Scalar expected_energy = density_star * (E / rho + (s_star - u) * (s_star + p / (rho * (s_k - u))));
 
-  CFE_CHECK_NEAR(q_star[0], density_star, 1e-12);
-  CFE_CHECK_NEAR(q_star[1], density_star * s_star, 1e-12);  // normal (X) momentum: S_star
-  CFE_CHECK_NEAR(q_star[2], density_star * v, 1e-12);       // tangential (Y) momentum: original v, NOT s_star
-  CFE_CHECK_NEAR(q_star[3], expected_energy, 1e-10);
+  CFE_CHECK_NEAR(static_cast<double>(q_star[0]), static_cast<double>(density_star), tol_state);
+  CFE_CHECK_NEAR(static_cast<double>(q_star[1]), static_cast<double>(density_star * s_star),
+                 tol_state);  // normal (X) momentum: S_star
+  CFE_CHECK_NEAR(static_cast<double>(q_star[2]), static_cast<double>(density_star * v),
+                 tol_state);  // tangential (Y) momentum: original v, NOT s_star
+  CFE_CHECK_NEAR(static_cast<double>(q_star[3]), static_cast<double>(expected_energy), tol_energy);
 }
 
-CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_y)
+CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_x_double)
+{
+  check_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_x<double>(1e-12, 1e-10);
+}
+CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_x_float)
+{
+  check_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_x<float>(1e-5, 1e-4);
+}
+
+template <class Scalar>
+void check_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_y(double tol_state)
 {
   // Same check with the roles of X/Y swapped (axis = Y) -- guards
   // against an axis mixup in `momentum_index(axis)` specifically (a bug
@@ -165,14 +258,31 @@ CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_origin
   const Scalar u_tangential = velocity[0], v_normal = velocity[1];
   const Scalar density_star = rho * (s_k - v_normal) / (s_k - s_star);
 
-  CFE_CHECK_NEAR(q_star[0], density_star, 1e-12);
-  CFE_CHECK_NEAR(q_star[1], density_star * u_tangential, 1e-12);  // tangential (X) momentum
-  CFE_CHECK_NEAR(q_star[2], density_star * s_star, 1e-12);        // normal (Y) momentum: S_star
+  CFE_CHECK_NEAR(static_cast<double>(q_star[0]), static_cast<double>(density_star), tol_state);
+  CFE_CHECK_NEAR(static_cast<double>(q_star[1]), static_cast<double>(density_star * u_tangential),
+                 tol_state);  // tangential (X) momentum
+  CFE_CHECK_NEAR(static_cast<double>(q_star[2]), static_cast<double>(density_star * s_star),
+                 tol_state);  // normal (Y) momentum: S_star
+}
+
+CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_y_double)
+{
+  check_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_y<double>(1e-12);
+}
+CFE_TEST(test_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_y_float)
+{
+  check_hllc_star_state_normal_momentum_uses_s_star_tangential_uses_original_velocity_axis_y<float>(1e-5);
 }
 
 // --- S_star cross-checked against the independent exact Riemann solver --
+// The oracle (`cfe_verification::solve_star_region`) is always evaluated
+// in `double` regardless of `Scalar` -- it is a reference solution, not
+// simulation state (same convention `sod_shock_tube_exact.hpp` uses
+// project-wide); only the HLLC-side computation is instantiated at the
+// Scalar under test.
 
-CFE_TEST(test_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic_sod_parameters)
+template <class Scalar>
+void check_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic_sod_parameters()
 {
   // IMPORTANT, measured-not-assumed calibration (caught in review): this
   // is NOT expected to be a tight match, even though `p*`/`S_L`/`S_R`
@@ -184,16 +294,17 @@ CFE_TEST(test_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic
   // STRONG rarefaction (u*/c_L ~ 0.78): HLLC/HLL-family solvers
   // fundamentally collapse an entire rarefaction fan into a single wave
   // speed `S_L`, an approximation in the FORMULA itself, independent of
-  // how exactly that speed is computed (see
-  // test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_
-  // are_genuine_shocks below for the case where this formula's own
-  // assumptions hold and it DOES track `u*` tightly). 0.35 absolute
-  // tolerance only guards against a grossly wrong formula (wrong sign,
-  // order-of-magnitude error, a stale/un-refactored duplicate of the
-  // arithmetic) -- not a precision claim.
+  // how exactly that speed is computed (see the genuine-shocks check
+  // below for the case where this formula's own assumptions hold and it
+  // DOES track `u*` tightly). 0.35 absolute tolerance only guards
+  // against a grossly wrong formula (wrong sign, order-of-magnitude
+  // error, a stale/un-refactored duplicate of the arithmetic) -- not a
+  // precision claim, so this tolerance is identical at float: the ~31%
+  // physics-approximation gap this test checks for is many orders of
+  // magnitude larger than either precision's own rounding error.
   const cfe_verification::PrimitiveState left{1.0, 0.0, 1.0};
   const cfe_verification::PrimitiveState right{0.125, 0.0, 0.1};
-  const auto star = cfe_verification::solve_star_region(static_cast<double>(kGamma), left, right);
+  const auto star = cfe_verification::solve_star_region(kGammaValue, left, right);
 
   const cfe::EulerField<Scalar, 1> field{};
   cfe::Vector<Scalar, 1> vL, vR;
@@ -206,7 +317,17 @@ CFE_TEST(test_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic
   CFE_CHECK_NEAR(static_cast<double>(waves.s_star), star.u_star, 0.35);
 }
 
-CFE_TEST(test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_are_genuine_shocks)
+CFE_TEST(test_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic_sod_parameters_double)
+{
+  check_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic_sod_parameters<double>();
+}
+CFE_TEST(test_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic_sod_parameters_float)
+{
+  check_hllc_s_star_is_a_loose_estimate_of_exact_contact_speed_for_classic_sod_parameters<float>();
+}
+
+template <class Scalar>
+void check_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_are_genuine_shocks(double tol)
 {
   // The companion, more demanding test to the Sod cross-check above:
   // when BOTH nonlinear waves genuinely are shocks (this formula's own
@@ -215,10 +336,14 @@ CFE_TEST(test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_ar
   // loosely -- a symmetric head-on collision (equal density/pressure,
   // equal and opposite inward velocity) is the simplest such case, and
   // by symmetry alone the exact `u*` must be exactly 0 regardless of the
-  // exact solver's own numerics.
+  // exact solver's own numerics. Measured: exact (0.0) at BOTH double
+  // and float on this toolchain (the symmetric construction makes every
+  // intermediate quantity cancel exactly, at either precision) -- 1e-5
+  // at float is a generous portability margin, not a measured
+  // requirement.
   const cfe_verification::PrimitiveState left{1.0, 2.0, 1.0};
   const cfe_verification::PrimitiveState right{1.0, -2.0, 1.0};
-  const auto star = cfe_verification::solve_star_region(static_cast<double>(kGamma), left, right);
+  const auto star = cfe_verification::solve_star_region(kGammaValue, left, right);
   CFE_CHECK(star.p_star > left.p);  // sanity: compression on both sides, i.e. both waves are shocks
 
   const cfe::EulerField<Scalar, 1> field{};
@@ -229,8 +354,17 @@ CFE_TEST(test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_ar
   const cfe::State<Scalar, 3> q_right = field.conserved_from_primitive(Scalar(right.rho), vR, Scalar(right.p));
 
   const auto waves = cfe::detail::hllc_wave_speeds(q_left, q_right, cfe::Axis::X, field);
-  CFE_CHECK_NEAR(static_cast<double>(waves.s_star), star.u_star, 1e-6);
-  CFE_CHECK_NEAR(static_cast<double>(waves.s_star), 0.0, 1e-6);
+  CFE_CHECK_NEAR(static_cast<double>(waves.s_star), star.u_star, tol);
+  CFE_CHECK_NEAR(static_cast<double>(waves.s_star), 0.0, tol);
+}
+
+CFE_TEST(test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_are_genuine_shocks_double)
+{
+  check_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_are_genuine_shocks<double>(1e-6);
+}
+CFE_TEST(test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_are_genuine_shocks_float)
+{
+  check_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_are_genuine_shocks<float>(1e-5);
 }
 
 // --- Regression: the forward-step wall-reflection bug found in review --
@@ -251,7 +385,33 @@ CFE_TEST(test_hllc_s_star_matches_exact_contact_speed_tightly_when_both_waves_ar
 // caught here immediately rather than silently reappearing as a
 // multi-minute tutorial re-run producing a suspiciously-frozen flow
 // field.
-CFE_TEST(test_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection)
+//
+// Unlike the identity/symmetry checks above, this case genuinely
+// accumulates float rounding through the Newton iteration and the
+// resulting flux arithmetic -- measured (this task's own calibration,
+// cross-checked independently by Violet's review): `s_star` off by
+// ~5.5e-8, mass flux off by ~7.3e-7, ENERGY flux off by ~7.0e-6 at float
+// vs. their double counterparts (the energy-flux error is a full order
+// of magnitude larger than the mass-flux error here, NOT the same
+// magnitude -- an earlier version of this comment/tolerance set wrongly
+// shared one tolerance between mass and energy flux and claimed a
+// uniform ">=10x margin" that was only true for mass flux; caught in
+// Violet's review, since it also made this check measurably sensitive
+// to FP-contraction/optimization flags, not just to the toolchain).
+// `s_star`'s tolerance widens below (from double's 1e-9) to a
+// float-epsilon-scaled 1e-6; mass flux widens to 1e-5 (~13.7x measured
+// margin); energy flux widens further, to 1e-4 (~14.2x measured margin
+// over ~7.0e-6) -- not the same value as mass flux's tolerance, despite
+// both nominally being "zero flux at a wall" checks. `s_l`/`s_r`
+// (measured ~1e-7 float-vs-double difference) and the momentum flux =
+// p* (measured ~1e-6 difference) already fit inside double's own
+// existing 1e-5/1e-4 tolerances with no change.
+
+template <class Scalar>
+void check_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection(double tol_s, double tol_s_star,
+                                                                                   double tol_mass_flux,
+                                                                                   double tol_momentum_flux,
+                                                                                   double tol_energy_flux)
 {
   const cfe::EulerField<Scalar, 2> field{};
   cfe::Vector<Scalar, 2> vL, vR;
@@ -266,9 +426,9 @@ CFE_TEST(test_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflec
   // Exact solution (cross-checked against this file's own independent
   // exact solver): p*=17.208329, giving S_L=-0.859126 exactly (S_R is
   // its mirror image by symmetry, S_star=0 by symmetry).
-  CFE_CHECK_NEAR(static_cast<double>(waves.s_l), -0.859126, 1e-5);
-  CFE_CHECK_NEAR(static_cast<double>(waves.s_r), 0.859126, 1e-5);
-  CFE_CHECK_NEAR(static_cast<double>(waves.s_star), 0.0, 1e-9);
+  CFE_CHECK_NEAR(static_cast<double>(waves.s_l), -0.859126, tol_s);
+  CFE_CHECK_NEAR(static_cast<double>(waves.s_r), 0.859126, tol_s);
+  CFE_CHECK_NEAR(static_cast<double>(waves.s_star), 0.0, tol_s_star);
   CFE_CHECK(waves.s_l < Scalar(0));  // the specific sign that was wrong before the fix
 
   // The resulting flux must show the strong, nonzero interaction a
@@ -276,9 +436,18 @@ CFE_TEST(test_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflec
   // the star pressure, zero mass/energy flux) -- NOT the bug's
   // signature of silently reducing to the unperturbed physical flux.
   const cfe::State<Scalar, 4> flux = cfe::hllc_flux(qL, qR, cfe::Axis::X, field);
-  CFE_CHECK_NEAR(static_cast<double>(flux[0]), 0.0, 1e-9);        // zero mass flux at a wall
-  CFE_CHECK_NEAR(static_cast<double>(flux[1]), 17.208329, 1e-4);  // momentum flux = p*
-  CFE_CHECK_NEAR(static_cast<double>(flux[3]), 0.0, 1e-9);        // zero energy flux at a wall
+  CFE_CHECK_NEAR(static_cast<double>(flux[0]), 0.0, tol_mass_flux);           // zero mass flux at a wall
+  CFE_CHECK_NEAR(static_cast<double>(flux[1]), 17.208329, tol_momentum_flux); // momentum flux = p*
+  CFE_CHECK_NEAR(static_cast<double>(flux[3]), 0.0, tol_energy_flux);         // zero energy flux at a wall
+}
+
+CFE_TEST(test_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection_double)
+{
+  check_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection<double>(1e-5, 1e-9, 1e-9, 1e-4, 1e-9);
+}
+CFE_TEST(test_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection_float)
+{
+  check_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflection<float>(1e-5, 1e-6, 1e-5, 1e-4, 1e-4);
 }
 
 // --- Regression: the forward-step res40+ near-vacuum NaN found in review
@@ -299,8 +468,16 @@ CFE_TEST(test_hllc_wave_speeds_correctly_signed_for_strong_symmetric_wall_reflec
 // genuinely negative density/pressure and then NaN via `sqrt`. Fixed by
 // flooring density/pressure at their two entry points (raw inputs to
 // `hllc_wave_speeds`, and the constructed star state in
-// `hllc_star_state`) -- both no-ops for any well-separated input.
-CFE_TEST(test_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step)
+// `hllc_star_state`) -- both no-ops for any well-separated input. This
+// floor's whole purpose is staying finite near float's OWN precision
+// floor (`kTinyDensityFloor`/`kTinyPressureFloor` sit only ~8.4x above
+// float's epsilon, Enzo's review finding, vs. ~4.5e9x above double's) --
+// so this check is only meaningful once actually run at float, not
+// merely compiled there; this is a "no tolerance, just finite" check at
+// both precisions.
+
+template <class Scalar>
+void check_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step()
 {
   // The exact face pair recorded at the point of failure (forward-step,
   // cells-per-unit-height=40, step 636, cell (i=14,j=12), Y-axis face).
@@ -321,7 +498,17 @@ CFE_TEST(test_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forwar
   for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
 }
 
-CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative)
+CFE_TEST(test_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step_double)
+{
+  check_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step<double>();
+}
+CFE_TEST(test_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step_float)
+{
+  check_hllc_flux_stays_finite_for_near_vacuum_asymmetric_face_from_forward_step<float>();
+}
+
+template <class Scalar>
+void check_hllc_star_state_floors_density_instead_of_going_negative()
 {
   // Direct, deterministic exercise of the floor itself: engineered
   // S_K/S_star values (not from a real Riemann solve) where the raw
@@ -339,6 +526,15 @@ CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative)
   for (cfe::Index c = 0; c < 3; ++c) CFE_CHECK(std::isfinite(static_cast<double>(q_star[c])));
 }
 
+CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative_double)
+{
+  check_hllc_star_state_floors_density_instead_of_going_negative<double>();
+}
+CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative_float)
+{
+  check_hllc_star_state_floors_density_instead_of_going_negative<float>();
+}
+
 // --- Robustness at the PVRS estimate's documented weak point -----------
 // Toro's "Test 2": a strong double rarefaction (left/right moving apart
 // fast enough that the star region is near-vacuum, p* ~ 0.00189 exact).
@@ -348,8 +544,12 @@ CFE_TEST(test_hllc_star_state_floors_density_instead_of_going_negative)
 // rather than asserting tight quantitative agreement with the exact
 // solver, which is not expected of this simplified estimate at this
 // specific stress case (documented in hllc.hpp/docs/adr/0012-...md).
+// Already loose (order-of-magnitude only) at double, so unchanged at
+// float -- the formula's own approximation error here dwarfs either
+// precision's rounding.
 
-CFE_TEST(test_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction)
+template <class Scalar>
+void check_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction()
 {
   const cfe::EulerField<Scalar, 1> field{};
   cfe::Vector<Scalar, 1> vL, vR;
@@ -368,60 +568,15 @@ CFE_TEST(test_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction)
   // header comment.
   const cfe_verification::PrimitiveState left{1.0, -2.0, 0.4};
   const cfe_verification::PrimitiveState right{1.0, 2.0, 0.4};
-  const auto star = cfe_verification::solve_star_region(static_cast<double>(kGamma), left, right);
+  const auto star = cfe_verification::solve_star_region(kGammaValue, left, right);
   CFE_CHECK(star.p_star < 0.1);  // sanity-check the oracle itself is in the expected near-vacuum regime
 }
 
-// --- float precision: the near-vacuum floors, exercised at float -------
-// Enzo review finding: `kTinyDensityFloor`/`kTinyPressureFloor` (hllc.hpp)
-// are the same literal (`1e-6`) at both `float` and `double`, but sit far
-// closer to `float`'s own epsilon (~1.19e-7, only ~8.4x above it) than to
-// `double`'s (~2.22e-16, ~4.5e9x above it) -- and NO test file anywhere
-// in this repository previously instantiated ANY Euler numerical flux at
-// `Scalar=float` at all (a pre-existing gap, not specific to HLLC, named
-// here rather than silently left for HLLC only). This reruns the two
-// real failure cases this task's own ADR documents (the Mach-3 wall
-// reflection, and the near-vacuum asymmetric face from the forward-step
-// res40 NaN) at `float`, confirming the floors still produce finite
-// output rather than merely asserting it by reasoning about the
-// exponent/precision margins.
-
-CFE_TEST(test_hllc_wave_speeds_stays_finite_and_correctly_signed_at_float_precision_wall_reflection)
+CFE_TEST(test_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction_double)
 {
-  const cfe::EulerField<float, 2> field{};
-  cfe::Vector<float, 2> vL, vR;
-  vL[0] = 3.0f;
-  vL[1] = 0.0f;
-  vR[0] = -3.0f;
-  vR[1] = 0.0f;
-  const cfe::State<float, 4> qL = field.conserved_from_primitive(1.4f, vL, 1.0f);
-  const cfe::State<float, 4> qR = field.conserved_from_primitive(1.4f, vR, 1.0f);
-
-  const auto waves = cfe::detail::hllc_wave_speeds(qL, qR, cfe::Axis::X, field);
-  CFE_CHECK(std::isfinite(static_cast<double>(waves.s_l)));
-  CFE_CHECK(std::isfinite(static_cast<double>(waves.s_r)));
-  CFE_CHECK(std::isfinite(static_cast<double>(waves.s_star)));
-  CFE_CHECK(waves.s_l < 0.0f);  // the specific sign the double-precision regression test above also checks
-
-  const cfe::State<float, 4> flux = cfe::hllc_flux(qL, qR, cfe::Axis::X, field);
-  for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
+  check_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction<double>();
 }
-
-CFE_TEST(test_hllc_flux_stays_finite_at_float_precision_near_vacuum_asymmetric_face)
+CFE_TEST(test_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction_float)
 {
-  const cfe::EulerField<float, 2> field{};
-  cfe::State<float, 4> left, right;
-  left[0] = 1.704418f;
-  left[1] = 5.916672f;
-  left[2] = 0.5957078f;
-  left[3] = 10.39702f;
-  right[0] = 1.335642f;
-  right[1] = 4.022677f;
-  right[2] = -0.05738744f;
-  right[3] = 8.410979f;
-  CFE_CHECK(static_cast<double>(field.pressure(left)) > 0.0);
-  CFE_CHECK(static_cast<double>(field.pressure(left)) < 0.02);  // confirm this is still the near-vacuum case at float
-
-  const cfe::State<float, 4> flux = cfe::hllc_flux(left, right, cfe::Axis::Y, field);
-  for (cfe::Index c = 0; c < 4; ++c) CFE_CHECK(std::isfinite(static_cast<double>(flux[c])));
+  check_hllc_flux_stays_finite_and_physical_for_strong_double_rarefaction<float>();
 }

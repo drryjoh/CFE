@@ -41,7 +41,20 @@
 
 namespace {
 
-using Scalar = double;
+// Precision is `cfe::scalar` (core/types.hpp, project-wide via
+// `-DCFE_SCALAR_TYPE`) -- task 0017 finding: this file previously
+// hardcoded `double` here, but this IS the physics/field precision
+// (what actually gets packed/sent), not a reported metric -- a float
+// build genuinely halves the bytes moved per exchange
+// (`bytes_per_exchange`'s `sizeof(Scalar)` below), so a float build's
+// own halo-exchange bandwidth number must come from actually moving
+// `float`-sized messages, not from a `double` message mislabeled as a
+// float measurement. The wall-clock timings themselves
+// (`time_one_fill_x_median`'s returned `double` seconds, and the
+// bytes/bandwidth values derived from them) stay plain `double`
+// regardless of `Scalar` -- those are reported metrics, matching this
+// project's existing timing/metric convention.
+using Scalar = cfe::scalar;
 constexpr int kRepetitions = 20;
 
 // Times `kRepetitions` calls to `boundary.fill_x(...)` (after one

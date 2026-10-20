@@ -58,7 +58,23 @@
 
 namespace {
 
-using Scalar = double;
+// Precision is `cfe::scalar` (core/types.hpp, project-wide via
+// `-DCFE_SCALAR_TYPE`), the same convention
+// `tutorials/burgers_3d_visualization/` already established for the
+// Burgers tutorial lineage specifically (NOT yet a project-wide
+// convention -- this scalar-advection tutorial's own non-MPI siblings,
+// `benchmarks/scalar_advection/bench_scalar_advection.cpp` and
+// `tutorials/scalar_advection_3d_visualization/advect_gaussian_3d.cpp`,
+// still hardcode `double` and were out of this task's scope; a real,
+// separate follow-up, not silently closed by this comment). This file
+// previously hardcoded `double` here (task 0017 finding: this is the
+// simulation/field precision, not a reported metric, so it must track
+// the build's chosen precision for a float build's strong-scaling numbers
+// to actually reflect the float path). The wall-clock timing captured
+// below stays plain `double` regardless -- that is a reported metric,
+// not simulation state, matching this project's existing convention for
+// timing/metric values.
+using Scalar = cfe::scalar;
 
 constexpr cfe::Index kGlobalN = 128;  // 128^3 global cells, fixed for every rank count
 constexpr Scalar kVelocity = 1.0;      // same speed on all three axes
