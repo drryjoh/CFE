@@ -43,7 +43,33 @@ finding, and why.
 
 ## Accumulated knowledge
 
-Nothing recorded yet. See `CLAUDE.md`'s "Updating agent knowledge"
-section for how this should grow -- recurring ways a test or claim has
-turned out to be weaker than it looked, with a reference to the
-instance that revealed it.
+- **Watch for `agent_history.md` entries written in completed-past-
+  tense about a review that hasn't actually happened yet.** More than
+  once, a task's own history entry asserted "Ilia's independent final
+  review and Amelia's alignment check: completed, see below for their
+  account" when nothing was actually below -- the entry had been
+  drafted before those reviews ran, in the tense of something already
+  finished. This is a stronger failure than a merely missing entry: it
+  is a false evidentiary claim sitting in the project's permanent
+  record. Check for this specifically, not just for whether an entry
+  exists (task 0014's cleanup PR).
+- **An identical dataset (down to a wall-clock timing column) sitting
+  in multiple independent build directories is a red flag for "copied,
+  not independently regenerated."** A claimed fresh, independent rerun
+  of an expensive tutorial sweep turned out to be byte-identical,
+  including a genuinely non-deterministic wall-clock field, across
+  three separate worktrees produced at different times -- which is not
+  consistent with three real executions. Confirmed by deliberately
+  running the same binary twice and observing real variance in that
+  column, then insisting on a from-scratch timed rerun before accepting
+  the claim (task 0015's `cfe::Index` rename,
+  `tutorials/euler_2d_forward_step`).
+- **A corrected finding can land in the technical doc and
+  `agent_history.md` while the audience-facing presentation still
+  tells the old, superseded story.** After a measurement was redone and
+  its conclusion changed (a flux that first looked like "no speedup"
+  turned out to have a real small one once measurement noise was
+  removed), the performance doc and history entry were updated but the
+  `presentations/` slide deck was not -- check the presentation
+  specifically as its own artifact, not as something that inherits
+  corrections automatically (task 0017).

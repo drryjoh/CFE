@@ -50,7 +50,22 @@ proposed fix or alternative; label each as blocking or optional.
 
 ## Accumulated knowledge
 
-Nothing recorded yet. See `CLAUDE.md`'s "Updating agent knowledge"
-section for how this should grow -- accepted architectural decisions
-and the rationale behind them, with a reference to the ADR/roadmap
-entry that recorded them.
+- **Check that a new standing cross-cutting PR requirement is
+  orthogonal to an existing one, not redundant with it, before
+  accepting it.** A proposed "every PR touching numerical code must
+  pass at both `float` and `double`" rule sits alongside an existing
+  "every PR adding a Field/scheme needs a 3D CUDA correctness test"
+  rule -- confirmed these check different failure modes (cross-
+  precision vs. cross-backend correctness; a kernel can be CPU/GPU-
+  consistent at one precision and silently wrong at the other) before
+  treating the new rule as proportionate rather than duplicative (task
+  0017, `AGENTS.md` #11 addition / ADR 0014).
+- **When a task finds a residual gap one layer up from its own scope
+  (a sibling file/benchmark that's inconsistent with the change but
+  wasn't part of what was asked), confirm it's honestly named as a
+  known residual rather than silently left inconsistent** -- and route
+  it to whichever future task naturally touches that area next, rather
+  than spinning up a dedicated task just to close a low-urgency gap
+  (task 0017: `benchmarks/scalar_advection/`'s own non-MPI sibling
+  files still hardcoded `double` after the MPI version was converted to
+  `cfe::scalar`; correctly named, not fixed, in that task).

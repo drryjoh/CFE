@@ -48,9 +48,31 @@ blocking or optional.
 
 ## Accumulated knowledge
 
-Nothing recorded yet. See `CLAUDE.md`'s "Updating agent knowledge"
-section for how this should grow -- durable, confirmed lessons (a
-verification pattern that worked, a reference case established for a
-given problem class, a recurring correctness pitfall) with their
-rationale and a reference to the test/benchmark/ADR that established
-them.
+- **Independently re-derive a stated tolerance margin; don't just check
+  the test passes.** A float-precision regression test claimed every
+  widened tolerance kept a "≥10x measured margin," but one component
+  (an energy-flux check sharing a tolerance with a mass-flux check) was
+  actually only at ~1.4x, and the real error was itself sensitive to
+  compiler flags (`-ffp-contract`/`-ffast-math` shifted it ~2x on the
+  same hardware). A margin this thin is nearly a correctness gap in
+  itself -- a real regression could hide in the gap between "passes
+  today" and "has real headroom." Recompute the actual number yourself
+  rather than trusting the comment that cites it (task 0017,
+  `tests/unit/test_hllc_flux.cpp`'s wall-reflection regression test).
+- **A bit-identical resume/restart claim needs an analytical trace of
+  the refill invariant, not just an end-to-end state comparison.** For
+  checkpoint/restart, the strong evidence isn't only "continuous run ==
+  restart-then-continue run bit-for-bit" -- it's confirming *why* that
+  must hold, by tracing every ghost-cell read back to a call that
+  unconditionally refills it before use (e.g. `FvmSolver::residual()`'s
+  ghost-fill call happening before any state read, for every buffer,
+  not just the primary one). This turns "it happened to match" into "it
+  cannot do otherwise" (task 0016, `src/cfe/io/restart_file.hpp`).
+- **When a committed test only covers a toy scale or one numerical
+  scheme, spot-check the actual production scale/scheme the feature is
+  motivated by yourself**, rather than accepting the narrower committed
+  coverage as sufficient evidence. A restart-correctness test only
+  exercised `RusanovFlux` at a small resolution; the feature's actual
+  motivating case was `HllcFlux` at a much larger step count -- an
+  independent one-off check at the real scale/flux closed that gap
+  before signing off (task 0016).

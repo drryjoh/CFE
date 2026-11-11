@@ -48,8 +48,29 @@ outdated guidance rather than appending a contradiction.
 
 ## Accumulated knowledge
 
-Nothing recorded yet. See `CLAUDE.md`'s "Updating agent knowledge"
-section for how this should grow: durable lessons only, with rationale
-and a reference to the code/test/benchmark that established them, not
-temporary task notes (those belong in `agent_history.md` or the live
-conversation).
+- **Write the `agent_history.md` entry for a task only after its
+  reviews have actually happened, in whatever tense is true at that
+  moment** -- not a pre-written "completed" account you intend to fill
+  in once Ilia/Amelia finish. This exact mistake (asserting a review's
+  outcome before the review ran) was caught more than once and is a
+  stronger failure than simply forgetting the entry: it is a false
+  claim left in the project's permanent record, not an omission. If a
+  draft must exist before every review lands, phrase it as pending and
+  go back to replace that language with the real account once it's
+  true (tasks 0014, 0017).
+- **Before declaring any task done, independently reconfirm the
+  evidence yourself if there is any chance it is stale or was produced
+  under the wrong conditions** -- a "fresh independent rerun" that is
+  actually a copy of already-existing output (even bit-identical,
+  including fields that should vary like wall-clock time) is worse than
+  no evidence, because it looks like proof. When in doubt, delete the
+  old output and regenerate from scratch rather than diffing against
+  something that might already be sitting there (task 0015).
+- **A single silent wait on a long-running background process longer
+  than ~10 minutes trips this environment's stream watchdog and gets
+  reported as a false stall**, discarding real in-progress work if
+  mishandled. For any run expected to take a while, launch it with
+  `nohup`+`disown` so it survives independent of your own process tree,
+  and check on it with short periodic polls instead of one long silent
+  wait (observed repeatedly during the `cfe::Index` rename's
+  resolution-sweep reverification, task 0015).
