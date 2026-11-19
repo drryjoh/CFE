@@ -260,6 +260,59 @@ to within ~10⁻⁴.
 
 ---
 
+## Slide: Results — 3D, split across 8 MPI ranks
+
+**3D Burgers: a shock forming in three directions at once.** A Gaussian
+bump (`u = 1 + 0.5·exp(-r²/(2·0.12²))`) on a periodic **128³ grid**
+(2.1 million cells), split across **8 MPI ranks** (a 2×2×2 block
+decomposition), using MUSCL + Rusanov + SSP-RK2. That's the same
+building blocks as the 1D results, now in 3D and in parallel.
+
+![3D Burgers isosurface: the bump steepens into a shock and wraps around the periodic box](images/burgers_3d_isosurface.gif)
+
+[Full-quality MP4](images/burgers_3d_isosurface.mp4)
+
+- **What you're seeing:** in Burgers' equation, each point moves at its
+  own local value of `u`. The tall center of the bump outruns its
+  edges, so the **leading faces steepen into a shock** and the
+  **trailing faces spread into a rarefaction** in all three directions
+  at once.
+- The run goes to `t = 1.2`, about **3× the analytic shock-formation
+  time** (`t_s ≈ 0.396`), so the shock is fully developed.
+- **It drifts and wraps around the box, and that's correct.** The
+  background state `u = 1` also moves (Burgers' speed is never zero
+  here), so the whole solution travels through the periodic boundaries.
+  The pieces at the cube's corners at the end are the bump coming back
+  in from the other side.
+- **The shock crosses rank boundaries cleanly.** Each rank writes only
+  its own 64³ block, and the video stitches the 8 pieces back together.
+  There are no seams where the shock passes from one rank to the next,
+  because the MPI halo exchange (the ghost cells from earlier) does its
+  job.
+- **Checked, not just viewed:** the solution never goes above its
+  initial maximum (1.49921) or below its minimum (1.0), on any rank, in
+  any frame. That's the no-new-oscillations guarantee the limiter is
+  supposed to give, confirmed from the output data.
+- **A real bug this case catches:** each rank only sees its own part of
+  the bump, so each one computes a different local maximum speed. If
+  every rank picked its own time step, they would fall out of sync and
+  the run would hang. All ranks agree on one global time step (an
+  `MPI_Allreduce`), and a dedicated MPI test breaks this on purpose to
+  prove it matters.
+
+**3D linear scalar transport, the companion case:** a smaller Gaussian
+bump carried diagonally at velocity (1, 1, 1) through the same periodic
+128³ box on 8 ranks. The exact answer is a rigid translation, so the
+bump should keep its shape as it crosses rank boundaries, and it does.
+
+![3D scalar advection isosurface translating diagonally across 8 MPI ranks](images/scalar_advection_3d_isosurface.gif)
+
+[Full-quality MP4](images/scalar_advection_3d_isosurface.mp4)
+
+These two runs are the same 128³ problems timed on the next slide.
+
+---
+
 ## Slide: Results — strong scaling
 
 - **What strong scaling tests:** keep the problem size fixed (a 128³
